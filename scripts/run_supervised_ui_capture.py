@@ -305,7 +305,7 @@ def _git_blob_sha1(data: bytes) -> str:
 def _verify_hands_checkout_and_commit(
     hands_commit_arg: str,
     repo_root: Path,
-) -> tuple[str, Any]:
+) -> tuple[str, Any, int]:
     if not isinstance(hands_commit_arg, str) or not _GIT_COMMIT_RE.fullmatch(hands_commit_arg):
         raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'declared Hands commit format is invalid')
 
@@ -375,7 +375,7 @@ def _verify_hands_checkout_and_commit(
                 f'declared Hands commit {hands_commit_arg} does not match checkout HEAD {actual_commit}',
             )
 
-        # 5. Read scorer helper directly through descriptor and verify blob hash against committed HEAD
+        # 5. Read entire scorer helper closure directly through descriptor and verify blob hashes against committed HEAD
         try:
             consult_fd = os.open(
                 'consultation_v2',
@@ -386,67 +386,100 @@ def _verify_hands_checkout_and_commit(
             raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', f'unable to open consultation_v2 directory: {exc}') from exc
 
         try:
-            try:
-                scorer_fd = os.open(
-                    'ui_lane_production_scorer.py',
-                    os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
-                    dir_fd=consult_fd,
-                )
-            except OSError as exc:
-                raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', f'unable to open scorer helper file: {exc}') from exc
+            def _read_closure_file(filename: str) -> bytes:
+                try:
+                    fd = os.open(
+                        filename,
+                        os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                        dir_fd=consult_fd,
+                    )
+                except OSError as exc:
+                    raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', f'unable to open {filename}: {exc}') from exc
 
-            try:
-                scorer_meta = os.fstat(scorer_fd)
-                if not stat.S_ISREG(scorer_meta.st_mode):
-                    raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', 'scorer helper is not a regular file')
-                scorer_bytes = os.read(scorer_fd, scorer_meta.st_size + 1)
-                if len(scorer_bytes) != scorer_meta.st_size:
-                    raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', 'scorer helper read length mismatch')
-            finally:
-                os.close(scorer_fd)
+                try:
+                    f_meta = os.fstat(fd)
+                    if not stat.S_ISREG(f_meta.st_mode):
+                        raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', f'{filename} is not a regular file')
+                    data = os.read(fd, f_meta.st_size + 1)
+                    if len(data) != f_meta.st_size:
+                        raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', f'{filename} read length mismatch')
+                    return data
+                finally:
+                    os.close(fd)
+
+            types_bytes = _read_closure_file('types.py')
+            contract_bytes = _read_closure_file('supervised_ui_contract.py')
+            scorer_bytes = _read_closure_file('ui_lane_production_scorer.py')
         finally:
             os.close(consult_fd)
 
-        try:
-            ls_proc = subprocess.run(
-                ['git', '-C', f'/proc/self/fd/{repo_fd}', 'ls-tree', actual_commit, 'consultation_v2/ui_lane_production_scorer.py'],
-                check=True,
-                capture_output=True,
-                text=True,
-                pass_fds=(repo_fd,),
-            )
-            ls_parts = ls_proc.stdout.strip().split()
-            if len(ls_parts) < 3 or ls_parts[1] != 'blob':
-                raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'scorer helper not tracked at committed HEAD')
-            committed_blob = ls_parts[2]
-        except subprocess.CalledProcessError as exc:
-            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to check scorer git ls-tree: {exc}') from exc
+        for rel_path, file_bytes in [
+            ('consultation_v2/types.py', types_bytes),
+            ('consultation_v2/supervised_ui_contract.py', contract_bytes),
+            ('consultation_v2/ui_lane_production_scorer.py', scorer_bytes),
+        ]:
+            try:
+                ls_proc = subprocess.run(
+                    ['git', '-C', f'/proc/self/fd/{repo_fd}', 'ls-tree', actual_commit, rel_path],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                    pass_fds=(repo_fd,),
+                )
+                ls_parts = ls_proc.stdout.strip().split()
+                if len(ls_parts) < 3 or ls_parts[1] != 'blob':
+                    raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'{rel_path} not tracked at committed HEAD')
+                committed_blob = ls_parts[2]
+            except subprocess.CalledProcessError as exc:
+                raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to check {rel_path} git ls-tree: {exc}') from exc
 
-        actual_blob = _git_blob_sha1(scorer_bytes)
-        if actual_blob != committed_blob:
-            raise CaptureSupervisorPreflightError(
-                'FC-WRONG-COMMIT',
-                f'scorer helper on-disk content {actual_blob} differs from committed HEAD blob {committed_blob}',
-            )
+            actual_blob = _git_blob_sha1(file_bytes)
+            if actual_blob != committed_blob:
+                raise CaptureSupervisorPreflightError(
+                    'FC-WRONG-COMMIT',
+                    f'{rel_path} on-disk content {actual_blob} differs from committed HEAD blob {committed_blob}',
+                )
 
-        # 6. Compile scorer module strictly from verified bytes
+        # 6. Build hermetic private package and compile modules strictly from verified bytes
         import types
-        module = types.ModuleType('consultation_v2.ui_lane_production_scorer')
-        module.__file__ = str(repo_root / 'consultation_v2/ui_lane_production_scorer.py')
-        code = compile(scorer_bytes.decode('utf-8'), module.__file__, 'exec')
-        exec(code, module.__dict__)
+        pkg_name = f'_verified_hands_{actual_commit}'
+        pkg = types.ModuleType(pkg_name)
+        pkg.__path__ = []
+        sys.modules[pkg_name] = pkg
 
-        return actual_commit, module
+        types_mod = types.ModuleType(f'{pkg_name}.types')
+        types_mod.__package__ = pkg_name
+        types_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/types.py'
+        sys.modules[f'{pkg_name}.types'] = types_mod
+        exec(compile(types_bytes.decode('utf-8'), types_mod.__file__, 'exec'), types_mod.__dict__)
+
+        contract_mod = types.ModuleType(f'{pkg_name}.supervised_ui_contract')
+        contract_mod.__package__ = pkg_name
+        contract_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/supervised_ui_contract.py'
+        sys.modules[f'{pkg_name}.supervised_ui_contract'] = contract_mod
+        exec(compile(contract_bytes.decode('utf-8'), contract_mod.__file__, 'exec'), contract_mod.__dict__)
+
+        scorer_mod = types.ModuleType(f'{pkg_name}.ui_lane_production_scorer')
+        scorer_mod.__package__ = pkg_name
+        scorer_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/ui_lane_production_scorer.py'
+        sys.modules[f'{pkg_name}.ui_lane_production_scorer'] = scorer_mod
+        exec(compile(scorer_bytes.decode('utf-8'), scorer_mod.__file__, 'exec'), scorer_mod.__dict__)
+        scorer_mod.REPO_ROOT = Path(f'/proc/self/fd/{repo_fd}')
+
+        held_repo_fd = repo_fd
+        repo_fd = -1
+        return actual_commit, scorer_mod, held_repo_fd
     finally:
-        os.close(repo_fd)
+        if repo_fd >= 0:
+            os.close(repo_fd)
 
 
 def _preflight_fresh_session(
     args: argparse.Namespace,
     public_roots: list[Path],
-) -> tuple[Path, Path, str, Any]:
+) -> tuple[Path, Path, str, Any, int]:
     # 0. Verify Hands checkout and exact commit binding before any storage or helper import
-    _, scorer_module = _verify_hands_checkout_and_commit(args.hands_commit, REPO_ROOT)
+    _, scorer_module, repo_fd = _verify_hands_checkout_and_commit(args.hands_commit, REPO_ROOT)
 
     # 1. Validate public roots
     for pub in public_roots:
@@ -610,7 +643,7 @@ def _preflight_fresh_session(
     finally:
         os.close(session_dir_fd)
 
-    return receipt_root, export_root, str(export_receipt_posix), scorer_module
+    return receipt_root, export_root, str(export_receipt_posix), scorer_module, repo_fd
 
 
 def _traverse_export_parent_directory(
@@ -952,27 +985,13 @@ def _attest_export_root(export_root: Path, public_roots: list[str]) -> str:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
-    if args.close_ack_timeout_seconds <= 0 or args.worker_exit_timeout_seconds <= 0:
-        refusal = {
-            'child_created': False,
-            'error': 'timeouts must be positive floats',
-            'reveal': 'claim kind and refusal code only; no private root or target path',
-            'status': 'refused_preflight',
-            'ui_action_count': 0,
-        }
-        sys.stdout.write(json.dumps(refusal, sort_keys=True, separators=(',', ':')) + '\n')
-        sys.stdout.flush()
-        return 2
-
-    public_roots = [REPO_ROOT.resolve(strict=True)]
-    for pub in args.public_repo_root:
-        try:
-            public_roots.append(Path(pub).resolve(strict=True))
-        except Exception:
+    repo_fd: int = -1
+    try:
+        args = build_parser().parse_args()
+        if args.close_ack_timeout_seconds <= 0 or args.worker_exit_timeout_seconds <= 0:
             refusal = {
                 'child_created': False,
-                'error': f'public repo root {pub} could not be resolved',
+                'error': 'timeouts must be positive floats',
                 'reveal': 'claim kind and refusal code only; no private root or target path',
                 'status': 'refused_preflight',
                 'ui_action_count': 0,
@@ -981,171 +1000,190 @@ def main() -> int:
             sys.stdout.flush()
             return 2
 
-    # Preflight fresh session
-    try:
-        receipt_root, export_root, export_receipt_posix, scorer_module = _preflight_fresh_session(args, public_roots)
-    except CaptureSupervisorPreflightError as exc:
-        refusal = {
-            'child_created': False,
-            'error': exc.failure_code,
-            'reveal': 'claim kind and refusal code only; no private root or target path',
-            'status': 'refused_preflight',
-            'ui_action_count': 0,
-        }
-        sys.stdout.write(json.dumps(refusal, sort_keys=True, separators=(',', ':')) + '\n')
-        sys.stdout.flush()
-        return 2
-    except Exception as exc:
-        refusal = {
-            'child_created': False,
-            'error': f'preflight_failed: {exc}',
-            'reveal': 'claim kind and refusal code only; no private root or target path',
-            'status': 'refused_preflight',
-            'ui_action_count': 0,
-        }
-        sys.stdout.write(json.dumps(refusal, sort_keys=True, separators=(',', ':')) + '\n')
-        sys.stdout.flush()
-        return 2
-
-    # Launch worker
-    resolved_public_roots_str = sorted({str(r) for r in public_roots})
-    try:
-        worker = _launch_worker(args, resolved_public_roots_str)
-    except Exception as exc:
-        return _quarantine(f'launch_worker_failed: {exc}')
-
-    # Read and relay worker handshake
-    try:
-        handshake_line = _read_worker_line(worker, timeout=args.close_ack_timeout_seconds)
-        handshake_dict = _strict_json(handshake_line)
-        if handshake_dict.get('type') != 'handshake' or handshake_dict.get('ok') is not True:
-            return _quarantine('handshake_invalid', worker)
-        sys.stdout.write(handshake_line)
-        sys.stdout.flush()
-    except Exception as exc:
-        return _quarantine(f'handshake_failed: {exc}', worker)
-
-    # Relay loop
-    for raw_line in sys.stdin:
-        if len(raw_line.encode('utf-8')) > _REQUEST_LIMIT:
-            return _quarantine('request_too_large', worker)
-        try:
-            request = _strict_json(raw_line)
-        except Exception:
-            return _quarantine('protocol_invalid', worker)
-
-        command = request.get('command')
-        if command in {'execute_approved', 'observe'}:
+        public_roots = [REPO_ROOT.resolve(strict=True)]
+        for pub in args.public_repo_root:
             try:
-                resp_line = _relay_request(worker, raw_line)
-                sys.stdout.write(resp_line)
-                sys.stdout.flush()
-            except Exception as exc:
-                return _quarantine(f'relay_failed: {exc}', worker)
-            continue
-
-        if command == 'cancel':
-            try:
-                resp_line = _relay_request(worker, raw_line)
-                sys.stdout.write(resp_line)
-                sys.stdout.flush()
-                worker.wait(timeout=args.worker_exit_timeout_seconds)
-                return 0
-            except Exception as exc:
-                return _quarantine(f'cancel_failed: {exc}', worker)
-
-        if command == 'close':
-            try:
-                _require_keys(request, frozenset({'command', 'request_id'}))
-                request_id = _uuid_text(request['request_id'])
+                public_roots.append(Path(pub).resolve(strict=True))
             except Exception:
-                return _quarantine('close_request_invalid', worker)
+                refusal = {
+                    'child_created': False,
+                    'error': f'public repo root {pub} could not be resolved',
+                    'reveal': 'claim kind and refusal code only; no private root or target path',
+                    'status': 'refused_preflight',
+                    'ui_action_count': 0,
+                }
+                sys.stdout.write(json.dumps(refusal, sort_keys=True, separators=(',', ':')) + '\n')
+                sys.stdout.flush()
+                return 2
 
-            close_request_dict = dict(request)
-            try:
-                ack_dict = _close_ack(worker, close_request_dict, timeout=args.close_ack_timeout_seconds)
-            except CaptureSupervisorQuarantineError as exc:
-                return _quarantine(exc.failure_code, worker, exc.last_hash)
-            except Exception as exc:
-                return _quarantine(f'close_ack_failed: {exc}', worker)
-
-            # Wait for worker exit code 0
-            try:
-                exit_code = worker.wait(timeout=args.worker_exit_timeout_seconds)
-                if exit_code != 0:
-                    return _quarantine('worker_exit_nonzero', worker)
-            except subprocess.TimeoutExpired:
-                return _quarantine('worker_exit_timeout', worker)
-            except Exception as exc:
-                return _quarantine(f'worker_wait_failed: {exc}', worker)
-
-            # Independent rehash
-            try:
-                rehash_summary, events = _rehash_closed_session(
-                    receipt_root,
-                    args.session_id,
-                    args.hands_commit,
-                    ack_dict,
-                    scorer_module,
-                )
-            except CaptureSupervisorQuarantineError as exc:
-                return _quarantine(exc.failure_code, worker, exc.last_hash)
-            except Exception as exc:
-                return _quarantine(f'rehash_failed: {exc}', worker)
-
-            # Compute capture content sha256
-            capture_script_path = REPO_ROOT / 'scripts' / 'run_supervised_ui_capture.py'
-            capture_content_sha256 = _sha256_hex(capture_script_path.read_bytes())
-            export_root_attestation_sha = _attest_export_root(export_root, resolved_public_roots_str)
-
-            export_data = {
-                'capture_entrypoint_content_sha256': capture_content_sha256,
-                'capture_implementation_commit': args.hands_commit,
-                'close_ack': ack_dict,
-                'close_ack_sha256': _sha256_hex(_canonical_json_bytes(ack_dict)),
-                'close_request': close_request_dict,
-                'close_request_sha256': _sha256_hex(_canonical_json_bytes(close_request_dict)),
-                'display': args.display,
-                'export_root_attestation_sha256': export_root_attestation_sha,
-                'hands_commit': args.hands_commit,
-                'platform': args.platform,
-                'presence_incarnation_id': args.presence_incarnation_id,
-                'rehash': rehash_summary,
-                'schema_version': 'supervised_ui_capture_export_v1',
-                'seat_receipt_session': {
-                    'receipt_directory': args.session_id,
-                    'role': 'exercise',
-                    'session_id': args.session_id,
-                    'terminal_event_hash': rehash_summary['terminal_event_hash'],
-                },
-                'session_id': args.session_id,
-                'status': 'closed',
-                'worker_entrypoint': 'scripts/run_supervised_ui_seat.py',
-                'worker_exit_code': 0,
+        # Preflight fresh session
+        try:
+            receipt_root, export_root, export_receipt_posix, scorer_module, repo_fd = _preflight_fresh_session(args, public_roots)
+        except CaptureSupervisorPreflightError as exc:
+            refusal = {
+                'child_created': False,
+                'error': exc.failure_code,
+                'reveal': 'claim kind and refusal code only; no private root or target path',
+                'status': 'refused_preflight',
+                'ui_action_count': 0,
             }
-
-            try:
-                _write_export_once(export_root, export_receipt_posix, export_data)
-            except CaptureSupervisorQuarantineError as exc:
-                return _quarantine(exc.failure_code, worker, exc.last_hash)
-            except Exception as exc:
-                return _quarantine(f'export_write_failed: {exc}', worker)
-
-            terminal_envelope = {
-                'export_receipt_path': export_receipt_posix,
-                'ok': True,
-                'rehash': rehash_summary,
-                'request_id': request_id,
-                'status': 'closed',
-            }
-            sys.stdout.write(json.dumps(terminal_envelope, sort_keys=True, separators=(',', ':')) + '\n')
+            sys.stdout.write(json.dumps(refusal, sort_keys=True, separators=(',', ':')) + '\n')
             sys.stdout.flush()
-            return 0
+            return 2
+        except Exception as exc:
+            refusal = {
+                'child_created': False,
+                'error': f'preflight_failed: {exc}',
+                'reveal': 'claim kind and refusal code only; no private root or target path',
+                'status': 'refused_preflight',
+                'ui_action_count': 0,
+            }
+            sys.stdout.write(json.dumps(refusal, sort_keys=True, separators=(',', ':')) + '\n')
+            sys.stdout.flush()
+            return 2
 
-        return _quarantine('unknown_command', worker)
+        # Launch worker
+        resolved_public_roots_str = sorted({str(r) for r in public_roots})
+        try:
+            worker = _launch_worker(args, resolved_public_roots_str)
+        except Exception as exc:
+            return _quarantine(f'launch_worker_failed: {exc}')
 
-    # Worker EOF before close
-    return _quarantine('worker_eof_before_close', worker)
+        # Read and relay worker handshake
+        try:
+            handshake_line = _read_worker_line(worker, timeout=args.close_ack_timeout_seconds)
+            handshake_dict = _strict_json(handshake_line)
+            if handshake_dict.get('type') != 'handshake' or handshake_dict.get('ok') is not True:
+                return _quarantine('handshake_invalid', worker)
+            sys.stdout.write(handshake_line)
+            sys.stdout.flush()
+        except Exception as exc:
+            return _quarantine(f'handshake_failed: {exc}', worker)
+
+        # Relay loop
+        for raw_line in sys.stdin:
+            if len(raw_line.encode('utf-8')) > _REQUEST_LIMIT:
+                return _quarantine('request_too_large', worker)
+            try:
+                request = _strict_json(raw_line)
+            except Exception:
+                return _quarantine('protocol_invalid', worker)
+
+            command = request.get('command')
+            if command in {'execute_approved', 'observe'}:
+                try:
+                    resp_line = _relay_request(worker, raw_line)
+                    sys.stdout.write(resp_line)
+                    sys.stdout.flush()
+                except Exception as exc:
+                    return _quarantine(f'relay_failed: {exc}', worker)
+                continue
+
+            if command == 'cancel':
+                try:
+                    resp_line = _relay_request(worker, raw_line)
+                    sys.stdout.write(resp_line)
+                    sys.stdout.flush()
+                    worker.wait(timeout=args.worker_exit_timeout_seconds)
+                    return 0
+                except Exception as exc:
+                    return _quarantine(f'cancel_failed: {exc}', worker)
+
+            if command == 'close':
+                try:
+                    _require_keys(request, frozenset({'command', 'request_id'}))
+                    request_id = _uuid_text(request['request_id'])
+                except Exception:
+                    return _quarantine('close_request_invalid', worker)
+
+                close_request_dict = dict(request)
+                try:
+                    ack_dict = _close_ack(worker, close_request_dict, timeout=args.close_ack_timeout_seconds)
+                except CaptureSupervisorQuarantineError as exc:
+                    return _quarantine(exc.failure_code, worker, exc.last_hash)
+                except Exception as exc:
+                    return _quarantine(f'close_ack_failed: {exc}', worker)
+
+                # Wait for worker exit code 0
+                try:
+                    exit_code = worker.wait(timeout=args.worker_exit_timeout_seconds)
+                    if exit_code != 0:
+                        return _quarantine('worker_exit_nonzero', worker)
+                except subprocess.TimeoutExpired:
+                    return _quarantine('worker_exit_timeout', worker)
+                except Exception as exc:
+                    return _quarantine(f'worker_wait_failed: {exc}', worker)
+
+                # Independent rehash
+                try:
+                    rehash_summary, events = _rehash_closed_session(
+                        receipt_root,
+                        args.session_id,
+                        args.hands_commit,
+                        ack_dict,
+                        scorer_module,
+                    )
+                except CaptureSupervisorQuarantineError as exc:
+                    return _quarantine(exc.failure_code, worker, exc.last_hash)
+                except Exception as exc:
+                    return _quarantine(f'rehash_failed: {exc}', worker)
+
+                # Compute capture content sha256
+                capture_script_path = REPO_ROOT / 'scripts' / 'run_supervised_ui_capture.py'
+                capture_content_sha256 = _sha256_hex(capture_script_path.read_bytes())
+                export_root_attestation_sha = _attest_export_root(export_root, resolved_public_roots_str)
+
+                export_data = {
+                    'capture_entrypoint_content_sha256': capture_content_sha256,
+                    'capture_implementation_commit': args.hands_commit,
+                    'close_ack': ack_dict,
+                    'close_ack_sha256': _sha256_hex(_canonical_json_bytes(ack_dict)),
+                    'close_request': close_request_dict,
+                    'close_request_sha256': _sha256_hex(_canonical_json_bytes(close_request_dict)),
+                    'display': args.display,
+                    'export_root_attestation_sha256': export_root_attestation_sha,
+                    'hands_commit': args.hands_commit,
+                    'platform': args.platform,
+                    'presence_incarnation_id': args.presence_incarnation_id,
+                    'rehash': rehash_summary,
+                    'schema_version': 'supervised_ui_capture_export_v1',
+                    'seat_receipt_session': {
+                        'receipt_directory': args.session_id,
+                        'role': 'exercise',
+                        'session_id': args.session_id,
+                        'terminal_event_hash': rehash_summary['terminal_event_hash'],
+                    },
+                    'session_id': args.session_id,
+                    'status': 'closed',
+                    'worker_entrypoint': 'scripts/run_supervised_ui_seat.py',
+                    'worker_exit_code': 0,
+                }
+
+                try:
+                    _write_export_once(export_root, export_receipt_posix, export_data)
+                except CaptureSupervisorQuarantineError as exc:
+                    return _quarantine(exc.failure_code, worker, exc.last_hash)
+                except Exception as exc:
+                    return _quarantine(f'export_write_failed: {exc}', worker)
+
+                terminal_envelope = {
+                    'export_receipt_path': export_receipt_posix,
+                    'ok': True,
+                    'rehash': rehash_summary,
+                    'request_id': request_id,
+                    'status': 'closed',
+                }
+                sys.stdout.write(json.dumps(terminal_envelope, sort_keys=True, separators=(',', ':')) + '\n')
+                sys.stdout.flush()
+                return 0
+
+            return _quarantine('unknown_command', worker)
+
+        # Worker EOF before close
+        return _quarantine('worker_eof_before_close', worker)
+    finally:
+        if repo_fd >= 0:
+            os.close(repo_fd)
 
 
 if __name__ == '__main__':
