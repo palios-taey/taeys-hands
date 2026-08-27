@@ -16,7 +16,9 @@ from scripts.run_manual_chat_worker import (
     _completed_before_stop_provenance,
     _completed_before_stop_state,
     _extract_content,
+    _perplexity_artifacts_diagnostic_content,
     _post_send_confirmation_content,
+    build_parser,
 )
 
 
@@ -191,6 +193,46 @@ display: :6
     _require(
         _completed_before_stop_provenance(receipt, 'perplexity', ':6'),
         'Perplexity completed-before-Stop receipt fields are not machine-readable',
+    )
+    parser = build_parser()
+    diagnostic_args = parser.parse_args([
+        'diagnose-perplexity-artifacts',
+        '--display',
+        ':6',
+        '--seat-id',
+        'perplexity-artifacts-diagnostic-r1',
+        '--artifact-root',
+        '/private/perplexity-artifacts-diagnostic-r1',
+        '--source-terminal-identity',
+        'spent-perplexity-identity',
+        '--thread-url',
+        'https://www.perplexity.ai/search/exact-thread-id',
+    ])
+    _require(
+        diagnostic_args.platform == 'perplexity'
+        and diagnostic_args.phase == 'diagnose-perplexity-artifacts',
+        'Perplexity Artifacts diagnostic parser binding drifted',
+    )
+    diagnostic = _perplexity_artifacts_diagnostic_content(
+        ':6',
+        'spent-perplexity-identity',
+        'https://www.perplexity.ai/search/exact-thread-id',
+    )
+    _require(
+        diagnostic.count('observe scope=base exactly once') == 2
+        and diagnostic.count('click element=artifacts_one_button') == 1
+        and 'exactly zero research_report_open' in diagnostic
+        and 'exactly zero artifact_options' in diagnostic
+        and 'exactly one artifacts_one_button named Artifacts 1' in diagnostic,
+        'Perplexity Artifacts diagnostic lost its exact 0/0/1 transition',
+    )
+    _require(
+        'Do not navigate, attach, paste, send, Copy, read the clipboard, extract' in diagnostic
+        and 'copied: false' in diagnostic
+        and 'extracted: false' in diagnostic
+        and 'sent: false' in diagnostic
+        and 'other_mutation_count: 0' in diagnostic,
+        'Perplexity Artifacts diagnostic widened mutation authority',
     )
     print('perplexity manual extraction contract: PASS')
     return 0
