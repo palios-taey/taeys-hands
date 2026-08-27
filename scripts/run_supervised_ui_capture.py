@@ -343,16 +343,22 @@ def _preflight_fresh_session(
             )
 
     # 5. Validate export-receipt
-    export_receipt_posix = PurePosixPath(args.export_receipt)
+    if not isinstance(args.export_receipt, str) or not args.export_receipt:
+        raise CaptureSupervisorPreflightError(
+            'FC-TRACE',
+            'export-receipt must be a non-empty string',
+        )
+    raw_components = args.export_receipt.split('/')
+    if any(part in {'', '.', '..'} for part in raw_components):
+        raise CaptureSupervisorPreflightError(
+            'FC-TRACE',
+            'export-receipt cannot contain empty, dot, or dot-dot components',
+        )
+    export_receipt_posix = PurePosixPath(*raw_components)
     if export_receipt_posix.is_absolute() or not export_receipt_posix.parts:
         raise CaptureSupervisorPreflightError(
             'FC-TRACE',
             'export-receipt must be a relative path',
-        )
-    if any(part in {'', '.', '..'} for part in export_receipt_posix.parts):
-        raise CaptureSupervisorPreflightError(
-            'FC-TRACE',
-            'export-receipt cannot contain empty, dot, or dot-dot components',
         )
 
     # 6. Open spent record directories
