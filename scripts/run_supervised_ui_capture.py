@@ -628,19 +628,48 @@ def _preflight_fresh_session(
         finally:
             os.close(parent_fd)
 
-        # 11. Create session directory once as mode 0700
-        receipt_root_fd = os.open(receipt_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        # 11. Create session directory once as mode 0700 via descriptor
+        receipt_root_fd = os.open(
+            receipt_root,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
         try:
-            os.mkdir(args.session_id, mode=0o700, dir_fd=receipt_root_fd)
-            os.fsync(receipt_root_fd)
+            try:
+                os.mkdir(args.session_id, mode=0o700, dir_fd=receipt_root_fd)
+            except FileExistsError as exc:
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    'session directory already exists before fresh launch',
+                ) from exc
+            except OSError as exc:
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    f'unable to create session directory {args.session_id}: {exc}',
+                ) from exc
+
+            try:
+                os.fsync(receipt_root_fd)
+            except OSError as exc:
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    f'unable to fsync receipt root after session mkdir: {exc}',
+                ) from exc
+
+            # 12. Reopen and verify new session directory descriptor-relative with O_NOFOLLOW
+            try:
+                session_dir_fd = os.open(
+                    args.session_id,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    dir_fd=receipt_root_fd,
+                )
+            except OSError as exc:
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    f'unable to reopen fresh session directory {args.session_id}: {exc}',
+                ) from exc
         finally:
             os.close(receipt_root_fd)
 
-        # 12. Reopen and verify new session directory
-        session_dir_fd = os.open(
-            session_dir,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-        )
         try:
             metadata = os.fstat(session_dir_fd)
             if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700:
@@ -653,7 +682,7 @@ def _preflight_fresh_session(
                     'FC-TRACE',
                     'fresh session directory has invalid owner',
                 )
-            entries = os.listdir(session_dir)
+            entries = os.listdir(session_dir_fd)
             if len(entries) != 0:
                 raise CaptureSupervisorPreflightError(
                     'FC-TRACE',
