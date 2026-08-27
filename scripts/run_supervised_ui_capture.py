@@ -37,10 +37,17 @@ class CaptureSupervisorPreflightError(ValueError):
 
 class CaptureSupervisorQuarantineError(RuntimeError):
     """Raised when an active child process fails, halts, or violates protocol."""
-    def __init__(self, failure_code: str, message: str, last_hash: str | None = None) -> None:
+    def __init__(
+        self,
+        failure_code: str,
+        message: str,
+        last_hash: str | None = None,
+        verified_event_count: int | None = None,
+    ) -> None:
         super().__init__(message)
         self.failure_code = failure_code
         self.last_hash = last_hash
+        self.verified_event_count = verified_event_count
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -925,11 +932,25 @@ def _rehash_closed_session(
         raise CaptureSupervisorQuarantineError('rehash_failed', f'independent receipt rehash failed: {exc}') from exc
 
     if not events:
-        raise CaptureSupervisorQuarantineError('rehash_empty', 'rehash produced zero events')
+        raise CaptureSupervisorQuarantineError('rehash_empty', 'rehash produced zero events', last_hash=None, verified_event_count=0)
+
+    last_hash = events[-1].get('event_hash') if isinstance(events[-1], dict) else None
+    event_count = len(events)
+
     if events[0].get('kind') != 'worker_started':
-        raise CaptureSupervisorQuarantineError('first_event_not_started', 'first event is not worker_started')
+        raise CaptureSupervisorQuarantineError(
+            'first_event_not_started',
+            'first event is not worker_started',
+            last_hash=last_hash,
+            verified_event_count=event_count,
+        )
     if events[-1].get('kind') != 'worker_closed':
-        raise CaptureSupervisorQuarantineError('last_event_not_closed', 'last event is not worker_closed')
+        raise CaptureSupervisorQuarantineError(
+            'last_event_not_closed',
+            'last event is not worker_closed',
+            last_hash=last_hash,
+            verified_event_count=event_count,
+        )
 
     ack_result = close_ack['result']
     ack_hash = ack_result['event_hash']
@@ -939,6 +960,8 @@ def _rehash_closed_session(
         raise CaptureSupervisorQuarantineError(
             'terminal_hash_mismatch',
             f"terminal event hash {events[-1].get('event_hash')} != close ACK {ack_hash}",
+            last_hash=last_hash,
+            verified_event_count=event_count,
         )
 
     # Read worker_closed raw payload to verify final_state
@@ -946,16 +969,28 @@ def _rehash_closed_session(
     closed_prefix = f"{len(events):06d}-worker_closed"
     raw_path = session_dir / f"{closed_prefix}.raw"
     if not raw_path.exists():
-        raise CaptureSupervisorQuarantineError('closed_raw_missing', 'worker_closed raw payload missing')
+        raise CaptureSupervisorQuarantineError(
+            'closed_raw_missing',
+            'worker_closed raw payload missing',
+            last_hash=last_hash,
+            verified_event_count=event_count,
+        )
     try:
         closed_payload = json.loads(raw_path.read_text(encoding='utf-8'))
     except Exception as exc:
-        raise CaptureSupervisorQuarantineError('closed_raw_malformed', f'worker_closed raw payload malformed: {exc}') from exc
+        raise CaptureSupervisorQuarantineError(
+            'closed_raw_malformed',
+            f'worker_closed raw payload malformed: {exc}',
+            last_hash=last_hash,
+            verified_event_count=event_count,
+        ) from exc
 
     if closed_payload.get('final_state') != ack_state:
         raise CaptureSupervisorQuarantineError(
             'closed_state_mismatch',
             f"worker_closed final_state {closed_payload.get('final_state')} != close ACK state {ack_state}",
+            last_hash=last_hash,
+            verified_event_count=event_count,
         )
 
     rehash_summary = {
@@ -1030,6 +1065,7 @@ def _quarantine(
     failure_code: str,
     worker: subprocess.Popen[str] | None = None,
     last_hash: str | None = None,
+    verified_event_count: int | None = None,
     worker_exit_timeout: float = 2.0,
 ) -> int:
     worker_exit_code: int | None = None
@@ -1059,6 +1095,7 @@ def _quarantine(
         'last_verified_event_hash': last_hash,
         'ok': False,
         'status': 'quarantined',
+        'verified_event_count': verified_event_count,
         'worker_exit_code': worker_exit_code,
     }
     sys.stdout.write(json.dumps(envelope, sort_keys=True, separators=(',', ':')) + '\n')
@@ -1222,6 +1259,8 @@ def main() -> int:
                     return _quarantine(f'worker_wait_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
                 # Independent rehash
+                verified_last_hash: str | None = None
+                verified_count: int | None = None
                 try:
                     rehash_summary, events = _rehash_closed_session(
                         receipt_root,
@@ -1230,8 +1269,16 @@ def main() -> int:
                         ack_dict,
                         scorer_module,
                     )
+                    verified_last_hash = rehash_summary['terminal_event_hash']
+                    verified_count = rehash_summary['event_count']
                 except CaptureSupervisorQuarantineError as exc:
-                    return _quarantine(exc.failure_code, worker, exc.last_hash, worker_exit_timeout=args.worker_exit_timeout_seconds)
+                    return _quarantine(
+                        exc.failure_code,
+                        worker,
+                        last_hash=exc.last_hash,
+                        verified_event_count=exc.verified_event_count,
+                        worker_exit_timeout=args.worker_exit_timeout_seconds,
+                    )
                 except Exception as exc:
                     return _quarantine(f'rehash_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
 
@@ -1269,9 +1316,21 @@ def main() -> int:
                 try:
                     _write_export_once(export_root, export_receipt_posix, export_data)
                 except CaptureSupervisorQuarantineError as exc:
-                    return _quarantine(exc.failure_code, worker, exc.last_hash, worker_exit_timeout=args.worker_exit_timeout_seconds)
+                    return _quarantine(
+                        exc.failure_code,
+                        worker,
+                        last_hash=exc.last_hash or verified_last_hash,
+                        verified_event_count=exc.verified_event_count if exc.verified_event_count is not None else verified_count,
+                        worker_exit_timeout=args.worker_exit_timeout_seconds,
+                    )
                 except Exception as exc:
-                    return _quarantine(f'export_write_failed: {exc}', worker, worker_exit_timeout=args.worker_exit_timeout_seconds)
+                    return _quarantine(
+                        f'export_write_failed: {exc}',
+                        worker,
+                        last_hash=verified_last_hash,
+                        verified_event_count=verified_count,
+                        worker_exit_timeout=args.worker_exit_timeout_seconds,
+                    )
 
                 terminal_envelope = {
                     'export_receipt_path': export_receipt_posix,
