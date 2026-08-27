@@ -443,32 +443,43 @@ def _verify_hands_checkout_and_commit(
         # 6. Build hermetic private package and compile modules strictly from verified bytes
         import types
         pkg_name = f'_verified_hands_{actual_commit}'
-        pkg = types.ModuleType(pkg_name)
-        pkg.__path__ = []
-        sys.modules[pkg_name] = pkg
+        created_mod_names = [
+            pkg_name,
+            f'{pkg_name}.types',
+            f'{pkg_name}.supervised_ui_contract',
+            f'{pkg_name}.ui_lane_production_scorer',
+        ]
+        try:
+            pkg = types.ModuleType(pkg_name)
+            pkg.__path__ = []
+            sys.modules[pkg_name] = pkg
 
-        types_mod = types.ModuleType(f'{pkg_name}.types')
-        types_mod.__package__ = pkg_name
-        types_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/types.py'
-        sys.modules[f'{pkg_name}.types'] = types_mod
-        exec(compile(types_bytes.decode('utf-8'), types_mod.__file__, 'exec'), types_mod.__dict__)
+            types_mod = types.ModuleType(f'{pkg_name}.types')
+            types_mod.__package__ = pkg_name
+            types_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/types.py'
+            sys.modules[f'{pkg_name}.types'] = types_mod
+            exec(compile(types_bytes.decode('utf-8'), types_mod.__file__, 'exec'), types_mod.__dict__)
 
-        contract_mod = types.ModuleType(f'{pkg_name}.supervised_ui_contract')
-        contract_mod.__package__ = pkg_name
-        contract_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/supervised_ui_contract.py'
-        sys.modules[f'{pkg_name}.supervised_ui_contract'] = contract_mod
-        exec(compile(contract_bytes.decode('utf-8'), contract_mod.__file__, 'exec'), contract_mod.__dict__)
+            contract_mod = types.ModuleType(f'{pkg_name}.supervised_ui_contract')
+            contract_mod.__package__ = pkg_name
+            contract_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/supervised_ui_contract.py'
+            sys.modules[f'{pkg_name}.supervised_ui_contract'] = contract_mod
+            exec(compile(contract_bytes.decode('utf-8'), contract_mod.__file__, 'exec'), contract_mod.__dict__)
 
-        scorer_mod = types.ModuleType(f'{pkg_name}.ui_lane_production_scorer')
-        scorer_mod.__package__ = pkg_name
-        scorer_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/ui_lane_production_scorer.py'
-        sys.modules[f'{pkg_name}.ui_lane_production_scorer'] = scorer_mod
-        exec(compile(scorer_bytes.decode('utf-8'), scorer_mod.__file__, 'exec'), scorer_mod.__dict__)
-        scorer_mod.REPO_ROOT = Path(f'/proc/self/fd/{repo_fd}')
+            scorer_mod = types.ModuleType(f'{pkg_name}.ui_lane_production_scorer')
+            scorer_mod.__package__ = pkg_name
+            scorer_mod.__file__ = f'/proc/self/fd/{repo_fd}/consultation_v2/ui_lane_production_scorer.py'
+            sys.modules[f'{pkg_name}.ui_lane_production_scorer'] = scorer_mod
+            exec(compile(scorer_bytes.decode('utf-8'), scorer_mod.__file__, 'exec'), scorer_mod.__dict__)
+            scorer_mod.REPO_ROOT = Path(f'/proc/self/fd/{repo_fd}')
 
-        held_repo_fd = repo_fd
-        repo_fd = -1
-        return actual_commit, scorer_mod, held_repo_fd
+            held_repo_fd = repo_fd
+            repo_fd = -1
+            return actual_commit, scorer_mod, held_repo_fd
+        except Exception:
+            for name in created_mod_names:
+                sys.modules.pop(name, None)
+            raise
     finally:
         if repo_fd >= 0:
             os.close(repo_fd)
@@ -480,170 +491,185 @@ def _preflight_fresh_session(
 ) -> tuple[Path, Path, str, Any, int]:
     # 0. Verify Hands checkout and exact commit binding before any storage or helper import
     _, scorer_module, repo_fd = _verify_hands_checkout_and_commit(args.hands_commit, REPO_ROOT)
+    pkg_name = scorer_module.__package__
+    registered_mod_names = [
+        pkg_name,
+        f'{pkg_name}.types',
+        f'{pkg_name}.supervised_ui_contract',
+        f'{pkg_name}.ui_lane_production_scorer',
+    ]
 
-    # 1. Validate public roots
-    for pub in public_roots:
-        if not (pub / '.git').exists():
+    try:
+        # 1. Validate public roots
+        for pub in public_roots:
+            if not (pub / '.git').exists():
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    f'public repo root {pub} is not a git checkout',
+                )
+
+        # 2. Validate receipt-root
+        receipt_root = _validate_private_root(args.receipt_root, public_roots, 'receipt-root')
+
+        # 3. Validate session-id
+        if not _UUID_RE.fullmatch(args.session_id):
             raise CaptureSupervisorPreflightError(
                 'FC-TRACE',
-                f'public repo root {pub} is not a git checkout',
+                'session-id must be a canonical lowercase UUID',
             )
 
-    # 2. Validate receipt-root
-    receipt_root = _validate_private_root(args.receipt_root, public_roots, 'receipt-root')
-
-    # 3. Validate session-id
-    if not _UUID_RE.fullmatch(args.session_id):
-        raise CaptureSupervisorPreflightError(
-            'FC-TRACE',
-            'session-id must be a canonical lowercase UUID',
-        )
-
-    # 4. Validate export-root via verified scorer helper
-    try:
-        export_root = scorer_module._private_root(Path(args.export_root))
-    except scorer_module.UiLaneScorerError as exc:
-        raise CaptureSupervisorPreflightError(
-            exc.refusal_code,
-            exc.reason,
-        ) from exc
-    except Exception as exc:
-        raise CaptureSupervisorPreflightError(
-            'FC-TRACE',
-            f'export-root validation failed: {exc}',
-        ) from exc
-
-    for pub in public_roots:
-        resolved_pub = pub.resolve(strict=True)
-        if export_root == resolved_pub or resolved_pub in export_root.parents or export_root in resolved_pub.parents:
-            raise CaptureSupervisorPreflightError(
-                'FC-PRIVACY',
-                f'export-root overlaps supplied public repository root {resolved_pub}',
-            )
-
-    # 5. Validate export-receipt
-    if not isinstance(args.export_receipt, str) or not args.export_receipt:
-        raise CaptureSupervisorPreflightError(
-            'FC-TRACE',
-            'export-receipt must be a non-empty string',
-        )
-    raw_components = args.export_receipt.split('/')
-    if any(part in {'', '.', '..'} for part in raw_components):
-        raise CaptureSupervisorPreflightError(
-            'FC-TRACE',
-            'export-receipt cannot contain empty, dot, or dot-dot components',
-        )
-    export_receipt_posix = PurePosixPath(*raw_components)
-    if export_receipt_posix.is_absolute() or not export_receipt_posix.parts:
-        raise CaptureSupervisorPreflightError(
-            'FC-TRACE',
-            'export-receipt must be a relative path',
-        )
-
-    # 6. Open spent record directories
-    session_claims_fd = _open_spent_record_directory(
-        receipt_root,
-        '.supervised-ui-capture-session-claims',
-    )
-    export_claims_fd = _open_spent_record_directory(
-        export_root,
-        '.supervised-ui-capture-export-claims',
-    )
-
-    try:
-        # 7. Create session spent record first
-        session_identity = {
-            'receipt_root_realpath': str(receipt_root),
-            'session_id': args.session_id,
-        }
-        _create_spent_record_once(
-            session_claims_fd,
-            'supervised-ui-capture-session-claim-v1',
-            session_identity,
-            'session',
-        )
-
-        # 8. Create export target spent record second
-        export_identity = {
-            'export_receipt_relative_posix': str(export_receipt_posix),
-            'export_root_realpath': str(export_root),
-        }
-        _create_spent_record_once(
-            export_claims_fd,
-            'supervised-ui-capture-export-claim-v1',
-            export_identity,
-            'export_target',
-        )
-    finally:
-        os.close(session_claims_fd)
-        os.close(export_claims_fd)
-
-    # 9. After both records verify, require export target containment and absence
-    parent_fd, target_name = _traverse_export_parent_directory(
-        export_root,
-        export_receipt_posix,
-        is_preflight=True,
-    )
-    try:
+        # 4. Validate export-root via verified scorer helper
         try:
-            os.stat(target_name, dir_fd=parent_fd, follow_symlinks=False)
+            export_root = scorer_module._private_root(Path(args.export_root))
+        except scorer_module.UiLaneScorerError as exc:
             raise CaptureSupervisorPreflightError(
-                'FC-TRACE',
-                f'export target {target_name} already exists before fresh launch',
-            )
-        except FileNotFoundError:
-            pass
-        except OSError as exc:
-            raise CaptureSupervisorPreflightError(
-                'FC-TRACE',
-                f'unable to stat export target {target_name}: {exc}',
+                exc.refusal_code,
+                exc.reason,
             ) from exc
-    finally:
-        os.close(parent_fd)
+        except Exception as exc:
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                f'export-root validation failed: {exc}',
+            ) from exc
 
-    # 10. Require session dir not to exist
-    session_dir = receipt_root / args.session_id
-    if session_dir.exists() or session_dir.is_symlink():
-        raise CaptureSupervisorPreflightError(
-            'FC-TRACE',
-            'session directory already exists before fresh launch',
+        for pub in public_roots:
+            resolved_pub = pub.resolve(strict=True)
+            if export_root == resolved_pub or resolved_pub in export_root.parents or export_root in resolved_pub.parents:
+                raise CaptureSupervisorPreflightError(
+                    'FC-PRIVACY',
+                    f'export-root overlaps supplied public repository root {resolved_pub}',
+                )
+
+        # 5. Validate export-receipt
+        if not isinstance(args.export_receipt, str) or not args.export_receipt:
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                'export-receipt must be a non-empty string',
+            )
+        raw_components = args.export_receipt.split('/')
+        if any(part in {'', '.', '..'} for part in raw_components):
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                'export-receipt cannot contain empty, dot, or dot-dot components',
+            )
+        export_receipt_posix = PurePosixPath(*raw_components)
+        if export_receipt_posix.is_absolute() or not export_receipt_posix.parts:
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                'export-receipt must be a relative path',
+            )
+
+        # 6. Open spent record directories
+        session_claims_fd = _open_spent_record_directory(
+            receipt_root,
+            '.supervised-ui-capture-session-claims',
+        )
+        export_claims_fd = _open_spent_record_directory(
+            export_root,
+            '.supervised-ui-capture-export-claims',
         )
 
-    # 11. Create session directory once as mode 0700
-    receipt_root_fd = os.open(receipt_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    try:
-        os.mkdir(args.session_id, mode=0o700, dir_fd=receipt_root_fd)
-        os.fsync(receipt_root_fd)
-    finally:
-        os.close(receipt_root_fd)
+        try:
+            # 7. Create session spent record first
+            session_identity = {
+                'receipt_root_realpath': str(receipt_root),
+                'session_id': args.session_id,
+            }
+            _create_spent_record_once(
+                session_claims_fd,
+                'supervised-ui-capture-session-claim-v1',
+                session_identity,
+                'session',
+            )
 
-    # 12. Reopen and verify new session directory
-    session_dir_fd = os.open(
-        session_dir,
-        os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-    )
-    try:
-        metadata = os.fstat(session_dir_fd)
-        if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700:
-            raise CaptureSupervisorPreflightError(
-                'FC-TRACE',
-                'fresh session directory has invalid mode',
+            # 8. Create export target spent record second
+            export_identity = {
+                'export_receipt_relative_posix': str(export_receipt_posix),
+                'export_root_realpath': str(export_root),
+            }
+            _create_spent_record_once(
+                export_claims_fd,
+                'supervised-ui-capture-export-claim-v1',
+                export_identity,
+                'export_target',
             )
-        if metadata.st_uid != os.getuid():
-            raise CaptureSupervisorPreflightError(
-                'FC-TRACE',
-                'fresh session directory has invalid owner',
-            )
-        entries = os.listdir(session_dir)
-        if len(entries) != 0:
-            raise CaptureSupervisorPreflightError(
-                'FC-TRACE',
-                'fresh session directory is not empty',
-            )
-    finally:
-        os.close(session_dir_fd)
+        finally:
+            os.close(session_claims_fd)
+            os.close(export_claims_fd)
 
-    return receipt_root, export_root, str(export_receipt_posix), scorer_module, repo_fd
+        # 9. After both records verify, require export target containment and absence
+        parent_fd, target_name = _traverse_export_parent_directory(
+            export_root,
+            export_receipt_posix,
+            is_preflight=True,
+        )
+        try:
+            try:
+                os.stat(target_name, dir_fd=parent_fd, follow_symlinks=False)
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    f'export target {target_name} already exists before fresh launch',
+                )
+            except FileNotFoundError:
+                pass
+            except OSError as exc:
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    f'unable to stat export target {target_name}: {exc}',
+                ) from exc
+        finally:
+            os.close(parent_fd)
+
+        # 10. Require session dir not to exist
+        session_dir = receipt_root / args.session_id
+        if session_dir.exists() or session_dir.is_symlink():
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                'session directory already exists before fresh launch',
+            )
+
+        # 11. Create session directory once as mode 0700
+        receipt_root_fd = os.open(receipt_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+        try:
+            os.mkdir(args.session_id, mode=0o700, dir_fd=receipt_root_fd)
+            os.fsync(receipt_root_fd)
+        finally:
+            os.close(receipt_root_fd)
+
+        # 12. Reopen and verify new session directory
+        session_dir_fd = os.open(
+            session_dir,
+            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        try:
+            metadata = os.fstat(session_dir_fd)
+            if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700:
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    'fresh session directory has invalid mode',
+                )
+            if metadata.st_uid != os.getuid():
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    'fresh session directory has invalid owner',
+                )
+            entries = os.listdir(session_dir)
+            if len(entries) != 0:
+                raise CaptureSupervisorPreflightError(
+                    'FC-TRACE',
+                    'fresh session directory is not empty',
+                )
+        finally:
+            os.close(session_dir_fd)
+
+        ret_repo_fd = repo_fd
+        repo_fd = -1
+        return receipt_root, export_root, str(export_receipt_posix), scorer_module, ret_repo_fd
+    finally:
+        if repo_fd >= 0:
+            os.close(repo_fd)
+            for name in registered_mod_names:
+                sys.modules.pop(name, None)
 
 
 def _traverse_export_parent_directory(
@@ -986,6 +1012,7 @@ def _attest_export_root(export_root: Path, public_roots: list[str]) -> str:
 
 def main() -> int:
     repo_fd: int = -1
+    scorer_module: Any = None
     try:
         args = build_parser().parse_args()
         if args.close_ack_timeout_seconds <= 0 or args.worker_exit_timeout_seconds <= 0:
@@ -1184,6 +1211,15 @@ def main() -> int:
     finally:
         if repo_fd >= 0:
             os.close(repo_fd)
+        if scorer_module is not None and getattr(scorer_module, '__package__', None):
+            pkg_name = scorer_module.__package__
+            for name in [
+                pkg_name,
+                f'{pkg_name}.types',
+                f'{pkg_name}.supervised_ui_contract',
+                f'{pkg_name}.ui_lane_production_scorer',
+            ]:
+                sys.modules.pop(name, None)
 
 
 if __name__ == '__main__':
