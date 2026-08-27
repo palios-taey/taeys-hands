@@ -812,19 +812,43 @@ def _read_worker_line(
 ) -> str:
     if worker.stdout is None:
         raise CaptureSupervisorQuarantineError('worker_stdout_missing', 'worker stdout pipe is missing')
-    if timeout is not None and timeout > 0:
-        rlist, _, _ = select.select([worker.stdout], [], [], timeout)
-        if not rlist:
-            raise CaptureSupervisorQuarantineError('worker_timeout', 'timed out waiting for worker response')
-    line = worker.stdout.readline()
-    if not line:
-        raise CaptureSupervisorQuarantineError('worker_eof', 'worker emitted unexpected EOF')
-    return line
+
+    fd = worker.stdout.fileno()
+    deadline = (time.monotonic() + timeout) if (timeout is not None and timeout > 0) else None
+
+    chunks: list[bytes] = []
+    while True:
+        if deadline is not None:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise CaptureSupervisorQuarantineError('worker_timeout', 'timed out waiting for worker response')
+            rlist, _, _ = select.select([fd], [], [], max(0.0, remaining))
+            if not rlist:
+                raise CaptureSupervisorQuarantineError('worker_timeout', 'timed out waiting for worker response')
+
+        try:
+            chunk = os.read(fd, 1)
+        except (BlockingIOError, InterruptedError):
+            continue
+        except OSError as exc:
+            raise CaptureSupervisorQuarantineError('worker_read_failed', f'worker read failed: {exc}') from exc
+
+        if not chunk:
+            if chunks:
+                line = b''.join(chunks).decode('utf-8')
+                if line.endswith('\n'):
+                    return line
+            raise CaptureSupervisorQuarantineError('worker_eof', 'worker emitted unexpected EOF')
+
+        chunks.append(chunk)
+        if chunk == b'\n':
+            return b''.join(chunks).decode('utf-8')
 
 
 def _relay_request(
     worker: subprocess.Popen[str],
     line: str,
+    timeout: float | None = None,
 ) -> str:
     if worker.stdin is None:
         raise CaptureSupervisorQuarantineError('worker_stdin_missing', 'worker stdin pipe is missing')
@@ -833,7 +857,7 @@ def _relay_request(
         worker.stdin.flush()
     except (BrokenPipeError, OSError) as exc:
         raise CaptureSupervisorQuarantineError('worker_stdin_broken', f'worker stdin write failed: {exc}') from exc
-    return _read_worker_line(worker)
+    return _read_worker_line(worker, timeout=timeout)
 
 
 def _close_ack(
@@ -843,7 +867,7 @@ def _close_ack(
 ) -> dict[str, Any]:
     req_bytes = _canonical_json_bytes(close_request)
     req_line = req_bytes.decode('utf-8') + '\n'
-    ack_line = _relay_request(worker, req_line)
+    ack_line = _relay_request(worker, req_line, timeout=timeout)
     try:
         ack_dict = _strict_json(ack_line)
     except Exception as exc:
