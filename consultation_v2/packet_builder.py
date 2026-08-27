@@ -301,7 +301,7 @@ def _assert_no_symlink_components(path: Path, *, include_leaf: bool) -> None:
             raise PacketBuildError(f"symlink path component is forbidden: {current}")
 
 
-def _read_regular_file(path: Path, context: str) -> bytes:
+def _read_regular_file_bytes(path: Path, context: str) -> bytes:
     _assert_no_symlink_components(path, include_leaf=True)
     flags = os.O_RDONLY | os.O_CLOEXEC
     if hasattr(os, "O_NOFOLLOW"):
@@ -323,6 +323,11 @@ def _read_regular_file(path: Path, context: str) -> bytes:
         data = b"".join(chunks)
     finally:
         os.close(descriptor)
+    return data
+
+
+def _read_regular_file(path: Path, context: str) -> bytes:
+    data = _read_regular_file_bytes(path, context)
     if not data:
         raise PacketBuildError(f"{context} is empty: {path}")
     return data
@@ -900,7 +905,7 @@ def _snapshot_root(root: Path) -> dict[str, Any]:
         metadata = os.lstat(path)
         relative = str(path.relative_to(root))
         if stat.S_ISREG(metadata.st_mode):
-            data = _read_regular_file(path, f"quarantine file {relative}")
+            data = _read_regular_file_bytes(path, f"quarantine file {relative}")
             files.append(
                 {
                     "path": relative,
