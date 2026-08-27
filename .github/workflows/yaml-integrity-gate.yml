@@ -38,6 +38,9 @@ jobs:
       - name: Run consultation_v2 platform isolation gate
         run: python3 consultation_v2/validators/lint_platform_independence.py --all
 
+      - name: Prove Gemini Deep Research send sequence contract
+        run: python3 consultation_v2/validators/validate_gemini_manual_deep_research_contract.py
+
       - name: Prove Grok attachment semantic operation contract
         run: python3 consultation_v2/validators/validate_grok_manual_attachment_contract.py
 
