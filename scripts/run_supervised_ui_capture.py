@@ -861,6 +861,10 @@ def _relay_request(
     return _read_worker_line(worker, timeout=timeout)
 
 
+_CLOSE_ACK_TOP_LEVEL_KEYS = frozenset({'ok', 'request_id', 'result'})
+_CLOSE_ACK_RESULT_KEYS = frozenset({'event_hash', 'state'})
+
+
 def _close_ack(
     worker: subprocess.Popen[str],
     close_request: dict[str, Any],
@@ -874,17 +878,30 @@ def _close_ack(
     except Exception as exc:
         raise CaptureSupervisorQuarantineError('close_ack_malformed', f'close ack is not strict json: {exc}') from exc
 
-    if ack_dict.get('ok') is not True:
+    if not isinstance(ack_dict, dict):
+        raise CaptureSupervisorQuarantineError('close_ack_malformed', 'close ack is not a dict')
+    try:
+        _require_keys(ack_dict, _CLOSE_ACK_TOP_LEVEL_KEYS)
+    except Exception as exc:
+        raise CaptureSupervisorQuarantineError('close_ack_shape_invalid', f'close ack top-level shape invalid: {exc}') from exc
+
+    if ack_dict['ok'] is not True:
         raise CaptureSupervisorQuarantineError('close_ack_not_ok', f'close ack not ok: {ack_dict}')
-    if ack_dict.get('request_id') != close_request.get('request_id'):
+    if ack_dict['request_id'] != close_request.get('request_id'):
         raise CaptureSupervisorQuarantineError('close_ack_id_mismatch', 'close ack request_id mismatch')
-    result = ack_dict.get('result')
+
+    result = ack_dict['result']
     if not isinstance(result, dict):
         raise CaptureSupervisorQuarantineError('close_ack_result_invalid', 'close ack result is not dict')
-    event_hash = result.get('event_hash')
+    try:
+        _require_keys(result, _CLOSE_ACK_RESULT_KEYS)
+    except Exception as exc:
+        raise CaptureSupervisorQuarantineError('close_ack_result_shape_invalid', f'close ack result shape invalid: {exc}') from exc
+
+    event_hash = result['event_hash']
     if not isinstance(event_hash, str) or not _SHA256_RE.fullmatch(event_hash):
         raise CaptureSupervisorQuarantineError('close_ack_hash_invalid', 'close ack event_hash is invalid')
-    state = result.get('state')
+    state = result['state']
     if not isinstance(state, str) or not state:
         raise CaptureSupervisorQuarantineError('close_ack_state_invalid', 'close ack state is invalid')
     return ack_dict
