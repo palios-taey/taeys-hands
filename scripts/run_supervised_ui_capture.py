@@ -319,8 +319,28 @@ def _preflight_fresh_session(
             'session-id must be a canonical lowercase UUID',
         )
 
-    # 4. Validate export-root (check against REPO_ROOT and all public roots)
-    export_root = _validate_private_root(args.export_root, public_roots, 'export-root')
+    # 4. Validate export-root
+    from consultation_v2.ui_lane_production_scorer import UiLaneScorerError, _private_root as scorer_private_root
+    try:
+        export_root = scorer_private_root(Path(args.export_root))
+    except UiLaneScorerError as exc:
+        raise CaptureSupervisorPreflightError(
+            exc.refusal_code,
+            exc.reason,
+        ) from exc
+    except Exception as exc:
+        raise CaptureSupervisorPreflightError(
+            'FC-TRACE',
+            f'export-root validation failed: {exc}',
+        ) from exc
+
+    for pub in public_roots:
+        resolved_pub = pub.resolve(strict=True)
+        if export_root == resolved_pub or resolved_pub in export_root.parents or export_root in resolved_pub.parents:
+            raise CaptureSupervisorPreflightError(
+                'FC-PRIVACY',
+                f'export-root overlaps supplied public repository root {resolved_pub}',
+            )
 
     # 5. Validate export-receipt
     export_receipt_posix = PurePosixPath(args.export_receipt)
