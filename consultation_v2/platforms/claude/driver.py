@@ -11,9 +11,11 @@ import json
 import os
 import re
 import subprocess
+import tempfile
 import time
 from contextlib import contextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any, Iterable, Iterator, List, Optional, Tuple
 
 from consultation_v2.platforms.claude.monitor import COMPLETE, DEEP_MODES, ClaudeCompletionDetector
@@ -24,6 +26,13 @@ from consultation_v2 import storage_policy
 from consultation_v2.display_readiness import display_for_platform
 from consultation_v2.display_watchdog import pause_display_watchdog
 from consultation_v2.planner import SelectionPlanError, build_selection_plan, has_selection_menus
+from consultation_v2.platforms.claude.downloaded_artifact import (
+    ClaudeArtifactDownloadError,
+    classify_claude_extraction_snapshot,
+    materialize_claude_download,
+    resolve_claude_download_scope,
+    snapshot_claude_downloads,
+)
 from consultation_v2.native_dialog_snapshot import (
     NativeDialogObservationError,
     NativeDialogSnapshot,
@@ -40,7 +49,7 @@ from consultation_v2.run_state_identity import (
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.snapshot import matches_spec
 from consultation_v2.types import ConsultationRequest, ConsultationResult, ElementRef, ExtractedArtifact, Snapshot
-from consultation_v2.yaml_contract import load_platform_yaml
+from consultation_v2.yaml_contract import get_extraction, load_platform_yaml
 
 
 DEEP_GENERATION_FLOOR_SECONDS = 1800.0
@@ -4940,70 +4949,281 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
     def extract_additional(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
-        artifact_expected = self._response_expects_artifact(result.response_text)
-        expected_names = (
-            self._artifact_names_from_response(result.response_text)
-            if artifact_expected
-            else []
-        )
-        attempts: list[dict] = []
-        self.runtime._sync_platform_io_display()
-        copied = self._copy_artifact_from_tree_controls(
-            request,
-            result,
-            expected_names,
-            attempts,
-        )
-        if copied is None and artifact_expected:
-            opened = self._open_claude_artifact_panel(attempts)
-            if opened:
-                copied = self._copy_artifact_from_tree_controls(
-                    request,
-                    result,
-                    expected_names,
-                    attempts,
-                )
-
-        if copied is not None:
-            content = str(copied['content']).strip()
-            artifact = ExtractedArtifact(
-                name=self._artifact_name(expected_names, content),
-                content=content,
-                kind='artifact',
-                metadata=dict(copied['metadata']),
-            )
-            result.extractions.append(artifact)
-            result.add_step(
-                'extract_additional',
-                True,
-                f'Claude artifact copied ({len(content)} chars)',
-                expected_artifacts=expected_names,
-                attempts=attempts,
-                artifacts=[artifact.serializable()],
-            )
-            return True
-
-        if artifact_expected:
+        try:
+            self.runtime._sync_platform_io_display()
+            snapshot = self.runtime.snapshot()
+        except Exception as exc:
             result.add_step(
                 'extract_additional',
                 False,
-                (
-                    'Claude artifact extraction requires mapped AT-SPI opener and '
-                    'copy controls; the configured sequence yielded no artifact content'
-                ),
-                expected_artifacts=expected_names,
-                attempts=attempts,
-                artifacts=[],
+                f'Claude canonical extraction observation failed: {exc}',
+                observation_error_type=type(exc).__name__,
+                stop_condition='extraction_failed',
+            )
+            return False
+        try:
+            mode, classification_revision, counts = (
+                classify_claude_extraction_snapshot(snapshot)
+            )
+        except ClaudeArtifactDownloadError as exc:
+            result.add_step(
+                'extract_additional',
+                False,
+                str(exc),
+                snapshot=snapshot.serializable(),
                 stop_condition='extraction_failed',
             )
             return False
 
+        if mode == 'assistant_text':
+            result.add_step(
+                'extract_additional',
+                True,
+                'Claude canonical extraction classified assistant text only',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                artifacts=[],
+            )
+            return True
+
+        try:
+            extraction = get_extraction('claude', 'downloaded_file')
+            observed_steps = tuple(
+                (step.action, step.element, step.select, step.validation)
+                for step in (extraction.steps if extraction is not None else ())
+            )
+        except Exception as exc:
+            result.add_step(
+                'extract_additional',
+                False,
+                f'Claude downloaded_file YAML could not be compiled: {exc}',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                yaml_error_type=type(exc).__name__,
+                stop_condition='extraction_failed',
+            )
+            return False
+        expected_steps = (
+            ('download', 'generated_artifact_download_button', 'last', None),
+        )
+        if observed_steps != expected_steps:
+            result.add_step(
+                'extract_additional',
+                False,
+                'Claude downloaded_file YAML does not declare one exact Download action',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                expected_steps=expected_steps,
+                observed_steps=observed_steps,
+                stop_condition='extraction_failed',
+            )
+            return False
+
+        target = snapshot.last('generated_artifact_download_button')
+        pre_url = str(snapshot.url or '')
+        staging_directory: Path | None = None
+        download_click_count = 0
+        try:
+            before = snapshot_claude_downloads(
+                resolve_claude_download_scope(self._display())
+            )
+            staging_directory = Path(
+                tempfile.mkdtemp(prefix='taey-claude-downloaded-artifact-')
+            )
+            staging_destination = staging_directory / 'payload'
+        except Exception as exc:
+            result.add_step(
+                'extract_additional',
+                False,
+                f'Claude Download preflight failed before mutation: {exc}',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                artifact_download_click_count=download_click_count,
+                preflight_error_type=type(exc).__name__,
+                staging_directory=(
+                    str(staging_directory) if staging_directory is not None else None
+                ),
+                stop_condition='extraction_failed',
+            )
+            return False
+
+        if target is None:
+            result.add_step(
+                'extract_additional',
+                False,
+                'Claude generated-artifact Download target disappeared before mutation',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                artifact_download_click_count=download_click_count,
+                staging_directory=str(staging_directory),
+                stop_condition='extraction_failed',
+            )
+            return False
+        try:
+            clicked = self.runtime.click(target)
+        except Exception as exc:
+            result.add_step(
+                'extract_additional',
+                False,
+                f'Claude generated-artifact Download primitive raised: {exc}',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                artifact_download_click_count=None,
+                side_effect_state='SIDE_EFFECT_UNCERTAIN',
+                click_error_type=type(exc).__name__,
+                staging_directory=str(staging_directory),
+                stop_condition='side_effect_uncertain',
+            )
+            return False
+        if not clicked:
+            result.add_step(
+                'extract_additional',
+                False,
+                'Claude generated-artifact Download click failed',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                artifact_download_click_count=download_click_count,
+                staging_directory=str(staging_directory),
+                stop_condition='extraction_failed',
+            )
+            return False
+        download_click_count = 1
+
+        post_download_observe_count = 0
+        try:
+            post_snapshot = self.runtime.snapshot()
+            post_download_observe_count = 1
+            post_revision = self._snapshot_receipt_revision(post_snapshot)
+            exception_state = self._monitor_exception_state(post_snapshot)
+            same_thread = bool(
+                pre_url
+                and '/chat/' in pre_url
+                and str(post_snapshot.url or '') == pre_url
+            )
+            if (
+                not same_thread
+                or post_snapshot.has('continue_button')
+                or exception_state is not None
+            ):
+                result.add_step(
+                    'extract_additional',
+                    False,
+                    'Claude Download postcondition did not preserve the completed answer thread',
+                    extraction_mode=mode,
+                    classification_revision=classification_revision,
+                    generated_artifact_counts=counts,
+                    artifact_download_click_count=download_click_count,
+                    post_download_observe_count=1,
+                    post_download_revision=post_revision,
+                    pre_url=pre_url,
+                    post_url=post_snapshot.url,
+                    continue_present=post_snapshot.has('continue_button'),
+                    monitor_exception=exception_state,
+                    snapshot=post_snapshot.serializable(),
+                    staging_directory=str(staging_directory),
+                    stop_condition='extraction_failed',
+                )
+                return False
+        except Exception as exc:
+            result.add_step(
+                'extract_additional',
+                False,
+                f'Claude post-Download observation failed: {exc}',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                artifact_download_click_count=download_click_count,
+                post_download_observe_count=post_download_observe_count,
+                side_effect_state='SIDE_EFFECT_UNCERTAIN',
+                observation_error_type=type(exc).__name__,
+                staging_directory=str(staging_directory),
+                stop_condition='side_effect_uncertain',
+            )
+            return False
+
+        try:
+            download_receipt = materialize_claude_download(
+                before,
+                staging_destination,
+            )
+        except Exception as exc:
+            result.add_step(
+                'extract_additional',
+                False,
+                f'Claude downloaded artifact failed exact materialization: {exc}',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                artifact_download_click_count=download_click_count,
+                materialization_error_type=type(exc).__name__,
+                staging_directory=str(staging_directory),
+                stop_condition='extraction_failed',
+            )
+            return False
+
+        source = dict(download_receipt.get('source') or {})
+        destination = dict(download_receipt.get('destination') or {})
+        source_name = Path(str(source.get('path') or '')).name
+        summary_payload = result.response_text.encode('utf-8')
+        if (
+            not source_name
+            or source_name in {'.', '..'}
+            or int(destination.get('bytes') or 0) <= 0
+            or str(destination.get('sha256') or '')
+            == hashlib.sha256(summary_payload).hexdigest()
+        ):
+            result.add_step(
+                'extract_additional',
+                False,
+                'Claude materialized artifact was empty, unnamed, or duplicated the summary',
+                extraction_mode=mode,
+                classification_revision=classification_revision,
+                generated_artifact_counts=counts,
+                artifact_download_click_count=1,
+                post_download_observe_count=1,
+                post_download_revision=post_revision,
+                download_receipt=download_receipt,
+                stop_condition='extraction_failed',
+            )
+            return False
+
+        materialized = {
+            'schema': 'taey.materialized_file.v1',
+            'name': source_name,
+            'path': str(destination['path']),
+            'bytes': int(destination['bytes']),
+            'sha256': str(destination['sha256']),
+            'metadata': {
+                'source_name': source_name,
+                'classification_revision': classification_revision,
+                'counts': counts,
+                'download_receipt': download_receipt,
+            },
+        }
+        result.storage['materialized_artifacts'] = [materialized]
         result.add_step(
-            'extract_additional', True,
-            'Claude artifact extraction found no expected artifact marker in mapped copy controls',
-            expected_artifacts=expected_names,
-            attempts=attempts,
-            artifacts=[],
+            'extract_additional',
+            True,
+            'Claude generated artifact downloaded and materialized exactly once',
+            extraction_mode=mode,
+            classification_revision=classification_revision,
+            generated_artifact_counts=counts,
+            artifact_download_click_count=1,
+            artifact_view_click_count=0,
+            artifact_copy_click_count=0,
+            generic_artifact_click_count=0,
+            assistant_copy_click_count=0,
+            clipboard_read_count=0,
+            post_download_observe_count=1,
+            post_download_revision=post_revision,
+            materialized_artifact=materialized,
         )
         return True
 
@@ -5439,15 +5659,19 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
     def store_in_neo4j(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        materialized_artifacts = result.storage.get('materialized_artifacts')
         session_url = (
             result.session_url_after
             or result.session_url_before
             or self.runtime.current_url()
             or ''
         )
-        return self.store_response_for_delivery(
+        stored = self.store_response_for_delivery(
             request,
             result,
             session_url,
             label='Claude',
         )
+        if materialized_artifacts is not None:
+            result.storage['materialized_artifacts'] = materialized_artifacts
+        return stored

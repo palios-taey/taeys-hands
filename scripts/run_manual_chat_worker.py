@@ -17,8 +17,10 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from consultation_v2.yaml_contract import get_extraction, load_platform_yaml  # noqa: E402
 from consultation_v2.platforms.claude.downloaded_artifact import (  # noqa: E402
+    CLAUDE_ARTIFACT_CONTROL_KEYS,  # noqa: F401 - compatibility export for validator
     ClaudeArtifactDownloadError,
     ClaudeDownloadSnapshot,
+    classify_claude_extraction_snapshot,
     materialize_claude_download,
     resolve_claude_download_scope,
     snapshot_claude_downloads,
@@ -38,13 +40,6 @@ IDENTITY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 CHATGPT_POWER_INSTANT_DESCRIPTION = (
     "Instant, 1 of 5. Use Left and Right arrow keys to adjust power."
 )
-CLAUDE_ARTIFACT_CONTROL_KEYS = (
-    "generated_artifact_controls_section",
-    "generated_artifact_view_button",
-    "generated_artifact_download_button",
-)
-
-
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Invoke one frozen manual-chat-ui worker turn without freeform instructions.",
@@ -1246,29 +1241,10 @@ def _build_canonical_claude_snapshot():
 def _classify_claude_extraction_snapshot(
     snapshot,
 ) -> tuple[str, str, dict[str, int]]:
-    if snapshot.platform != "claude":
-        raise RuntimeError("canonical Claude extraction snapshot has wrong platform")
-    counts = {
-        key: len((snapshot.mapped or {}).get(key) or ())
-        for key in CLAUDE_ARTIFACT_CONTROL_KEYS
-    }
-    observed = tuple(counts[key] for key in CLAUDE_ARTIFACT_CONTROL_KEYS)
-    if observed == (1, 1, 1):
-        mode = "downloaded_file"
-    elif observed == (0, 0, 0):
-        mode = "assistant_text"
-    else:
-        raise RuntimeError(
-            "canonical Claude extraction snapshot has partial or duplicate "
-            f"generated-artifact controls: {counts}"
-        )
-    serialized = json.dumps(
-        snapshot.serializable(),
-        ensure_ascii=True,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return mode, hashlib.sha256(serialized).hexdigest(), counts
+    try:
+        return classify_claude_extraction_snapshot(snapshot)
+    except ClaudeArtifactDownloadError as exc:
+        raise RuntimeError(str(exc)) from exc
 
 
 def _prepare_claude_extraction(
