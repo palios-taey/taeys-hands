@@ -21,10 +21,13 @@ from scripts.run_manual_chat_worker import (
     _perplexity_artifacts_diagnostic_content,
     _perplexity_report_card_diagnostic_content,
     _perplexity_report_card_extraction_content,
+    _perplexity_report_preview_extraction_content,
+    _perplexity_report_preview_source_provenance,
     _post_send_confirmation_content,
     _validate_perplexity_artifacts_diagnostic_receipt,
     _validate_perplexity_report_card_diagnostic_receipt,
     _validate_perplexity_report_card_extraction_receipt,
+    _validate_perplexity_report_preview_extraction_receipt,
     build_parser,
 )
 
@@ -546,6 +549,104 @@ retried: false
                 raise AssertionError(
                     f'Perplexity report-card extraction parser accepted {failure}'
                 )
+    preview_args = parser.parse_args([
+        'extract-perplexity-report-preview', '--display', ':6', '--seat-id',
+        'preview-extract-r1', '--artifact-root', '/private/preview-extract-r1',
+        '--source-terminal-response-json', '/private/source.json', '--thread-url',
+        'https://www.perplexity.ai/search/exact-thread-id', '--response-file',
+        '/private/preview-extract-r1/response.txt',
+    ])
+    _require(
+        preview_args.platform == 'perplexity'
+        and preview_args.phase == 'extract-perplexity-report-preview',
+        'Perplexity preview extraction parser binding drifted',
+    )
+    preview_url = 'https://www.perplexity.ai/search/exact-thread-id?preview=1'
+    source_receipt = '''FIRST-MISMATCH STOP REPORT
+platform: perplexity
+display: :6
+report_surface_url: https://www.perplexity.ai/search/exact-thread-id?preview=1
+report_surface_stop_count: 0
+report_surface_copy_contents_count: 0
+report_entry_click_count: 1
+report_copy_click_count: 0
+clipboard_read_count: 0
+sent: false
+retried: false
+'''
+    _require(
+        _perplexity_report_preview_source_provenance(source_receipt, ':6', preview_url),
+        'Perplexity preview extraction rejected exact terminal provenance',
+    )
+    preview_card = _perplexity_report_preview_extraction_content(
+        ':6', 'b' * 64, preview_url, Path('/private/preview-extract-r1/response.txt')
+    )
+    _require(
+        preview_card.count('operate element=artifact_options exactly once') == 1
+        and preview_card.count('click element=artifact_open_new_tab exactly once') == 1
+        and preview_card.count('click element=copy_contents_button exactly once') == 1
+        and preview_card.count('read_clipboard output_file=') == 1
+        and 'observe scope=menu_snapshot exactly once' in preview_card
+        and 'Do not navigate, attach, paste, send, research, regenerate, retry' in preview_card,
+        'Perplexity preview extraction widened or reordered its exact operations',
+    )
+    with tempfile.TemporaryDirectory() as temporary_directory:
+        response_file = Path(temporary_directory) / 'response.txt'
+        response_file.write_text('report\n', encoding='utf-8')
+        response_sha = hashlib.sha256(response_file.read_bytes()).hexdigest()
+        success = f'''PERPLEXITY REPORT PREVIEW EXTRACTION RECEIPT
+platform: perplexity
+display: :6
+source_response_json_sha256: {'b' * 64}
+preview_url: {preview_url}
+pre_observation_revision: {'1' * 64}
+pre_stop_count: 0
+pre_artifact_options_count: 1
+pre_close_artifact_count: 1
+pre_expand_artifact_count: 1
+pre_report_scroll_pane_count: 1
+options_performed: true
+options_primitive: mapped_pointer_activate
+menu_observation_revision: {'2' * 64}
+menu_stop_count: 0
+menu_open_new_tab_count: 1
+open_new_tab_performed: true
+open_new_tab_primitive: click
+standalone_observation_revision: {'3' * 64}
+standalone_url: https://www.perplexity.ai/computer/a/report-id
+standalone_stop_count: 0
+standalone_copy_contents_count: 1
+copy_performed: true
+copy_primitive: click
+post_copy_observation_revision: {'4' * 64}
+post_copy_url: https://www.perplexity.ai/computer/a/report-id
+post_copy_stop_count: 0
+post_copy_contents_count: 1
+output_file: {response_file}
+byte_count: {response_file.stat().st_size}
+response_sha256: {response_sha}
+observe_count: 4
+operate_count: 1
+click_count: 2
+clipboard_read_count: 1
+other_mutation_count: 0
+extracted: true
+sent: false
+regenerated: false
+retried: false
+'''
+        _validate_perplexity_report_preview_extraction_receipt(
+            success, ':6', 'b' * 64, preview_url, response_file
+        )
+        try:
+            _validate_perplexity_report_preview_extraction_receipt(
+                success.replace('click_count: 2', 'click_count: 3'),
+                ':6', 'b' * 64, preview_url, response_file,
+            )
+        except RuntimeError:
+            pass
+        else:
+            raise AssertionError('Perplexity preview extraction accepted a third click')
     print('perplexity manual extraction contract: PASS')
     return 0
 

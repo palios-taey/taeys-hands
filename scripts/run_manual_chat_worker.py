@@ -143,6 +143,20 @@ def build_parser() -> argparse.ArgumentParser:
     extract_perplexity_report_card.add_argument("--thread-url", required=True)
     extract_perplexity_report_card.add_argument("--response-file", required=True)
 
+    extract_perplexity_report_preview = phases.add_parser(
+        "extract-perplexity-report-preview",
+        help="Extract once from one terminal Perplexity report-preview surface.",
+    )
+    extract_perplexity_report_preview.set_defaults(platform="perplexity")
+    extract_perplexity_report_preview.add_argument("--display", required=True)
+    extract_perplexity_report_preview.add_argument("--seat-id", required=True)
+    extract_perplexity_report_preview.add_argument("--artifact-root", required=True)
+    extract_perplexity_report_preview.add_argument(
+        "--source-terminal-response-json", required=True
+    )
+    extract_perplexity_report_preview.add_argument("--thread-url", required=True)
+    extract_perplexity_report_preview.add_argument("--response-file", required=True)
+
     extract = phases.add_parser(
         "extract",
         help="Extract once from one explicitly authorized completion basis.",
@@ -871,6 +885,54 @@ def _perplexity_report_card_extraction_content(
         "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected "
         "element, state, action, scope, result, URL, file, or postcondition, return the "
         "first-mismatch stop report and halt. Do not retry or recover."
+    )
+
+
+def _perplexity_report_preview_extraction_content(
+    display: str,
+    source_response_sha256: str,
+    preview_url: str,
+    response_file: Path,
+) -> str:
+    return (
+        f"Execute one frozen Perplexity report-preview extraction on {display}. This new turn is "
+        "authorized only by the terminal first-mismatch response whose exact SHA-256 is "
+        f"{source_response_sha256}; never invoke or retry that source identity. Use drive_chat "
+        "only and pass element keys only, never opaque refs. Do not navigate, attach, paste, "
+        "send, research, regenerate, retry, recover, poll, press a key, expand, close, download, "
+        "or scroll.\n"
+        f"1. observe scope=base exactly once. Require current_url exactly {preview_url}, a "
+        "populated Perplexity tree, stop_button absent, exactly one artifact_options named "
+        "Artifact options with role push button and states showing, focusable, enabled, exactly "
+        "one close_artifact named Close, exactly one expand_artifact named Expand artifact, and "
+        "exactly one report_scroll_pane with role scroll pane and states showing and enabled.\n"
+        "2. operate element=artifact_options exactly once. Require performed=true and "
+        "performed_primitive=mapped_pointer_activate. Immediately observe scope=menu_snapshot "
+        "exactly once. Require current_url unchanged, stop_button absent, and exactly one "
+        "artifact_open_new_tab named Open in new tab with role menu item and states showing and enabled.\n"
+        "3. click element=artifact_open_new_tab exactly once. Require performed=true and "
+        "performed_primitive=click. Immediately observe scope=base exactly once. Require current_url "
+        "to match https://www.perplexity.ai/computer/a/<non-empty-id>, stop_button absent, and "
+        "exactly one copy_contents_button named Copy contents with role push button and states "
+        "showing and enabled.\n"
+        "4. click element=copy_contents_button exactly once. Require performed=true and "
+        "performed_primitive=click. Immediately observe scope=base exactly once. Require the same "
+        "standalone report URL, stop_button absent, and exactly one copy_contents_button named "
+        "Copy contents with role push button and states showing and enabled.\n"
+        f"5. read_clipboard output_file={response_file} exactly once. Require the new file to be "
+        "nonempty and compute exact byte_count and response_sha256. Make no more drive_chat calls.\n"
+        "Return a PERPLEXITY REPORT PREVIEW EXTRACTION RECEIPT with separate fields: platform, "
+        "display, source_response_json_sha256, preview_url, pre_observation_revision, pre_stop_count, "
+        "pre_artifact_options_count, pre_close_artifact_count, pre_expand_artifact_count, "
+        "pre_report_scroll_pane_count, options_performed, options_primitive, menu_observation_revision, "
+        "menu_stop_count, menu_open_new_tab_count, open_new_tab_performed, open_new_tab_primitive, "
+        "standalone_observation_revision, standalone_url, standalone_stop_count, "
+        "standalone_copy_contents_count, copy_performed, copy_primitive, post_copy_observation_revision, "
+        "post_copy_url, post_copy_stop_count, post_copy_contents_count, output_file, byte_count, and "
+        "response_sha256. End with observe_count: 4, operate_count: 1, click_count: 2, "
+        "clipboard_read_count: 1, other_mutation_count: 0, extracted: true, sent: false, "
+        "regenerated: false, retried: false. Then halt. At first mismatch, return the first-mismatch "
+        "stop report and halt without another action."
     )
 
 
@@ -2305,6 +2367,84 @@ def _validate_perplexity_report_card_extraction_receipt(
         raise RuntimeError("Perplexity report-card extraction report name is empty")
 
 
+def _perplexity_report_preview_source_provenance(
+    receipt: str, display: str, preview_url: str
+) -> bool:
+    required = {
+        "platform": "perplexity",
+        "display": display,
+        "report_surface_url": preview_url,
+        "report_surface_stop_count": "0",
+        "report_surface_copy_contents_count": "0",
+        "report_entry_click_count": "1",
+        "report_copy_click_count": "0",
+        "clipboard_read_count": "0",
+        "sent": "false",
+        "retried": "false",
+    }
+    return "first-mismatch stop report" in receipt.lower() and all(
+        _receipt_field_matches(receipt, field, value)
+        for field, value in required.items()
+    )
+
+
+def _validate_perplexity_report_preview_extraction_receipt(
+    receipt: str,
+    display: str,
+    source_sha256: str,
+    preview_url: str,
+    response_file: Path,
+) -> None:
+    if not response_file.is_file() or response_file.stat().st_size == 0:
+        raise RuntimeError("Perplexity preview extraction file is missing or empty")
+    exact = {
+        "platform": "perplexity", "display": display,
+        "source_response_json_sha256": source_sha256, "preview_url": preview_url,
+        "pre_stop_count": "0", "pre_artifact_options_count": "1",
+        "pre_close_artifact_count": "1", "pre_expand_artifact_count": "1",
+        "pre_report_scroll_pane_count": "1", "options_performed": "true",
+        "options_primitive": "mapped_pointer_activate", "menu_stop_count": "0",
+        "menu_open_new_tab_count": "1", "open_new_tab_performed": "true",
+        "open_new_tab_primitive": "click", "standalone_stop_count": "0",
+        "standalone_copy_contents_count": "1", "copy_performed": "true",
+        "copy_primitive": "click", "post_copy_stop_count": "0",
+        "post_copy_contents_count": "1", "output_file": str(response_file),
+        "byte_count": str(response_file.stat().st_size),
+        "response_sha256": _sha256(response_file), "observe_count": "4",
+        "operate_count": "1", "click_count": "2", "clipboard_read_count": "1",
+        "other_mutation_count": "0", "extracted": "true", "sent": "false",
+        "regenerated": "false", "retried": "false",
+    }
+    invalid = [
+        field for field, value in exact.items()
+        if not _receipt_field_matches(receipt, field, value)
+    ]
+    if "perplexity report preview extraction receipt" not in receipt.lower() or invalid:
+        raise RuntimeError(
+            f"Perplexity preview extraction receipt has invalid fields: {invalid}"
+        )
+    for field in (
+        "pre_observation_revision", "menu_observation_revision",
+        "standalone_observation_revision", "post_copy_observation_revision",
+    ):
+        if re.search(
+            rf"(?im)\b{field}\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*[0-9a-f]{{64}}\b",
+            receipt,
+        ) is None:
+            raise RuntimeError(f"Perplexity preview extraction invalid revision: {field}")
+    url_pattern = r"https://www\.perplexity\.ai/computer/a/[A-Za-z0-9_-]+"
+    standalone = re.search(
+        r"(?im)\bstandalone_url\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*"
+        rf"({url_pattern})\b", receipt,
+    )
+    post_copy = re.search(
+        r"(?im)\bpost_copy_url\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*"
+        rf"({url_pattern})\b", receipt,
+    )
+    if standalone is None or post_copy is None or standalone.group(1) != post_copy.group(1):
+        raise RuntimeError("Perplexity preview extraction standalone URL is not stable")
+
+
 def _completed_before_stop_provenance(
     receipt: str,
     platform: str,
@@ -2406,7 +2546,10 @@ def main() -> int:
     artifact_root_preexisted = Path(args.artifact_root).expanduser().exists()
     root = _artifact_root(
         args.artifact_root,
-        allow_existing=args.phase in {"extract", "extract-perplexity-report-card"},
+        allow_existing=args.phase in {
+            "extract", "extract-perplexity-report-card",
+            "extract-perplexity-report-preview",
+        },
     )
 
     source_response = None
@@ -2421,6 +2564,9 @@ def main() -> int:
     claude_launcher_revision = None
     claude_launcher_counts = None
     perplexity_diagnostic_thread_url = None
+    preview_source_response = None
+    preview_source_sha256 = None
+    perplexity_preview_url = None
     if args.phase == "diagnose-chatgpt-model-menu":
         if args.platform != "chatgpt":
             raise RuntimeError("diagnose-chatgpt-model-menu requires platform chatgpt")
@@ -2585,6 +2731,49 @@ def main() -> int:
             )
         ).hexdigest()
         event_id = f"extract-perplexity-report-card-{digest[:24]}"
+        request_text = _request_text(content, 4096)
+    elif args.phase == "extract-perplexity-report-preview":
+        if args.platform != "perplexity" or args.display != ":6":
+            raise RuntimeError("extract-perplexity-report-preview requires Perplexity on :6")
+        perplexity_diagnostic_thread_url = args.thread_url.strip()
+        if re.fullmatch(
+            r"https://www\.perplexity\.ai/search/[A-Za-z0-9_-]+",
+            perplexity_diagnostic_thread_url,
+        ) is None:
+            raise RuntimeError("preview extraction requires one exact Perplexity thread URL")
+        perplexity_preview_url = perplexity_diagnostic_thread_url + "?preview=1"
+        preview_source_response = _absolute_input(
+            args.source_terminal_response_json, "source terminal response JSON"
+        )
+        _source_payload, preview_source_receipt = _worker_receipt(preview_source_response)
+        if not _is_worker_stop_report(preview_source_receipt) or not (
+            _perplexity_report_preview_source_provenance(
+                preview_source_receipt, args.display, perplexity_preview_url
+            )
+        ):
+            raise RuntimeError("source response lacks exact terminal preview provenance")
+        preview_source_sha256 = _sha256(preview_source_response)
+        response_file = Path(args.response_file).expanduser()
+        if not response_file.is_absolute():
+            raise RuntimeError("response file must be an absolute path")
+        response_file = response_file.parent.resolve(strict=False) / response_file.name
+        if response_file != root / "response.txt":
+            raise RuntimeError("response file must be ARTIFACT_ROOT/response.txt")
+        outputs = (
+            root / "request.json", root / "response.headers",
+            root / "worker_response.json", response_file,
+        )
+        existing = [str(path) for path in outputs if path.exists()]
+        if existing:
+            raise RuntimeError(f"preview extraction output exists; refusing retry: {existing}")
+        content = _perplexity_report_preview_extraction_content(
+            args.display, preview_source_sha256, perplexity_preview_url, response_file
+        )
+        digest = hashlib.sha256(
+            f"{seat_id}\0perplexity\0{args.display}\0{preview_source_sha256}\0"
+            f"{perplexity_preview_url}\0{response_file}\0{content}".encode("utf-8")
+        ).hexdigest()
+        event_id = f"extract-perplexity-report-preview-{digest[:24]}"
         request_text = _request_text(content, 4096)
     elif args.phase == "recover-claude-pre-send":
         exception_key = _identity(args.exception_key, "exception key")
@@ -2767,7 +2956,9 @@ def main() -> int:
     mutation_stop_report = False
     completed_before_stop = False
     try:
-        request_must_be_new = args.phase == "extract-perplexity-report-card"
+        request_must_be_new = args.phase in {
+            "extract-perplexity-report-card", "extract-perplexity-report-preview",
+        }
         if args.phase == "extract" and args.platform == "claude":
             try:
                 (
@@ -2860,6 +3051,11 @@ def main() -> int:
                 raise RuntimeError("source response changed during recovery")
             raise RuntimeError("source response changed during the extraction turn")
         if (
+            preview_source_response is not None
+            and _sha256(preview_source_response) != preview_source_sha256
+        ):
+            raise RuntimeError("preview source response changed during extraction")
+        if (
             args.phase == "extract"
             and source_response is not None
             and (
@@ -2889,6 +3085,7 @@ def main() -> int:
                 "diagnose-perplexity-artifacts",
                 "diagnose-perplexity-report-card",
                 "extract-perplexity-report-card",
+                "extract-perplexity-report-preview",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
         if args.phase == "extract" and args.platform == "claude":
@@ -3260,6 +3457,14 @@ def main() -> int:
                 perplexity_diagnostic_thread_url,
                 response_file,
             )
+        if args.phase == "extract-perplexity-report-preview":
+            assert preview_source_sha256 is not None
+            assert perplexity_preview_url is not None
+            assert response_file is not None
+            _validate_perplexity_report_preview_extraction_receipt(
+                receipt, args.display, preview_source_sha256,
+                perplexity_preview_url, response_file,
+            )
         if (
             args.phase in {"send", "recover"}
             and not completed_before_stop
@@ -3285,6 +3490,7 @@ def main() -> int:
             "diagnose-perplexity-artifacts",
             "diagnose-perplexity-report-card",
             "extract-perplexity-report-card",
+            "extract-perplexity-report-preview",
         } or mutation_stop_report or completed_before_stop:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
@@ -3349,6 +3555,12 @@ def main() -> int:
         })
     if source_diagnostic_identity is not None:
         result["source_diagnostic_identity"] = source_diagnostic_identity
+    if preview_source_response is not None:
+        result.update({
+            "source_terminal_response_json": str(preview_source_response),
+            "source_terminal_response_json_sha256": preview_source_sha256,
+            "preview_url": perplexity_preview_url,
+        })
     if completed_before_stop:
         completed_state = _completed_before_stop_state(args.platform)
         assert completed_state is not None
@@ -3373,6 +3585,7 @@ def main() -> int:
         "diagnose-perplexity-artifacts",
         "diagnose-perplexity-report-card",
         "extract-perplexity-report-card",
+        "extract-perplexity-report-preview",
     }:
         result["lease_release"] = lease_release
     if perplexity_diagnostic_thread_url is not None:
