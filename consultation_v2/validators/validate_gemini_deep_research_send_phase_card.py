@@ -8,6 +8,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+from types import ModuleType
 from unittest.mock import patch
 
 
@@ -102,7 +103,9 @@ def _assert_research_report_handoff() -> None:
         'stop_proven': True,
         'extraction_output_type': 'research_report',
     })
-    with patch('storage.redis_pool.get_client', return_value=client):
+    redis_pool = ModuleType('storage.redis_pool')
+    redis_pool.get_client = lambda: client  # type: ignore[attr-defined]
+    with patch.dict(sys.modules, {'storage.redis_pool': redis_pool}):
         routes = consult_completion_monitor.active_completion_routes('gemini', DISPLAY)
     assert len(routes) == 1
     route = routes[0]
