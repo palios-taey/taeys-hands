@@ -399,20 +399,35 @@ def _preflight_fresh_session(
         os.close(session_claims_fd)
         os.close(export_claims_fd)
 
-    # 9. After both records verify, require session dir not to exist
+    # 9. After both records verify, require export target containment and absence
+    parent_fd, target_name = _traverse_export_parent_directory(
+        export_root,
+        export_receipt_posix,
+        is_preflight=True,
+    )
+    try:
+        try:
+            os.stat(target_name, dir_fd=parent_fd, follow_symlinks=False)
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                f'export target {target_name} already exists before fresh launch',
+            )
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                f'unable to stat export target {target_name}: {exc}',
+            ) from exc
+    finally:
+        os.close(parent_fd)
+
+    # 10. Require session dir not to exist
     session_dir = receipt_root / args.session_id
     if session_dir.exists() or session_dir.is_symlink():
         raise CaptureSupervisorPreflightError(
             'FC-TRACE',
             'session directory already exists before fresh launch',
-        )
-
-    # 10. Require export target not to exist
-    target_path = export_root.joinpath(*export_receipt_posix.parts)
-    if target_path.exists() or target_path.is_symlink():
-        raise CaptureSupervisorPreflightError(
-            'FC-TRACE',
-            'export target already exists before fresh launch',
         )
 
     # 11. Create session directory once as mode 0700
@@ -452,37 +467,71 @@ def _preflight_fresh_session(
     return receipt_root, export_root, str(export_receipt_posix)
 
 
+def _traverse_export_parent_directory(
+    export_root: Path,
+    posix_path: PurePosixPath,
+    *,
+    is_preflight: bool = True,
+) -> tuple[int, str]:
+    err_cls = CaptureSupervisorPreflightError if is_preflight else CaptureSupervisorQuarantineError
+    err_code = 'FC-TRACE' if is_preflight else 'export_parent_invalid'
+
+    try:
+        curr_fd = os.open(export_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    except OSError as exc:
+        raise err_cls(err_code, f'unable to open export root {export_root}: {exc}') from exc
+
+    try:
+        for part in posix_path.parent.parts:
+            try:
+                os.mkdir(part, mode=0o700, dir_fd=curr_fd)
+                try:
+                    os.fsync(curr_fd)
+                except OSError as exc:
+                    raise err_cls(err_code, f'unable to fsync export parent after mkdir {part}: {exc}') from exc
+            except FileExistsError:
+                pass
+            except OSError as exc:
+                raise err_cls(err_code, f'unable to mkdir export parent {part}: {exc}') from exc
+
+            next_fd = -1
+            try:
+                next_fd = os.open(
+                    part,
+                    os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    dir_fd=curr_fd,
+                )
+                metadata = os.fstat(next_fd)
+                if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700:
+                    raise err_cls(err_code, f'export parent directory {part} is not mode 0700')
+                if metadata.st_uid != os.getuid():
+                    raise err_cls(err_code, f'export parent directory {part} is not owned by current user')
+            except err_cls:
+                if next_fd >= 0:
+                    os.close(next_fd)
+                raise
+            except Exception as exc:
+                if next_fd >= 0:
+                    os.close(next_fd)
+                raise err_cls(err_code, f'unable to open export parent {part} without symlink: {exc}') from exc
+
+            os.close(curr_fd)
+            curr_fd = next_fd
+
+        result_fd = curr_fd
+        curr_fd = -1
+        return result_fd, posix_path.name
+    finally:
+        if curr_fd >= 0:
+            os.close(curr_fd)
+
+
 def _resolve_export_target(export_root: Path, export_receipt: str) -> tuple[int, str]:
-    posix_path = PurePosixPath(export_receipt)
-    curr_fd = os.open(export_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
-    for part in posix_path.parent.parts:
-        try:
-            os.mkdir(part, mode=0o700, dir_fd=curr_fd)
-        except FileExistsError:
-            pass
-        next_fd = os.open(
-            part,
-            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
-            dir_fd=curr_fd,
-        )
-        metadata = os.fstat(next_fd)
-        if not stat.S_ISDIR(metadata.st_mode) or stat.S_IMODE(metadata.st_mode) != 0o700:
-            os.close(next_fd)
-            os.close(curr_fd)
-            raise CaptureSupervisorQuarantineError(
-                'export_parent_invalid',
-                f'export parent directory {part} is not mode 0700',
-            )
-        if metadata.st_uid != os.getuid():
-            os.close(next_fd)
-            os.close(curr_fd)
-            raise CaptureSupervisorQuarantineError(
-                'export_parent_invalid',
-                f'export parent directory {part} is not owned by current user',
-            )
-        os.close(curr_fd)
-        curr_fd = next_fd
-    return curr_fd, posix_path.name
+    return _traverse_export_parent_directory(
+        export_root,
+        PurePosixPath(export_receipt),
+        is_preflight=False,
+    )
 
 
 def _launch_worker(
