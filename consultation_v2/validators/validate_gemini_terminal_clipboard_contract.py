@@ -184,7 +184,7 @@ def main() -> int:
         fresh_inner = {
             "ok": True,
             "platform": "gemini",
-            "action": "read_clipboard",
+            "action": "read-clipboard",
             "display": display,
             "result": {
                 "output_file": str(response_file),

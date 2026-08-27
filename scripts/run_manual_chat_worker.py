@@ -2498,7 +2498,7 @@ def _validate_gemini_terminal_clipboard_only_capture(
         or inner.get("ok") is not True
         or inner.get("platform") != "gemini"
         or inner.get("display") != display
-        or inner.get("action") != "read_clipboard"
+        or inner.get("action") != "read-clipboard"
         or not isinstance(result, dict)
         or result.get("output_file") != str(response_file)
         or result.get("bytes") != response_file.stat().st_size
