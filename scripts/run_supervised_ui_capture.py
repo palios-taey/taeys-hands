@@ -597,7 +597,15 @@ def _preflight_fresh_session(
             os.close(session_claims_fd)
             os.close(export_claims_fd)
 
-        # 9. After both records verify, require export target containment and absence
+        # 9. After both records verify, require session dir not to exist before mutating export hierarchy
+        session_dir = receipt_root / args.session_id
+        if session_dir.exists() or session_dir.is_symlink():
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                'session directory already exists before fresh launch',
+            )
+
+        # 10. Require export target containment and absence
         parent_fd, target_name = _traverse_export_parent_directory(
             export_root,
             export_receipt_posix,
@@ -619,14 +627,6 @@ def _preflight_fresh_session(
                 ) from exc
         finally:
             os.close(parent_fd)
-
-        # 10. Require session dir not to exist
-        session_dir = receipt_root / args.session_id
-        if session_dir.exists() or session_dir.is_symlink():
-            raise CaptureSupervisorPreflightError(
-                'FC-TRACE',
-                'session directory already exists before fresh launch',
-            )
 
         # 11. Create session directory once as mode 0700
         receipt_root_fd = os.open(receipt_root, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
