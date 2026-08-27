@@ -297,10 +297,122 @@ def _create_spent_record_once(
     return identity_sha256
 
 
+def _verify_hands_checkout_and_commit(hands_commit_arg: str, repo_root: Path) -> str:
+    if not isinstance(hands_commit_arg, str) or not _GIT_COMMIT_RE.fullmatch(hands_commit_arg):
+        raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'declared Hands commit format is invalid')
+
+    # 1. Descriptor-open the running Hands checkout with no-follow containment
+    _assert_no_symlinks(repo_root)
+    try:
+        repo_fd = os.open(repo_root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except OSError as exc:
+        raise CaptureSupervisorPreflightError('FC-TRACE', f'unable to open repo root without symlinks: {exc}') from exc
+
+    try:
+        metadata = os.fstat(repo_fd)
+        if not stat.S_ISDIR(metadata.st_mode):
+            raise CaptureSupervisorPreflightError('FC-TRACE', 'Hands repo root is not a directory')
+
+        # 2. Prove via Git toplevel that it is the exact same checkout
+        try:
+            toplevel_proc = subprocess.run(
+                ['git', '-C', str(repo_root), 'rev-parse', '--show-toplevel'],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            toplevel_path = Path(toplevel_proc.stdout.strip()).resolve(strict=True)
+            if toplevel_path != repo_root.resolve(strict=True):
+                raise CaptureSupervisorPreflightError(
+                    'FC-WRONG-COMMIT',
+                    'Hands repository toplevel does not match running checkout',
+                )
+        except subprocess.CalledProcessError as exc:
+            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to establish Git toplevel: {exc}') from exc
+
+        # 3. Check for clean working tree
+        try:
+            diff_proc = subprocess.run(
+                ['git', '-C', str(repo_root), 'diff', 'HEAD', '--quiet'],
+                capture_output=True,
+            )
+            if diff_proc.returncode != 0:
+                raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'Hands checkout has uncommitted tracked changes')
+            cached_proc = subprocess.run(
+                ['git', '-C', str(repo_root), 'diff', '--cached', '--quiet'],
+                capture_output=True,
+            )
+            if cached_proc.returncode != 0:
+                raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'Hands checkout has staged uncommitted changes')
+        except subprocess.CalledProcessError as exc:
+            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to check Git status: {exc}') from exc
+
+        # 4. Prove local HEAD equals args.hands_commit
+        try:
+            rev_proc = subprocess.run(
+                ['git', '-C', str(repo_root), 'rev-parse', 'HEAD'],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            actual_commit = rev_proc.stdout.strip()
+        except subprocess.CalledProcessError as exc:
+            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to establish Git HEAD: {exc}') from exc
+
+        if not _GIT_COMMIT_RE.fullmatch(actual_commit):
+            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'unable to establish exact Hands commit')
+
+        if hands_commit_arg != actual_commit:
+            raise CaptureSupervisorPreflightError(
+                'FC-WRONG-COMMIT',
+                f'declared Hands commit {hands_commit_arg} does not match checkout HEAD {actual_commit}',
+            )
+
+        # 5. Scorer helper import and content hash binding
+        scorer_rel_path = 'consultation_v2/ui_lane_production_scorer.py'
+        scorer_path = repo_root / scorer_rel_path
+        if not scorer_path.exists() or scorer_path.is_symlink():
+            raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', 'scorer helper missing or symlinked')
+
+        try:
+            ls_proc = subprocess.run(
+                ['git', '-C', str(repo_root), 'ls-tree', actual_commit, scorer_rel_path],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            ls_parts = ls_proc.stdout.strip().split()
+            if len(ls_parts) < 3 or ls_parts[1] != 'blob':
+                raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'scorer helper not tracked at committed HEAD')
+            committed_blob = ls_parts[2]
+
+            hash_proc = subprocess.run(
+                ['git', '-C', str(repo_root), 'hash-object', str(scorer_path)],
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+            actual_blob = hash_proc.stdout.strip()
+            if actual_blob != committed_blob:
+                raise CaptureSupervisorPreflightError(
+                    'FC-WRONG-COMMIT',
+                    'scorer helper on-disk content differs from committed HEAD blob',
+                )
+        except subprocess.CalledProcessError as exc:
+            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to verify scorer Git blob: {exc}') from exc
+
+        return actual_commit
+    finally:
+        os.close(repo_fd)
+
+
 def _preflight_fresh_session(
     args: argparse.Namespace,
     public_roots: list[Path],
 ) -> tuple[Path, Path, str]:
+    # 0. Verify Hands checkout and exact commit binding before any storage or helper import
+    _verify_hands_checkout_and_commit(args.hands_commit, REPO_ROOT)
+
     # 1. Validate public roots
     for pub in public_roots:
         if not (pub / '.git').exists():
