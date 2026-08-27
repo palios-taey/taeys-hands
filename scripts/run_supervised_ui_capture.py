@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path, PurePosixPath
 import re
@@ -1068,7 +1069,12 @@ def main() -> int:
     scorer_module: Any = None
     try:
         args = build_parser().parse_args()
-        if args.close_ack_timeout_seconds <= 0 or args.worker_exit_timeout_seconds <= 0:
+        if (
+            not math.isfinite(args.close_ack_timeout_seconds)
+            or args.close_ack_timeout_seconds <= 0
+            or not math.isfinite(args.worker_exit_timeout_seconds)
+            or args.worker_exit_timeout_seconds <= 0
+        ):
             refusal = {
                 'child_created': False,
                 'error': 'timeouts must be positive floats',
