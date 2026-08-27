@@ -297,7 +297,15 @@ def _create_spent_record_once(
     return identity_sha256
 
 
-def _verify_hands_checkout_and_commit(hands_commit_arg: str, repo_root: Path) -> str:
+def _git_blob_sha1(data: bytes) -> str:
+    header = f'blob {len(data)}\x00'.encode('ascii')
+    return hashlib.sha1(header + data).hexdigest()
+
+
+def _verify_hands_checkout_and_commit(
+    hands_commit_arg: str,
+    repo_root: Path,
+) -> tuple[str, Any]:
     if not isinstance(hands_commit_arg, str) or not _GIT_COMMIT_RE.fullmatch(hands_commit_arg):
         raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'declared Hands commit format is invalid')
 
@@ -313,13 +321,14 @@ def _verify_hands_checkout_and_commit(hands_commit_arg: str, repo_root: Path) ->
         if not stat.S_ISDIR(metadata.st_mode):
             raise CaptureSupervisorPreflightError('FC-TRACE', 'Hands repo root is not a directory')
 
-        # 2. Prove via Git toplevel that it is the exact same checkout
+        # 2. Prove via Git toplevel on held descriptor that it is the exact same checkout
         try:
             toplevel_proc = subprocess.run(
-                ['git', '-C', str(repo_root), 'rev-parse', '--show-toplevel'],
+                ['git', '-C', f'/proc/self/fd/{repo_fd}', 'rev-parse', '--show-toplevel'],
                 check=True,
                 capture_output=True,
                 text=True,
+                pass_fds=(repo_fd,),
             )
             toplevel_path = Path(toplevel_proc.stdout.strip()).resolve(strict=True)
             if toplevel_path != repo_root.resolve(strict=True):
@@ -330,30 +339,28 @@ def _verify_hands_checkout_and_commit(hands_commit_arg: str, repo_root: Path) ->
         except subprocess.CalledProcessError as exc:
             raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to establish Git toplevel: {exc}') from exc
 
-        # 3. Check for clean working tree
+        # 3. Check for completely clean working tree (tracked and untracked) via held descriptor
         try:
-            diff_proc = subprocess.run(
-                ['git', '-C', str(repo_root), 'diff', 'HEAD', '--quiet'],
-                capture_output=True,
-            )
-            if diff_proc.returncode != 0:
-                raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'Hands checkout has uncommitted tracked changes')
-            cached_proc = subprocess.run(
-                ['git', '-C', str(repo_root), 'diff', '--cached', '--quiet'],
-                capture_output=True,
-            )
-            if cached_proc.returncode != 0:
-                raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'Hands checkout has staged uncommitted changes')
-        except subprocess.CalledProcessError as exc:
-            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to check Git status: {exc}') from exc
-
-        # 4. Prove local HEAD equals args.hands_commit
-        try:
-            rev_proc = subprocess.run(
-                ['git', '-C', str(repo_root), 'rev-parse', 'HEAD'],
+            status_proc = subprocess.run(
+                ['git', '-C', f'/proc/self/fd/{repo_fd}', 'status', '--porcelain'],
                 check=True,
                 capture_output=True,
                 text=True,
+                pass_fds=(repo_fd,),
+            )
+            if status_proc.stdout.strip():
+                raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'Hands checkout has uncommitted or untracked changes')
+        except subprocess.CalledProcessError as exc:
+            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to check Git status: {exc}') from exc
+
+        # 4. Prove local HEAD on held descriptor equals args.hands_commit
+        try:
+            rev_proc = subprocess.run(
+                ['git', '-C', f'/proc/self/fd/{repo_fd}', 'rev-parse', 'HEAD'],
+                check=True,
+                capture_output=True,
+                text=True,
+                pass_fds=(repo_fd,),
             )
             actual_commit = rev_proc.stdout.strip()
         except subprocess.CalledProcessError as exc:
@@ -368,40 +375,68 @@ def _verify_hands_checkout_and_commit(hands_commit_arg: str, repo_root: Path) ->
                 f'declared Hands commit {hands_commit_arg} does not match checkout HEAD {actual_commit}',
             )
 
-        # 5. Scorer helper import and content hash binding
-        scorer_rel_path = 'consultation_v2/ui_lane_production_scorer.py'
-        scorer_path = repo_root / scorer_rel_path
-        if not scorer_path.exists() or scorer_path.is_symlink():
-            raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', 'scorer helper missing or symlinked')
+        # 5. Read scorer helper directly through descriptor and verify blob hash against committed HEAD
+        try:
+            consult_fd = os.open(
+                'consultation_v2',
+                os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                dir_fd=repo_fd,
+            )
+        except OSError as exc:
+            raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', f'unable to open consultation_v2 directory: {exc}') from exc
+
+        try:
+            try:
+                scorer_fd = os.open(
+                    'ui_lane_production_scorer.py',
+                    os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+                    dir_fd=consult_fd,
+                )
+            except OSError as exc:
+                raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', f'unable to open scorer helper file: {exc}') from exc
+
+            try:
+                scorer_meta = os.fstat(scorer_fd)
+                if not stat.S_ISREG(scorer_meta.st_mode):
+                    raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', 'scorer helper is not a regular file')
+                scorer_bytes = os.read(scorer_fd, scorer_meta.st_size + 1)
+                if len(scorer_bytes) != scorer_meta.st_size:
+                    raise CaptureSupervisorPreflightError('FC-FORGED-EVIDENCE', 'scorer helper read length mismatch')
+            finally:
+                os.close(scorer_fd)
+        finally:
+            os.close(consult_fd)
 
         try:
             ls_proc = subprocess.run(
-                ['git', '-C', str(repo_root), 'ls-tree', actual_commit, scorer_rel_path],
+                ['git', '-C', f'/proc/self/fd/{repo_fd}', 'ls-tree', actual_commit, 'consultation_v2/ui_lane_production_scorer.py'],
                 check=True,
                 capture_output=True,
                 text=True,
+                pass_fds=(repo_fd,),
             )
             ls_parts = ls_proc.stdout.strip().split()
             if len(ls_parts) < 3 or ls_parts[1] != 'blob':
                 raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', 'scorer helper not tracked at committed HEAD')
             committed_blob = ls_parts[2]
-
-            hash_proc = subprocess.run(
-                ['git', '-C', str(repo_root), 'hash-object', str(scorer_path)],
-                check=True,
-                capture_output=True,
-                text=True,
-            )
-            actual_blob = hash_proc.stdout.strip()
-            if actual_blob != committed_blob:
-                raise CaptureSupervisorPreflightError(
-                    'FC-WRONG-COMMIT',
-                    'scorer helper on-disk content differs from committed HEAD blob',
-                )
         except subprocess.CalledProcessError as exc:
-            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to verify scorer Git blob: {exc}') from exc
+            raise CaptureSupervisorPreflightError('FC-WRONG-COMMIT', f'unable to check scorer git ls-tree: {exc}') from exc
 
-        return actual_commit
+        actual_blob = _git_blob_sha1(scorer_bytes)
+        if actual_blob != committed_blob:
+            raise CaptureSupervisorPreflightError(
+                'FC-WRONG-COMMIT',
+                f'scorer helper on-disk content {actual_blob} differs from committed HEAD blob {committed_blob}',
+            )
+
+        # 6. Compile scorer module strictly from verified bytes
+        import types
+        module = types.ModuleType('consultation_v2.ui_lane_production_scorer')
+        module.__file__ = str(repo_root / 'consultation_v2/ui_lane_production_scorer.py')
+        code = compile(scorer_bytes.decode('utf-8'), module.__file__, 'exec')
+        exec(code, module.__dict__)
+
+        return actual_commit, module
     finally:
         os.close(repo_fd)
 
@@ -409,9 +444,9 @@ def _verify_hands_checkout_and_commit(hands_commit_arg: str, repo_root: Path) ->
 def _preflight_fresh_session(
     args: argparse.Namespace,
     public_roots: list[Path],
-) -> tuple[Path, Path, str]:
+) -> tuple[Path, Path, str, Any]:
     # 0. Verify Hands checkout and exact commit binding before any storage or helper import
-    _verify_hands_checkout_and_commit(args.hands_commit, REPO_ROOT)
+    _, scorer_module = _verify_hands_checkout_and_commit(args.hands_commit, REPO_ROOT)
 
     # 1. Validate public roots
     for pub in public_roots:
@@ -431,11 +466,10 @@ def _preflight_fresh_session(
             'session-id must be a canonical lowercase UUID',
         )
 
-    # 4. Validate export-root
-    from consultation_v2.ui_lane_production_scorer import UiLaneScorerError, _private_root as scorer_private_root
+    # 4. Validate export-root via verified scorer helper
     try:
-        export_root = scorer_private_root(Path(args.export_root))
-    except UiLaneScorerError as exc:
+        export_root = scorer_module._private_root(Path(args.export_root))
+    except scorer_module.UiLaneScorerError as exc:
         raise CaptureSupervisorPreflightError(
             exc.refusal_code,
             exc.reason,
@@ -576,7 +610,7 @@ def _preflight_fresh_session(
     finally:
         os.close(session_dir_fd)
 
-    return receipt_root, export_root, str(export_receipt_posix)
+    return receipt_root, export_root, str(export_receipt_posix), scorer_module
 
 
 def _traverse_export_parent_directory(
@@ -748,10 +782,10 @@ def _rehash_closed_session(
     session_id: str,
     hands_commit: str,
     close_ack: dict[str, Any],
+    scorer_module: Any,
 ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    from consultation_v2.ui_lane_production_scorer import _verify_receipt_directory
     try:
-        events = _verify_receipt_directory(
+        events = scorer_module._verify_receipt_directory(
             receipt_root,
             session_id,
             expected_session_id=session_id,
@@ -949,7 +983,7 @@ def main() -> int:
 
     # Preflight fresh session
     try:
-        receipt_root, export_root, export_receipt_posix = _preflight_fresh_session(args, public_roots)
+        receipt_root, export_root, export_receipt_posix, scorer_module = _preflight_fresh_session(args, public_roots)
     except CaptureSupervisorPreflightError as exc:
         refusal = {
             'child_created': False,
@@ -1052,6 +1086,7 @@ def main() -> int:
                     args.session_id,
                     args.hands_commit,
                     ack_dict,
+                    scorer_module,
                 )
             except CaptureSupervisorQuarantineError as exc:
                 return _quarantine(exc.failure_code, worker, exc.last_hash)
