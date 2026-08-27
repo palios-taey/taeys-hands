@@ -10,15 +10,52 @@ import stat
 import time
 from typing import Callable
 
+from consultation_v2.types import Snapshot
+
 
 _PARTIAL_SUFFIXES = (".crdownload", ".download", ".part", ".tmp")
 _PREF_RE = re.compile(
     r'^user_pref\("(?P<key>(?:[^"\\]|\\.)+)",\s*(?P<value>.+)\);$'
 )
+CLAUDE_ARTIFACT_CONTROL_KEYS = (
+    "generated_artifact_controls_section",
+    "generated_artifact_view_button",
+    "generated_artifact_download_button",
+)
 
 
 class ClaudeArtifactDownloadError(RuntimeError):
     pass
+
+
+def classify_claude_extraction_snapshot(
+    snapshot: Snapshot,
+) -> tuple[str, str, dict[str, int]]:
+    if snapshot.platform != "claude":
+        raise ClaudeArtifactDownloadError(
+            "canonical Claude extraction snapshot has wrong platform"
+        )
+    counts = {
+        key: len((snapshot.mapped or {}).get(key) or ())
+        for key in CLAUDE_ARTIFACT_CONTROL_KEYS
+    }
+    observed = tuple(counts[key] for key in CLAUDE_ARTIFACT_CONTROL_KEYS)
+    if observed == (1, 1, 1):
+        mode = "downloaded_file"
+    elif observed == (0, 0, 0):
+        mode = "assistant_text"
+    else:
+        raise ClaudeArtifactDownloadError(
+            "canonical Claude extraction snapshot has partial or duplicate "
+            f"generated-artifact controls: {counts}"
+        )
+    serialized = json.dumps(
+        snapshot.serializable(),
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return mode, hashlib.sha256(serialized).hexdigest(), counts
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,8 @@ from __future__ import annotations
 import hashlib
 import importlib
 import json
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -184,6 +186,10 @@ def _planned_output(path: str, label: str) -> Path:
 
 def _planned_artifact_directory(output_path: Path) -> Path:
     artifact_directory = output_path.parent / 'output_attachments'
+    if artifact_directory.is_symlink():
+        raise DriveChatAdapterError(
+            f'output attachment path is a symlink: {artifact_directory}'
+        )
     if artifact_directory.exists():
         if not artifact_directory.is_dir():
             raise DriveChatAdapterError(
@@ -219,6 +225,212 @@ def _planned_artifacts(
         names.add(name)
         planned.append((path, content.encode('utf-8')))
     return planned
+
+
+def _read_exact_materialized_file(
+    path: Path,
+    *,
+    expected_bytes: int,
+    expected_sha256: str,
+) -> bytes:
+    flags = os.O_RDONLY
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise DriveChatAdapterError(
+            f'could not open materialized artifact file: {path}'
+        ) from exc
+    try:
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_nlink != 1
+            or stat.S_IMODE(before.st_mode) != 0o600
+            or before.st_size != expected_bytes
+        ):
+            raise DriveChatAdapterError(
+                f'materialized artifact failed exact file validation: {path}'
+            )
+        content = bytearray()
+        digest = hashlib.sha256()
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            content.extend(chunk)
+            digest.update(chunk)
+        after = os.fstat(descriptor)
+        stable_fields = ('st_dev', 'st_ino', 'st_mode', 'st_nlink', 'st_size', 'st_mtime_ns')
+        if any(getattr(before, field) != getattr(after, field) for field in stable_fields):
+            raise DriveChatAdapterError(
+                f'materialized artifact changed while being read: {path}'
+            )
+        if len(content) != expected_bytes or digest.hexdigest() != expected_sha256:
+            raise DriveChatAdapterError(
+                f'materialized artifact failed exact digest validation: {path}'
+            )
+        return bytes(content)
+    finally:
+        os.close(descriptor)
+
+
+def _write_private_exclusive(
+    path: Path,
+    payload: bytes,
+    *,
+    expected_sha256: str,
+) -> tuple[Path, str]:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, 'O_NOFOLLOW'):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise DriveChatAdapterError(
+            f'could not create exclusive materialized artifact output: {path}'
+        ) from exc
+    try:
+        os.fchmod(descriptor, 0o600)
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise DriveChatAdapterError(
+                    f'materialized artifact output write made no progress: {path}'
+                )
+            view = view[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    readback = _read_exact_materialized_file(
+        path,
+        expected_bytes=len(payload),
+        expected_sha256=expected_sha256,
+    )
+    if readback != payload:
+        raise DriveChatAdapterError(
+            f'materialized artifact output failed exact readback: {path}'
+        )
+    directory_flags = os.O_RDONLY
+    if hasattr(os, 'O_DIRECTORY'):
+        directory_flags |= os.O_DIRECTORY
+    try:
+        directory_descriptor = os.open(path.parent, directory_flags)
+        try:
+            os.fsync(directory_descriptor)
+        finally:
+            os.close(directory_descriptor)
+    except OSError as exc:
+        raise DriveChatAdapterError(
+            f'could not fsync materialized artifact directory: {path.parent}'
+        ) from exc
+    return path, expected_sha256
+
+
+def _planned_materialized_artifacts(
+    artifact_directory: Path,
+    result: ConsultationResult,
+    *,
+    reserved_names: set[str],
+    response_payload: bytes,
+) -> list[dict[str, Any]]:
+    if 'materialized_artifacts' not in result.storage:
+        return []
+    records = result.storage['materialized_artifacts']
+    if not isinstance(records, list):
+        raise DriveChatAdapterError('materialized_artifacts must be a list')
+    planned: list[dict[str, Any]] = []
+    names = set(reserved_names)
+    for index, record in enumerate(records):
+        if not isinstance(record, dict) or set(record) != {
+            'schema', 'name', 'path', 'bytes', 'sha256', 'metadata'
+        }:
+            raise DriveChatAdapterError(
+                f'materialized_artifacts[{index}] has an invalid envelope'
+            )
+        if record['schema'] != 'taey.materialized_file.v1':
+            raise DriveChatAdapterError(
+                f'materialized_artifacts[{index}] has an unsupported schema'
+            )
+        name = record['name']
+        if (
+            not isinstance(name, str)
+            or not name
+            or Path(name).name != name
+            or name in {'.', '..'}
+        ):
+            raise DriveChatAdapterError(
+                f'materialized_artifacts[{index}] has an invalid name'
+            )
+        if name in names:
+            raise DriveChatAdapterError(f'duplicate extracted artifact name: {name!r}')
+        source_value = record['path']
+        if not isinstance(source_value, str) or not source_value:
+            raise DriveChatAdapterError(
+                f'materialized_artifacts[{index}] has an invalid source path'
+            )
+        source = Path(source_value).expanduser()
+        if not source.is_absolute():
+            raise DriveChatAdapterError(
+                f'materialized_artifacts[{index}] source path must be absolute'
+            )
+        expected_bytes = record['bytes']
+        expected_sha256 = record['sha256']
+        if (
+            not isinstance(expected_bytes, int)
+            or isinstance(expected_bytes, bool)
+            or expected_bytes <= 0
+            or not isinstance(expected_sha256, str)
+            or len(expected_sha256) != 64
+            or any(character not in '0123456789abcdef' for character in expected_sha256)
+            or not isinstance(record['metadata'], dict)
+        ):
+            raise DriveChatAdapterError(
+                f'materialized_artifacts[{index}] has invalid byte/hash metadata'
+            )
+        payload = _read_exact_materialized_file(
+            source,
+            expected_bytes=expected_bytes,
+            expected_sha256=expected_sha256,
+        )
+        destination = artifact_directory / name
+        if destination.exists() or destination.is_symlink():
+            raise DriveChatAdapterError(
+                f'extracted artifact already exists; refusing overwrite: {destination}'
+            )
+        if payload == response_payload:
+            raise DriveChatAdapterError(
+                f'extracted artifact duplicates the assistant response: {name!r}'
+            )
+        names.add(name)
+        planned.append({
+            'source': source,
+            'destination': destination,
+            'bytes': expected_bytes,
+            'sha256': expected_sha256,
+            'payload': payload,
+            'record': record,
+        })
+    return planned
+
+
+def _copy_materialized_artifact(plan: dict[str, Any]) -> tuple[Path, str]:
+    return _write_private_exclusive(
+        plan['destination'],
+        plan['payload'],
+        expected_sha256=plan['sha256'],
+    )
+
+
+def _receipt_payload(result: ConsultationResult) -> bytes:
+    return json.dumps(
+        result.serializable(),
+        ensure_ascii=False,
+        indent=2,
+        sort_keys=True,
+    ).encode('utf-8')
 
 
 def consult(
@@ -272,18 +484,21 @@ def consult(
         requester=requester,
     )
     result = run_consultation(request)
-    receipt_payload = json.dumps(
-        result.serializable(),
-        ensure_ascii=False,
-        indent=2,
-        sort_keys=True,
-    ).encode('utf-8')
-    receipt_path, receipt_sha256 = _write_exclusive(
-        str(receipt_path),
-        receipt_payload,
-        'receipt_file',
-    )
     if not result.ok or not result.response_text:
+        if result.ok:
+            result.ok = False
+            result.add_step(
+                'materialize_outputs',
+                False,
+                'consultation returned no response deliverable',
+                stop_condition='output_materialization_failed',
+            )
+        receipt_payload = _receipt_payload(result)
+        receipt_path, receipt_sha256 = _write_exclusive(
+            str(receipt_path),
+            receipt_payload,
+            'receipt_file',
+        )
         failed_steps = [step for step in result.steps if not step.success]
         detail = (
             failed_steps[-1].message
@@ -296,32 +511,94 @@ def consult(
         )
 
     response_payload = result.response_text.encode('utf-8')
-    planned_artifacts = _planned_artifacts(artifact_directory, result)
-    for artifact_path, artifact_payload in planned_artifacts:
-        if artifact_payload == response_payload:
-            raise DriveChatAdapterError(
-                f'extracted artifact duplicates the assistant response: {artifact_path.name!r}'
-            )
-
-    response_path, response_sha256 = _write_exclusive(
-        str(output_path),
-        response_payload,
-        'output_file',
-    )
     artifact_records: list[dict[str, Any]] = []
-    if planned_artifacts:
-        artifact_directory.mkdir(mode=0o700, exist_ok=True)
+    try:
+        planned_artifacts = _planned_artifacts(artifact_directory, result)
+        reserved_names = {path.name for path, _ in planned_artifacts}
+        planned_materialized = _planned_materialized_artifacts(
+            artifact_directory,
+            result,
+            reserved_names=reserved_names,
+            response_payload=response_payload,
+        )
         for artifact_path, artifact_payload in planned_artifacts:
-            materialized_path, artifact_sha256 = _write_exclusive(
-                str(artifact_path),
-                artifact_payload,
-                'extracted artifact',
-            )
-            artifact_records.append({
-                'path': str(materialized_path),
-                'bytes': len(artifact_payload),
-                'sha256': artifact_sha256,
-            })
+            if artifact_payload == response_payload:
+                raise DriveChatAdapterError(
+                    'extracted artifact duplicates the assistant response: '
+                    f'{artifact_path.name!r}'
+                )
+        response_path, response_sha256 = _write_exclusive(
+            str(output_path),
+            response_payload,
+            'output_file',
+        )
+        final_materialized_records: list[dict[str, Any]] = []
+        if planned_artifacts or planned_materialized:
+            artifact_directory.mkdir(mode=0o700, exist_ok=True)
+            artifact_directory_details = artifact_directory.lstat()
+            if not stat.S_ISDIR(artifact_directory_details.st_mode):
+                raise DriveChatAdapterError(
+                    f'output attachment path is not a directory: {artifact_directory}'
+                )
+            for artifact_path, artifact_payload in planned_artifacts:
+                materialized_path, artifact_sha256 = _write_exclusive(
+                    str(artifact_path),
+                    artifact_payload,
+                    'extracted artifact',
+                )
+                artifact_records.append({
+                    'path': str(materialized_path),
+                    'bytes': len(artifact_payload),
+                    'sha256': artifact_sha256,
+                })
+            for plan in planned_materialized:
+                materialized_path, artifact_sha256 = _copy_materialized_artifact(plan)
+                artifact_record = {
+                    'path': str(materialized_path),
+                    'bytes': plan['bytes'],
+                    'sha256': artifact_sha256,
+                }
+                artifact_records.append(artifact_record)
+                final_record = dict(plan['record'])
+                final_record['path'] = str(materialized_path)
+                final_materialized_records.append(final_record)
+        if planned_materialized:
+            result.storage['materialized_artifacts'] = final_materialized_records
+        result.add_step(
+            'materialize_outputs',
+            True,
+            'consultation response and artifacts materialized exactly',
+            response={
+                'path': str(response_path),
+                'bytes': len(response_payload),
+                'sha256': response_sha256,
+            },
+            artifacts=artifact_records,
+        )
+    except (DriveChatAdapterError, OSError, ValueError) as exc:
+        result.ok = False
+        result.add_step(
+            'materialize_outputs',
+            False,
+            f'consultation output materialization failed: {exc}',
+            stop_condition='output_materialization_failed',
+        )
+        receipt_payload = _receipt_payload(result)
+        receipt_path, receipt_sha256 = _write_exclusive(
+            str(receipt_path),
+            receipt_payload,
+            'receipt_file',
+        )
+        raise DriveChatAdapterError(
+            f'{platform}: consultation output materialization failed: {exc}; '
+            f'receipt={receipt_path} sha256={receipt_sha256}'
+        ) from exc
+    receipt_payload = _receipt_payload(result)
+    receipt_path, receipt_sha256 = _write_exclusive(
+        str(receipt_path),
+        receipt_payload,
+        'receipt_file',
+    )
     return {
         'platform': platform,
         'completed': True,
