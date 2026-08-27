@@ -471,6 +471,8 @@ def consult(
         raise DriveChatAdapterError('prompt_file is empty')
 
     from consultation_v2.orchestrator import run_consultation
+    from consultation_v2.primitives import DeadSessionError
+    from consultation_v2.run_state_identity import durable_run_id
 
     request = ConsultationRequest(
         platform=platform,
@@ -482,8 +484,30 @@ def consult(
         attach_identity=False,
         purpose='frozen_manual_baseline_promotion',
         requester=requester,
+        attempt_key=str(receipt_path),
     )
-    result = run_consultation(request)
+    try:
+        result = run_consultation(request)
+    except DeadSessionError as exc:
+        result = ConsultationResult(platform=platform, request=request)
+        result.add_step(
+            'run_consultation',
+            False,
+            str(exc),
+            exception_type=type(exc).__name__,
+            durable_run_id=durable_run_id(request),
+            stop_condition='dead_session_refusal',
+        )
+        receipt_payload = _receipt_payload(result)
+        receipt_path, receipt_sha256 = _write_exclusive(
+            str(receipt_path),
+            receipt_payload,
+            'receipt_file',
+        )
+        raise DriveChatAdapterError(
+            f'{platform}: frozen consultation raised {type(exc).__name__}: {exc}; '
+            f'receipt={receipt_path} sha256={receipt_sha256}'
+        ) from exc
     if not result.ok or not result.response_text:
         if result.ok:
             result.ok = False

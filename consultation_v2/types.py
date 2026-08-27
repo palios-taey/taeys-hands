@@ -67,6 +67,7 @@ class ConsultationRequest:
     session_type: Optional[str] = None
     purpose: Optional[str] = None
     requester: Optional[str] = None
+    attempt_key: str = ''
     # Provenance of caller attachments, captured before consolidation (FLOW §3).
     # The browser receives only the merged package, but this records the
     # original caller files + their content hashes so provenance survives.
@@ -131,10 +132,14 @@ class ConsultationRequest:
         chat), and the prompt hash. It deliberately does NOT include the
         consolidated-package path (unstable per run) or volatile metadata
         (timeout, purpose, requester) — those vary run-to-run without changing
-        which irreversible turn this is."""
+        which irreversible turn this is.  A non-empty ``attempt_key`` is the
+        exclusive outer transaction identity and replaces attachment identity
+        so validation cannot change the id midway through that attempt."""
         session_target = self.session_url or 'new'
         seed = f'{self.platform}\x1f{session_target}\x1f{self.prompt_hash()}'
-        if not self.attach_identity:
+        if self.attempt_key:
+            seed = f'{seed}\x1fconsultation_attempt\x1f{self.attempt_key}'
+        elif not self.attach_identity:
             provenance = self.caller_attachment_provenance or []
             if provenance:
                 attachment_seed = '\x1e'.join(
