@@ -1190,8 +1190,17 @@ def main() -> int:
         resolved_public_roots_str = sorted({str(r) for r in public_roots})
         try:
             worker = _launch_worker(args, resolved_public_roots_str)
-        except Exception as exc:
-            return _quarantine(f'launch_worker_failed: {exc}', worker_exit_timeout=args.worker_exit_timeout_seconds)
+        except Exception:
+            refusal = {
+                'child_created': False,
+                'error': 'launch_worker_failed',
+                'reveal': 'claim kind and refusal code only; no private root or target path',
+                'status': 'refused_preflight',
+                'ui_action_count': 0,
+            }
+            sys.stdout.write(json.dumps(refusal, sort_keys=True, separators=(',', ':')) + '\n')
+            sys.stdout.flush()
+            return 2
 
         # Read and relay worker handshake
         try:
