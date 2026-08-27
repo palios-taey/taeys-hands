@@ -98,6 +98,10 @@ def main() -> int:
     start_research_click = content.index(
         '10. click element=start_research exactly once'
     )
+    research_confirmation = content.index(
+        'RESEARCH-PHASE POST-START CONFIRMATION: ENTRY REQUIRES '
+        'start_research_click_count=1 and a recorded start_research_post_revision.'
+    )
     _require(
         model_proof
         < tool_step
@@ -107,7 +111,8 @@ def main() -> int:
         < paste
         < send
         < start_research_wait
-        < start_research_click,
+        < start_research_click
+        < research_confirmation,
         'Gemini Deep Research send sequence or attachment barrier is out of order',
     )
     _require(
@@ -167,7 +172,8 @@ def main() -> int:
     )
     _require(
         content.count('click element=start_research exactly once') == 1
-        and content.count('start_research_click_count=1') == 2,
+        and content.count('start_research_click_count=1') == 4
+        and content.count('start_research_post_revision') == 4,
         'Gemini Start research action is missing or not receipted exactly once',
     )
     _require(
@@ -179,6 +185,26 @@ def main() -> int:
         content.index('A stop_button during this phase proves only plan generation')
         < content.index('Only now follow the post-send confirmation below'),
         'Gemini worker card can hand plan-generation Stop to the monitor',
+    )
+    _require(
+        content.count(
+            'Immediately after plan_send_post_revision, Step 9 is the exclusive next phase.'
+        ) == 1
+        and content.count(
+            'Until start_research_click_count=1 and start_research_post_revision are both '
+            'recorded, do not evaluate any post-send exception or completed-before-Stop state'
+        ) == 1,
+        'Gemini plan send can enter generic post-send classification before Start research',
+    )
+    _require(
+        content.count('RESEARCH-PHASE POST-START CONFIRMATION: ENTRY REQUIRES') == 1
+        and content.count('POST-SEND CONFIRMATION:') == 0,
+        'Gemini research completion classifier is not uniquely post-Start gated',
+    )
+    _require(
+        content.index('start_research_click_count=1 plus start_research_post_revision')
+        < research_confirmation,
+        'Gemini research completion classifier precedes Start research proof',
     )
     _require(
         'click element=tools_button' not in content

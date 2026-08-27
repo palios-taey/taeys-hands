@@ -1178,6 +1178,15 @@ def _send_content(
     if platform == "gemini":
         bundle_a_stem = bundle_a.stem
         bundle_b_stem = bundle_b.stem
+        generic_post_send_heading = "POST-SEND CONFIRMATION: "
+        if not post_send.startswith(generic_post_send_heading):
+            raise RuntimeError("Gemini research confirmation heading contract drifted")
+        research_post_send = (
+            "RESEARCH-PHASE POST-START CONFIRMATION: ENTRY REQUIRES "
+            "start_research_click_count=1 and a recorded start_research_post_revision. If either "
+            "proof is absent, this block is out of scope and must not be evaluated. "
+            + post_send.removeprefix(generic_post_send_heading)
+        )
         return (
             f"Execute one frozen Gemini send transaction on {display}. Use drive_chat only. "
             "Do not read any file, runbook, or YAML. For click or focus, pass only the exact "
@@ -1268,7 +1277,11 @@ def _send_content(
             "scope=base exactly once; require current_url on gemini.google.com matching /app/<id> or "
             "/u/<digit>/app/<id> and do not require a URL change. Record plan_send_post_revision and "
             "plan_send_count=1. A stop_button during this phase proves only plan generation; it does "
-            "not authorize monitor handoff.\n"
+            "not authorize monitor handoff. Immediately after plan_send_post_revision, Step 9 is "
+            "the exclusive next phase. Until start_research_click_count=1 and "
+            "start_research_post_revision are both recorded, do not evaluate any post-send "
+            "exception or completed-before-Stop state; Copy, input, and absence of Stop or Send "
+            "are only read-only wait-state evidence.\n"
             "9. Use read-only base observations to wait at most 180 seconds for start_research "
             "match_count 1 with name exactly Start research and state enabled. Every sample must retain "
             "the same answer-thread URL, mode_picker name exactly Open mode picker, currently Pro "
@@ -1293,7 +1306,7 @@ def _send_content(
             "include the same attachment, prompt, plan-send, and Start-research fields in that terminal "
             "success receipt with research_stop_seen=false in addition to its required completion fields. "
             "Then stop all UI calls.\n"
-            f"{post_send}"
+            f"{research_post_send}"
             "At the first missing, renamed, duplicated, ambiguous, or unsupported element; unsupported "
             "action or scope; refusal; failed postcondition; or unexpected state, return the "
             "first-mismatch stop report and stop. Do not retry, recover, press Escape, extract, poll, "
