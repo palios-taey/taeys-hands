@@ -174,6 +174,13 @@ def _open_spent_record_directory(root: Path, relative_dir_name: str) -> int:
             os.mkdir(relative_dir_name, mode=0o700, dir_fd=root_fd)
         except FileExistsError:
             pass
+        try:
+            os.fsync(root_fd)
+        except OSError as exc:
+            raise CaptureSupervisorPreflightError(
+                'FC-TRACE',
+                f'unable to fsync containing root directory {root}: {exc}',
+            ) from exc
         claim_dir_fd = os.open(
             relative_dir_name,
             os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC,
