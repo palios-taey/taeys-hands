@@ -114,6 +114,20 @@ def build_parser() -> argparse.ArgumentParser:
     )
     diagnose_perplexity_artifacts.add_argument("--thread-url", required=True)
 
+    diagnose_perplexity_report_card = phases.add_parser(
+        "diagnose-perplexity-report-card",
+        help="Click one mapped Perplexity report entry and map its resulting surface.",
+    )
+    diagnose_perplexity_report_card.set_defaults(platform="perplexity")
+    diagnose_perplexity_report_card.add_argument("--display", required=True)
+    diagnose_perplexity_report_card.add_argument("--seat-id", required=True)
+    diagnose_perplexity_report_card.add_argument("--artifact-root", required=True)
+    diagnose_perplexity_report_card.add_argument(
+        "--source-diagnostic-identity",
+        required=True,
+    )
+    diagnose_perplexity_report_card.add_argument("--thread-url", required=True)
+
     extract = phases.add_parser(
         "extract",
         help="Extract once from one explicitly authorized completion basis.",
@@ -713,14 +727,65 @@ def _perplexity_artifacts_diagnostic_content(
         "post_observation_revision and the observed counts for research_report_open, "
         "artifact_options, artifacts_one_button, copy_contents_button, and copy_button. Make no "
         "more drive_chat calls.\n"
-        "Return a PERPLEXITY ARTIFACTS PANE DIAGNOSTIC RECEIPT containing platform/display, "
-        "source_terminal_identity, thread_url, pre_observation_revision, "
+        "Return a PERPLEXITY ARTIFACTS PANE DIAGNOSTIC RECEIPT containing separate platform "
+        "and display fields, source_terminal_identity, thread_url, pre_observation_revision, "
         "pre_report_open_count, pre_artifact_options_count, pre_artifacts_one_count, "
         "pre_copy_count, pre_helpful_count, pre_not_helpful_count, clicked_element, "
         "click_result, post_observation_revision, post_report_open_count, "
         "post_artifact_options_count, post_artifacts_one_count, post_copy_contents_count, and "
         f"post_copy_count. Use exact values platform=perplexity and display={display}. End with "
         "observe_count: 2, click_count: 1, copied: false, "
+        "extracted: false, sent: false, and other_mutation_count: 0. The complete post-action "
+        "tree is retained by the private drive_chat exchange capture; do not paraphrase it as "
+        "an extraction result. Then halt.\n"
+        "At the first missing, renamed, duplicated, ambiguous, unsupported, or unexpected "
+        "element, state, action, scope, result, URL, or postcondition, return the first-mismatch "
+        "stop report and halt. Do not retry or recover."
+    )
+
+
+def _perplexity_report_card_diagnostic_content(
+    display: str,
+    source_diagnostic_identity: str,
+    thread_url: str,
+) -> str:
+    return (
+        f"Execute one frozen Perplexity report-entry diagnostic transaction on {display}. "
+        f"The source diagnostic identity is {source_diagnostic_identity}; never invoke or "
+        "retry that identity. This turn has a new identity. Use drive_chat only. Do not "
+        "navigate, attach, paste, send, Copy, read the clipboard, extract, retry, recover, "
+        "press a key, or click any control except artifact_report_entry exactly once.\n"
+        "1. observe scope=base exactly once. Require current_url exactly "
+        f"{thread_url}, a populated Perplexity tree, stop_button absent, exactly one "
+        "artifacts_pane_toggle named Artifacts with role push button and states showing, "
+        "focused, expanded, focusable, and enabled, exactly one artifact_report_entry with "
+        "role push button, states showing, focusable, and enabled, and a nonempty dynamic "
+        "name, and exactly one artifacts_pane_download named Download with role push button "
+        "and states focusable and enabled. Record pre_observation_revision, every exact "
+        "precondition count, and the exact pre_report_entry_name. Any missing, renamed, "
+        "duplicated, empty-name, different, or additional report-entry state ends the turn "
+        "without mutation.\n"
+        "2. click element=artifact_report_entry from that exact fresh observation once. "
+        "Require performed=true and performed_primitive=click. This is the only mutation "
+        "authorized.\n"
+        "3. The immediately next drive_chat call must be observe scope=base exactly once. "
+        "Make no intervening call. Require a populated Perplexity tree. Do not require or "
+        "infer a particular resulting URL, report surface, options menu, Copy control, or "
+        "pane state; this observation exists to discover the exact result. Record "
+        "post_observation_revision, post_current_url, and the observed counts for stop_button, "
+        "artifacts_pane_toggle, artifact_report_entry, artifacts_pane_download, "
+        "research_report_open, artifact_options, and copy_contents_button. Make no more "
+        "drive_chat calls.\n"
+        "Return a PERPLEXITY REPORT CARD DIAGNOSTIC RECEIPT containing platform, display, "
+        "source_diagnostic_identity, thread_url, pre_observation_revision, pre_stop_count, "
+        "pre_artifacts_pane_toggle_count, pre_artifact_report_entry_count, "
+        "pre_artifacts_pane_download_count, pre_report_entry_name, clicked_element, "
+        "click_performed, performed_primitive, post_observation_revision, post_current_url, "
+        "post_stop_count, post_artifacts_pane_toggle_count, "
+        "post_artifact_report_entry_count, post_artifacts_pane_download_count, "
+        "post_research_report_open_count, post_artifact_options_count, and "
+        f"post_copy_contents_count. Use exact values platform=perplexity and display={display}. "
+        "End with observe_count: 2, click_count: 1, copied: false, clipboard_read: false, "
         "extracted: false, sent: false, and other_mutation_count: 0. The complete post-action "
         "tree is retained by the private drive_chat exchange capture; do not paraphrase it as "
         "an extraction result. Then halt.\n"
@@ -1783,6 +1848,210 @@ def _receipt_field_matches(receipt: str, field: str, expected: str) -> bool:
     ) is not None
 
 
+def _validate_perplexity_diagnostic_receipt(
+    receipt: str,
+    label: str,
+    required_fields: tuple[str, ...],
+    exact_values: dict[str, str],
+    numeric_fields: tuple[str, ...],
+) -> None:
+    lowered_receipt = receipt.lower()
+    missing_fields = [field for field in required_fields if field not in lowered_receipt]
+    if missing_fields:
+        raise RuntimeError(f"{label} response is missing receipt fields: {missing_fields}")
+    invalid_values = [
+        field
+        for field, expected in exact_values.items()
+        if not _receipt_field_matches(receipt, field, expected)
+    ]
+    if invalid_values:
+        raise RuntimeError(f"{label} response has invalid values: {invalid_values}")
+    invalid_revisions = [
+        field
+        for field in ("pre_observation_revision", "post_observation_revision")
+        if re.search(
+            rf"(?im)\b{field}\b"
+            r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*[0-9a-f]{64}\b",
+            receipt,
+        )
+        is None
+    ]
+    if invalid_revisions:
+        raise RuntimeError(f"{label} response has invalid revisions: {invalid_revisions}")
+    invalid_counts = [
+        field
+        for field in numeric_fields
+        if re.search(
+            rf"(?im)\b{field}\b"
+            r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*\d+\b",
+            receipt,
+        )
+        is None
+    ]
+    if invalid_counts:
+        raise RuntimeError(f"{label} response has invalid counts: {invalid_counts}")
+
+
+def _validate_perplexity_artifacts_diagnostic_receipt(
+    receipt: str,
+    display: str,
+    source_terminal_identity: str,
+    thread_url: str,
+) -> None:
+    required_fields = (
+        "perplexity artifacts pane diagnostic receipt",
+        "platform",
+        "display",
+        "source_terminal_identity",
+        "thread_url",
+        "pre_observation_revision",
+        "pre_report_open_count",
+        "pre_artifact_options_count",
+        "pre_artifacts_one_count",
+        "pre_copy_count",
+        "pre_helpful_count",
+        "pre_not_helpful_count",
+        "clicked_element",
+        "click_result",
+        "post_observation_revision",
+        "post_report_open_count",
+        "post_artifact_options_count",
+        "post_artifacts_one_count",
+        "post_copy_contents_count",
+        "post_copy_count",
+        "observe_count",
+        "click_count",
+        "copied",
+        "extracted",
+        "sent",
+        "other_mutation_count",
+    )
+    exact_values = {
+        "platform": "perplexity",
+        "display": display,
+        "source_terminal_identity": source_terminal_identity,
+        "thread_url": thread_url,
+        "pre_report_open_count": "0",
+        "pre_artifact_options_count": "0",
+        "pre_artifacts_one_count": "1",
+        "pre_copy_count": "1",
+        "pre_helpful_count": "1",
+        "pre_not_helpful_count": "1",
+        "clicked_element": "artifacts_one_button",
+        "observe_count": "2",
+        "click_count": "1",
+        "copied": "false",
+        "extracted": "false",
+        "sent": "false",
+        "other_mutation_count": "0",
+    }
+    _validate_perplexity_diagnostic_receipt(
+        receipt,
+        "Perplexity Artifacts diagnostic",
+        required_fields,
+        exact_values,
+        (
+            "post_report_open_count",
+            "post_artifact_options_count",
+            "post_artifacts_one_count",
+            "post_copy_contents_count",
+            "post_copy_count",
+        ),
+    )
+
+
+def _validate_perplexity_report_card_diagnostic_receipt(
+    receipt: str,
+    display: str,
+    source_diagnostic_identity: str,
+    thread_url: str,
+) -> None:
+    required_fields = (
+        "perplexity report card diagnostic receipt",
+        "platform",
+        "display",
+        "source_diagnostic_identity",
+        "thread_url",
+        "pre_observation_revision",
+        "pre_stop_count",
+        "pre_artifacts_pane_toggle_count",
+        "pre_artifact_report_entry_count",
+        "pre_artifacts_pane_download_count",
+        "pre_report_entry_name",
+        "clicked_element",
+        "click_performed",
+        "performed_primitive",
+        "post_observation_revision",
+        "post_current_url",
+        "post_stop_count",
+        "post_artifacts_pane_toggle_count",
+        "post_artifact_report_entry_count",
+        "post_artifacts_pane_download_count",
+        "post_research_report_open_count",
+        "post_artifact_options_count",
+        "post_copy_contents_count",
+        "observe_count",
+        "click_count",
+        "copied",
+        "clipboard_read",
+        "extracted",
+        "sent",
+        "other_mutation_count",
+    )
+    exact_values = {
+        "platform": "perplexity",
+        "display": display,
+        "source_diagnostic_identity": source_diagnostic_identity,
+        "thread_url": thread_url,
+        "pre_stop_count": "0",
+        "pre_artifacts_pane_toggle_count": "1",
+        "pre_artifact_report_entry_count": "1",
+        "pre_artifacts_pane_download_count": "1",
+        "clicked_element": "artifact_report_entry",
+        "click_performed": "true",
+        "performed_primitive": "click",
+        "observe_count": "2",
+        "click_count": "1",
+        "copied": "false",
+        "clipboard_read": "false",
+        "extracted": "false",
+        "sent": "false",
+        "other_mutation_count": "0",
+    }
+    _validate_perplexity_diagnostic_receipt(
+        receipt,
+        "Perplexity report-card diagnostic",
+        required_fields,
+        exact_values,
+        (
+            "post_stop_count",
+            "post_artifacts_pane_toggle_count",
+            "post_artifact_report_entry_count",
+            "post_artifacts_pane_download_count",
+            "post_research_report_open_count",
+            "post_artifact_options_count",
+            "post_copy_contents_count",
+        ),
+    )
+    if re.search(
+        r"(?im)\bpre_report_entry_name\b"
+        r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*"
+        r"(?=[^\r\n]*[A-Za-z0-9])[^\r\n]+",
+        receipt,
+    ) is None:
+        raise RuntimeError(
+            "Perplexity report-card diagnostic response has an empty report-entry name"
+        )
+    if re.search(
+        r"(?im)\bpost_current_url\b"
+        r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*https://www\.perplexity\.ai/\S+",
+        receipt,
+    ) is None:
+        raise RuntimeError(
+            "Perplexity report-card diagnostic response has an invalid post URL"
+        )
+
+
 def _completed_before_stop_provenance(
     receipt: str,
     platform: str,
@@ -1890,6 +2159,7 @@ def main() -> int:
     source_response = None
     source_response_sha256 = None
     source_terminal_identity = None
+    source_diagnostic_identity = None
     exception_key = None
     completed_before_stop_response_file = None
     claude_download_before = None
@@ -1971,6 +2241,41 @@ def main() -> int:
             f"{perplexity_diagnostic_thread_url}\0{content}".encode("utf-8")
         ).hexdigest()
         event_id = f"diagnose-perplexity-artifacts-{digest[:24]}"
+        response_file = None
+        request_text = _request_text(content, 4096)
+    elif args.phase == "diagnose-perplexity-report-card":
+        if args.platform != "perplexity":
+            raise RuntimeError(
+                "diagnose-perplexity-report-card requires platform perplexity"
+            )
+        if args.display != ":6":
+            raise RuntimeError("diagnose-perplexity-report-card requires display :6")
+        source_diagnostic_identity = _identity(
+            args.source_diagnostic_identity,
+            "source diagnostic identity",
+        )
+        if seat_id == source_diagnostic_identity:
+            raise RuntimeError(
+                "Perplexity report-card diagnostic requires a new seat identity"
+            )
+        perplexity_diagnostic_thread_url = args.thread_url.strip()
+        if re.fullmatch(
+            r"https://www\.perplexity\.ai/search/[A-Za-z0-9_-]+",
+            perplexity_diagnostic_thread_url,
+        ) is None:
+            raise RuntimeError(
+                "diagnose-perplexity-report-card requires one exact Perplexity thread URL"
+            )
+        content = _perplexity_report_card_diagnostic_content(
+            args.display,
+            source_diagnostic_identity,
+            perplexity_diagnostic_thread_url,
+        )
+        digest = hashlib.sha256(
+            f"{seat_id}\0perplexity\0{args.display}\0{source_diagnostic_identity}\0"
+            f"{perplexity_diagnostic_thread_url}\0{content}".encode("utf-8")
+        ).hexdigest()
+        event_id = f"diagnose-perplexity-report-card-{digest[:24]}"
         response_file = None
         request_text = _request_text(content, 4096)
     elif args.phase == "recover-claude-pre-send":
@@ -2274,6 +2579,7 @@ def main() -> int:
                 "diagnose-chatgpt-power-right",
                 "reset-chatgpt-model-menu-compact",
                 "diagnose-perplexity-artifacts",
+                "diagnose-perplexity-report-card",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
         if args.phase == "extract" and args.platform == "claude":
@@ -2619,105 +2925,21 @@ def main() -> int:
         if args.phase == "diagnose-perplexity-artifacts":
             assert source_terminal_identity is not None
             assert perplexity_diagnostic_thread_url is not None
-            required_receipt_fields = (
-                "perplexity artifacts pane diagnostic receipt",
-                "platform/display",
-                "source_terminal_identity",
-                "thread_url",
-                "pre_observation_revision",
-                "pre_report_open_count",
-                "pre_artifact_options_count",
-                "pre_artifacts_one_count",
-                "pre_copy_count",
-                "pre_helpful_count",
-                "pre_not_helpful_count",
-                "clicked_element",
-                "click_result",
-                "post_observation_revision",
-                "post_report_open_count",
-                "post_artifact_options_count",
-                "post_artifacts_one_count",
-                "post_copy_contents_count",
-                "post_copy_count",
-                "observe_count",
-                "click_count",
-                "copied",
-                "extracted",
-                "sent",
-                "other_mutation_count",
+            _validate_perplexity_artifacts_diagnostic_receipt(
+                receipt,
+                args.display,
+                source_terminal_identity,
+                perplexity_diagnostic_thread_url,
             )
-            lowered_receipt = receipt.lower()
-            missing_receipt_fields = [
-                field for field in required_receipt_fields if field not in lowered_receipt
-            ]
-            if missing_receipt_fields:
-                raise RuntimeError(
-                    "Perplexity Artifacts diagnostic response is missing receipt fields: "
-                    f"{missing_receipt_fields}"
-                )
-            exact_receipt_values = {
-                "platform": "perplexity",
-                "display": args.display,
-                "source_terminal_identity": source_terminal_identity,
-                "thread_url": perplexity_diagnostic_thread_url,
-                "pre_report_open_count": "0",
-                "pre_artifact_options_count": "0",
-                "pre_artifacts_one_count": "1",
-                "pre_copy_count": "1",
-                "pre_helpful_count": "1",
-                "pre_not_helpful_count": "1",
-                "clicked_element": "artifacts_one_button",
-                "observe_count": "2",
-                "click_count": "1",
-                "copied": "false",
-                "extracted": "false",
-                "sent": "false",
-                "other_mutation_count": "0",
-            }
-            invalid_receipt_values = [
-                field
-                for field, expected in exact_receipt_values.items()
-                if not _receipt_field_matches(receipt, field, expected)
-            ]
-            if invalid_receipt_values:
-                raise RuntimeError(
-                    "Perplexity Artifacts diagnostic response has invalid values: "
-                    f"{invalid_receipt_values}"
-                )
-            invalid_revisions = [
-                field
-                for field in (
-                    "pre_observation_revision",
-                    "post_observation_revision",
-                )
-                if re.search(
-                    rf"(?im)\b{field}\b"
-                    r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*[0-9a-f]{64}\b",
-                    receipt,
-                )
-                is None
-            ]
-            if invalid_revisions:
-                raise RuntimeError(
-                    "Perplexity Artifacts diagnostic response has invalid revisions: "
-                    f"{invalid_revisions}"
-                )
-            for field in (
-                "post_report_open_count",
-                "post_artifact_options_count",
-                "post_artifacts_one_count",
-                "post_copy_contents_count",
-                "post_copy_count",
-            ):
-                if re.search(
-                    rf"(?im)\b{field}\b"
-                    r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*\d+\b",
-                    receipt,
-                ) is None:
-                    raise RuntimeError(
-                        "Perplexity Artifacts diagnostic response has invalid "
-                        f"{field}"
-                    )
+        if args.phase == "diagnose-perplexity-report-card":
+            assert source_diagnostic_identity is not None
+            assert perplexity_diagnostic_thread_url is not None
+            _validate_perplexity_report_card_diagnostic_receipt(
+                receipt,
+                args.display,
+                source_diagnostic_identity,
+                perplexity_diagnostic_thread_url,
+            )
         if (
             args.phase in {"send", "recover"}
             and not completed_before_stop
@@ -2741,6 +2963,7 @@ def main() -> int:
             "diagnose-chatgpt-power-right",
             "reset-chatgpt-model-menu-compact",
             "diagnose-perplexity-artifacts",
+            "diagnose-perplexity-report-card",
         } or mutation_stop_report or completed_before_stop:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
@@ -2803,6 +3026,8 @@ def main() -> int:
             "source_terminal_identity": source_terminal_identity,
             "exception_key": exception_key,
         })
+    if source_diagnostic_identity is not None:
+        result["source_diagnostic_identity"] = source_diagnostic_identity
     if completed_before_stop:
         completed_state = _completed_before_stop_state(args.platform)
         assert completed_state is not None
@@ -2825,6 +3050,7 @@ def main() -> int:
         "diagnose-chatgpt-power-right",
         "reset-chatgpt-model-menu-compact",
         "diagnose-perplexity-artifacts",
+        "diagnose-perplexity-report-card",
     }:
         result["lease_release"] = lease_release
     if perplexity_diagnostic_thread_url is not None:

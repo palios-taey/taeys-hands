@@ -17,7 +17,10 @@ from scripts.run_manual_chat_worker import (
     _completed_before_stop_state,
     _extract_content,
     _perplexity_artifacts_diagnostic_content,
+    _perplexity_report_card_diagnostic_content,
     _post_send_confirmation_content,
+    _validate_perplexity_artifacts_diagnostic_receipt,
+    _validate_perplexity_report_card_diagnostic_receipt,
     build_parser,
 )
 
@@ -44,6 +47,36 @@ def main() -> int:
         'Perplexity standalone report Copy contents mapping drifted',
     )
     element_map = ((cfg.get('tree') or {}).get('element_map') or {})
+    _require(
+        element_map.get('artifacts_pane_toggle') == {
+            'name': 'Artifacts',
+            'role': 'push button',
+            'states_include': [
+                'showing',
+                'focused',
+                'expanded',
+                'focusable',
+                'enabled',
+            ],
+        }
+        and element_map.get('artifacts_pane_download') == {
+            'name': 'Download',
+            'role': 'push button',
+            'states_include': ['focusable', 'enabled'],
+        }
+        and element_map.get('artifact_report_entry') == {
+            'role': 'push button',
+            'states_include': ['showing', 'focusable', 'enabled'],
+            'match_strategy': 'name_agnostic_structural',
+            'structural': {
+                'after': 'artifacts_pane_toggle',
+                'before': 'artifacts_pane_download',
+            },
+            'reason': 'The Artifacts pane report entry has a request-derived dynamic title and is the only enabled push button bounded by the exact expanded Artifacts toggle and exact Download control.',
+        },
+        'Perplexity Artifacts-pane report-entry mapping drifted',
+    )
+    report_entry_name = 'Current Provider and Agent-Platform Capability Intelligence Report'
     _require(
         element_map.get('expand_artifact') == {
             'name': 'Expand artifact',
@@ -223,7 +256,9 @@ display: :6
         and diagnostic.count('click element=artifacts_one_button') == 1
         and 'exactly zero research_report_open' in diagnostic
         and 'exactly zero artifact_options' in diagnostic
-        and 'exactly one artifacts_one_button named Artifacts 1' in diagnostic,
+        and 'exactly one artifacts_one_button named Artifacts 1' in diagnostic
+        and 'separate platform and display fields' in diagnostic
+        and 'platform/display' not in diagnostic,
         'Perplexity Artifacts diagnostic lost its exact 0/0/1 transition',
     )
     _require(
@@ -234,6 +269,148 @@ display: :6
         and 'other_mutation_count: 0' in diagnostic,
         'Perplexity Artifacts diagnostic widened mutation authority',
     )
+    artifacts_receipt = '''# PERPLEXITY ARTIFACTS PANE DIAGNOSTIC RECEIPT
+platform: perplexity
+display: :6
+source_terminal_identity: spent-perplexity-identity
+thread_url: https://www.perplexity.ai/search/exact-thread-id
+pre_observation_revision: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+pre_report_open_count: 0
+pre_artifact_options_count: 0
+pre_artifacts_one_count: 1
+pre_copy_count: 1
+pre_helpful_count: 1
+pre_not_helpful_count: 1
+clicked_element: artifacts_one_button
+click_result: performed=true, performed_primitive=click
+post_observation_revision: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+post_report_open_count: 0
+post_artifact_options_count: 0
+post_artifacts_one_count: 0
+post_copy_contents_count: 0
+post_copy_count: 1
+observe_count: 2
+click_count: 1
+copied: false
+extracted: false
+sent: false
+other_mutation_count: 0
+'''
+    _validate_perplexity_artifacts_diagnostic_receipt(
+        artifacts_receipt,
+        ':6',
+        'spent-perplexity-identity',
+        'https://www.perplexity.ai/search/exact-thread-id',
+    )
+    try:
+        _validate_perplexity_artifacts_diagnostic_receipt(
+            artifacts_receipt.replace(
+                'platform: perplexity\ndisplay: :6',
+                'platform/display: perplexity / :6',
+            ),
+            ':6',
+            'spent-perplexity-identity',
+            'https://www.perplexity.ai/search/exact-thread-id',
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError(
+            'Perplexity Artifacts parser accepted a combined platform/display field'
+        )
+
+    report_card_args = parser.parse_args([
+        'diagnose-perplexity-report-card',
+        '--display',
+        ':6',
+        '--seat-id',
+        'perplexity-report-card-diagnostic-r2',
+        '--artifact-root',
+        '/private/perplexity-report-card-diagnostic-r2',
+        '--source-diagnostic-identity',
+        'perplexity-artifacts-diagnostic-r1',
+        '--thread-url',
+        'https://www.perplexity.ai/search/exact-thread-id',
+    ])
+    _require(
+        report_card_args.platform == 'perplexity'
+        and report_card_args.phase == 'diagnose-perplexity-report-card'
+        and report_card_args.source_diagnostic_identity
+        == 'perplexity-artifacts-diagnostic-r1',
+        'Perplexity report-card diagnostic parser binding drifted',
+    )
+    report_card_diagnostic = _perplexity_report_card_diagnostic_content(
+        ':6',
+        'perplexity-artifacts-diagnostic-r1',
+        'https://www.perplexity.ai/search/exact-thread-id',
+    )
+    _require(
+        report_card_diagnostic.count('observe scope=base exactly once') == 2
+        and report_card_diagnostic.count('click element=artifact_report_entry') == 1
+        and 'exactly one artifacts_pane_toggle named Artifacts' in report_card_diagnostic
+        and 'exactly one artifact_report_entry' in report_card_diagnostic
+        and 'exactly one artifacts_pane_download named Download' in report_card_diagnostic,
+        'Perplexity report-card diagnostic lost its exact one-click transition',
+    )
+    _require(
+        'Do not navigate, attach, paste, send, Copy, read the clipboard, extract, retry, recover'
+        in report_card_diagnostic
+        and 'press a key' in report_card_diagnostic
+        and 'clipboard_read: false' in report_card_diagnostic
+        and 'other_mutation_count: 0' in report_card_diagnostic
+        and 'complete post-action tree is retained' in report_card_diagnostic,
+        'Perplexity report-card diagnostic widened mutation authority',
+    )
+    report_card_receipt = f'''# PERPLEXITY REPORT CARD DIAGNOSTIC RECEIPT
+platform: perplexity
+display: :6
+source_diagnostic_identity: perplexity-artifacts-diagnostic-r1
+thread_url: https://www.perplexity.ai/search/exact-thread-id
+pre_observation_revision: {'c' * 64}
+pre_stop_count: 0
+pre_artifacts_pane_toggle_count: 1
+pre_artifact_report_entry_count: 1
+pre_artifacts_pane_download_count: 1
+pre_report_entry_name: {report_entry_name}
+clicked_element: artifact_report_entry
+click_performed: true
+performed_primitive: click
+post_observation_revision: {'d' * 64}
+post_current_url: https://www.perplexity.ai/search/exact-thread-id
+post_stop_count: 0
+post_artifacts_pane_toggle_count: 0
+post_artifact_report_entry_count: 0
+post_artifacts_pane_download_count: 0
+post_research_report_open_count: 1
+post_artifact_options_count: 1
+post_copy_contents_count: 0
+observe_count: 2
+click_count: 1
+copied: false
+clipboard_read: false
+extracted: false
+sent: false
+other_mutation_count: 0
+'''
+    _validate_perplexity_report_card_diagnostic_receipt(
+        report_card_receipt,
+        ':6',
+        'perplexity-artifacts-diagnostic-r1',
+        'https://www.perplexity.ai/search/exact-thread-id',
+    )
+    try:
+        _validate_perplexity_report_card_diagnostic_receipt(
+            report_card_receipt.replace('click_count: 1', 'click_count: 2'),
+            ':6',
+            'perplexity-artifacts-diagnostic-r1',
+            'https://www.perplexity.ai/search/exact-thread-id',
+        )
+    except RuntimeError:
+        pass
+    else:
+        raise AssertionError(
+            'Perplexity report-card parser accepted more than one click'
+        )
     print('perplexity manual extraction contract: PASS')
     return 0
 
