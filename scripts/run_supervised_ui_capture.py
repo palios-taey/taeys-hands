@@ -518,8 +518,12 @@ def _traverse_export_parent_directory(
                     os.close(next_fd)
                 raise err_cls(err_code, f'unable to open export parent {part} without symlink: {exc}') from exc
 
-            os.close(curr_fd)
+            old_fd = curr_fd
             curr_fd = next_fd
+            try:
+                os.close(old_fd)
+            except Exception as exc:
+                raise err_cls(err_code, f'unable to close export parent directory descriptor: {exc}') from exc
 
         result_fd = curr_fd
         curr_fd = -1
