@@ -12,6 +12,8 @@ sys.path.insert(0, str(REPO_ROOT))
 
 from consultation_v2.platforms.gemini.manual import (
     deep_research_send_phase_card,
+    element_operation,
+    key_requires_state,
 )
 from consultation_v2.types import ElementRef, Snapshot
 
@@ -67,6 +69,9 @@ def _card(snapshot: Snapshot, phase: str) -> dict[str, object] | None:
 
 
 def main() -> int:
+    assert element_operation('send_button', ['focused'], {}) is None
+    assert key_requires_state('space') is False
+
     waiting = _card(_snapshot(), 'awaiting_initial_send')
     assert waiting is None
 

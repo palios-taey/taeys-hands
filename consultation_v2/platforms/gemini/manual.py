@@ -267,4 +267,22 @@ def deep_research_send_phase_card(
     )
 
 
-__all__ = ['deep_research_send_phase_card']
+def element_operation(
+    element_key: str,
+    states: list[str],
+    context: dict[str, Any] | None = None,
+) -> None:
+    del element_key, states, context
+    return None
+
+
+def key_requires_state(key: str) -> bool:
+    del key
+    return False
+
+
+__all__ = [
+    'deep_research_send_phase_card',
+    'element_operation',
+    'key_requires_state',
+]
