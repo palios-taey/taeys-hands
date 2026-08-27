@@ -348,6 +348,32 @@ tree:
       - showing
       - focusable
       - enabled
+    artifacts_pane_toggle:
+      name: Artifacts
+      role: push button
+      states_include:
+      - showing
+      - focused
+      - expanded
+      - focusable
+      - enabled
+    artifacts_pane_download:
+      name: Download
+      role: push button
+      states_include:
+      - focusable
+      - enabled
+    artifact_report_entry:
+      role: push button
+      states_include:
+      - showing
+      - focusable
+      - enabled
+      match_strategy: name_agnostic_structural
+      structural:
+        after: artifacts_pane_toggle
+        before: artifacts_pane_download
+      reason: The Artifacts pane report entry has a request-derived dynamic title and is the only enabled push button bounded by the exact expanded Artifacts toggle and exact Download control.
     artifact_open_new_tab:
       name: Open in new tab
       role: menu item
