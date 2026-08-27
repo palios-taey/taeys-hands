@@ -8,8 +8,8 @@ import sys
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
-from consultation_v2.yaml_contract import load_platform_yaml
-from scripts.run_manual_chat_worker import _send_content
+from consultation_v2.yaml_contract import get_extraction, load_platform_yaml  # noqa: E402
+from scripts.run_manual_chat_worker import _send_content  # noqa: E402
 
 
 def _require(condition: bool, message: str) -> None:
@@ -71,6 +71,35 @@ def main() -> int:
         element_map.get('tool_deselect_deep_research')
         == {'name': 'Deselect Deep research', 'role': 'push button'},
         'Gemini Deep Research active proof exact identity drifted',
+    )
+    _require(
+        element_map.get('share_export')
+        == {
+            'name': 'Share & Export',
+            'role': 'push button',
+            'scope': 'app_root_snapshot',
+        }
+        and element_map.get('copy_content_item')
+        == {
+            'name': 'Copy',
+            'role': 'menu item',
+            'scope': 'app_root_snapshot',
+        },
+        'Gemini Deep Research report controls must use the live app-root scope',
+    )
+    report_workflow = get_extraction('gemini', 'research_report')
+    _require(report_workflow is not None, 'Gemini research report extraction is missing')
+    report_steps = tuple(
+        (step.action, step.element, step.select, step.validation)
+        for step in report_workflow.steps
+    )
+    _require(
+        report_steps == (
+            ('click', 'share_export', 'last', None),
+            ('copy_element', 'copy_content_item', 'last', None),
+            ('read_clipboard', None, 'last', 'response_complete'),
+        ),
+        'Gemini research report extraction sequence drifted',
     )
 
     content = _send_content(
