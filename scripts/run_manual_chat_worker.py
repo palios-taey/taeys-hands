@@ -157,6 +157,20 @@ def build_parser() -> argparse.ArgumentParser:
     extract_perplexity_report_preview.add_argument("--thread-url", required=True)
     extract_perplexity_report_preview.add_argument("--response-file", required=True)
 
+    extract_perplexity_report_open_menu = phases.add_parser(
+        "extract-perplexity-report-open-menu",
+        help="Continue once from one terminal Perplexity report-preview options menu.",
+    )
+    extract_perplexity_report_open_menu.set_defaults(platform="perplexity")
+    extract_perplexity_report_open_menu.add_argument("--display", required=True)
+    extract_perplexity_report_open_menu.add_argument("--seat-id", required=True)
+    extract_perplexity_report_open_menu.add_argument("--artifact-root", required=True)
+    extract_perplexity_report_open_menu.add_argument(
+        "--source-terminal-response-json", required=True
+    )
+    extract_perplexity_report_open_menu.add_argument("--thread-url", required=True)
+    extract_perplexity_report_open_menu.add_argument("--response-file", required=True)
+
     extract = phases.add_parser(
         "extract",
         help="Extract once from one explicitly authorized completion basis.",
@@ -933,6 +947,53 @@ def _perplexity_report_preview_extraction_content(
         "clipboard_read_count: 1, other_mutation_count: 0, extracted: true, sent: false, "
         "regenerated: false, retried: false. Then halt. At first mismatch, return the first-mismatch "
         "stop report and halt without another action."
+    )
+
+
+def _perplexity_report_open_menu_extraction_content(
+    display: str,
+    source_response_sha256: str,
+    source_observation_revision: str,
+    preview_url: str,
+    response_file: Path,
+) -> str:
+    return (
+        f"Execute one frozen Perplexity already-open report-menu extraction on {display}. This "
+        "new turn is authorized only by the terminal first-mismatch response whose exact SHA-256 "
+        f"is {source_response_sha256} and whose exact source observation revision is "
+        f"{source_observation_revision}; never invoke or retry that source identity. Use "
+        "drive_chat only and pass element keys only, never opaque refs. Do not operate "
+        "artifact_options. Do not navigate, attach, paste, send, research, regenerate, retry, "
+        "recover, poll, press a key, expand, close, download, or scroll.\n"
+        f"1. observe scope=base exactly once. Require snapshot revision exactly "
+        f"{source_observation_revision}, current_url exactly {preview_url}, a populated Perplexity "
+        "tree, stop_button absent, exactly one artifact_options named Artifact options with role "
+        "push button and states showing, expanded, focusable, enabled, and exactly one "
+        "artifact_open_new_tab named Open in new tab with role menu item and states showing and "
+        "enabled. Do not operate the already-expanded artifact_options control.\n"
+        "2. click element=artifact_open_new_tab exactly once. Require performed=true and "
+        "performed_primitive=click. Immediately observe scope=base exactly once. Require "
+        "current_url to match https://www.perplexity.ai/computer/a/<non-empty-id>, stop_button "
+        "absent, and exactly one copy_contents_button named Copy contents with role push button "
+        "and states showing and enabled.\n"
+        "3. click element=copy_contents_button exactly once. Require performed=true and "
+        "performed_primitive=click. Immediately observe scope=base exactly once. Require the same "
+        "standalone report URL, stop_button absent, and exactly one copy_contents_button named "
+        "Copy contents with role push button and states showing and enabled.\n"
+        f"4. read_clipboard output_file={response_file} exactly once. Require the new file to be "
+        "nonempty and compute exact byte_count and response_sha256. Make no more drive_chat calls.\n"
+        "Return a PERPLEXITY REPORT OPEN MENU EXTRACTION RECEIPT with separate fields: platform, "
+        "display, source_response_json_sha256, source_observation_revision, preview_url, "
+        "pre_observation_revision, pre_stop_count, pre_artifact_options_count, "
+        "pre_artifact_options_expanded, pre_open_new_tab_count, open_new_tab_performed, "
+        "open_new_tab_primitive, standalone_observation_revision, standalone_url, "
+        "standalone_stop_count, standalone_copy_contents_count, copy_performed, copy_primitive, "
+        "post_copy_observation_revision, post_copy_url, post_copy_stop_count, "
+        "post_copy_contents_count, output_file, byte_count, and response_sha256. End with "
+        "observe_count: 3, operate_count: 0, click_count: 2, clipboard_read_count: 1, "
+        "other_mutation_count: 0, extracted: true, sent: false, regenerated: false, retried: "
+        "false. Then halt. At first mismatch, return the first-mismatch stop report and halt "
+        "without another action."
     )
 
 
@@ -2401,6 +2462,127 @@ def _perplexity_report_preview_source_provenance(
     )
 
 
+def _perplexity_report_open_menu_source_provenance(
+    receipt: str, display: str, preview_url: str
+) -> str | None:
+    required = {
+        "platform": "perplexity",
+        "display": display,
+        "current_url": preview_url,
+        "pre_stop_count": "0",
+        "pre_artifact_options_count": "1",
+        "pre_close_artifact_count": "1",
+        "pre_expand_artifact_count": "1",
+        "pre_report_scroll_pane_count": "1",
+        "options_performed": "false",
+        "open_new_tab_performed": "false",
+        "observe_count": "1",
+        "operate_count": "0",
+        "click_count": "0",
+        "clipboard_read_count": "0",
+        "extracted": "false",
+        "sent": "false",
+        "retried": "false",
+    }
+    lowered = receipt.lower()
+    if (
+        "first-mismatch stop report" not in lowered
+        or "already shows the artifact-options menu open" not in lowered
+        or "mapped element `artifact_open_new_tab`" not in receipt
+        or "states: showing, expanded, focusable, enabled" not in lowered
+        or any(
+            not _receipt_field_matches(receipt, field, value)
+            for field, value in required.items()
+        )
+    ):
+        return None
+    revision = re.search(
+        r"(?im)\bpre_observation_revision\b"
+        r"[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*([0-9a-f]{64})\b",
+        receipt,
+    )
+    return revision.group(1) if revision is not None else None
+
+
+def _validate_perplexity_report_open_menu_extraction_receipt(
+    receipt: str,
+    display: str,
+    source_sha256: str,
+    source_observation_revision: str,
+    preview_url: str,
+    response_file: Path,
+) -> None:
+    if not response_file.is_file() or response_file.stat().st_size == 0:
+        raise RuntimeError("Perplexity open-menu extraction file is missing or empty")
+    exact = {
+        "platform": "perplexity",
+        "display": display,
+        "source_response_json_sha256": source_sha256,
+        "source_observation_revision": source_observation_revision,
+        "preview_url": preview_url,
+        "pre_observation_revision": source_observation_revision,
+        "pre_stop_count": "0",
+        "pre_artifact_options_count": "1",
+        "pre_artifact_options_expanded": "true",
+        "pre_open_new_tab_count": "1",
+        "open_new_tab_performed": "true",
+        "open_new_tab_primitive": "click",
+        "standalone_stop_count": "0",
+        "standalone_copy_contents_count": "1",
+        "copy_performed": "true",
+        "copy_primitive": "click",
+        "post_copy_stop_count": "0",
+        "post_copy_contents_count": "1",
+        "output_file": str(response_file),
+        "byte_count": str(response_file.stat().st_size),
+        "response_sha256": _sha256(response_file),
+        "observe_count": "3",
+        "operate_count": "0",
+        "click_count": "2",
+        "clipboard_read_count": "1",
+        "other_mutation_count": "0",
+        "extracted": "true",
+        "sent": "false",
+        "regenerated": "false",
+        "retried": "false",
+    }
+    invalid = [
+        field
+        for field, value in exact.items()
+        if not _receipt_field_matches(receipt, field, value)
+    ]
+    if "perplexity report open menu extraction receipt" not in receipt.lower() or invalid:
+        raise RuntimeError(
+            f"Perplexity open-menu extraction receipt has invalid fields: {invalid}"
+        )
+    for field in (
+        "standalone_observation_revision",
+        "post_copy_observation_revision",
+    ):
+        if re.search(
+            rf"(?im)\b{field}\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*[0-9a-f]{{64}}\b",
+            receipt,
+        ) is None:
+            raise RuntimeError(f"Perplexity open-menu extraction invalid revision: {field}")
+    url_pattern = r"https://www\.perplexity\.ai/computer/a/[A-Za-z0-9_-]+"
+    standalone_url = re.search(
+        r"(?im)\bstandalone_url\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*"
+        rf"({url_pattern})\b",
+        receipt,
+    )
+    post_copy_url = re.search(
+        r"(?im)\bpost_copy_url\b[*`\"' \t|]*(?::|=|\|)[*`\"' \t|]*"
+        rf"({url_pattern})\b",
+        receipt,
+    )
+    if (
+        standalone_url is None
+        or post_copy_url is None
+        or post_copy_url.group(1) != standalone_url.group(1)
+    ):
+        raise RuntimeError("Perplexity open-menu extraction standalone URL is not stable")
+
+
 def _validate_perplexity_report_preview_extraction_receipt(
     receipt: str,
     display: str,
@@ -2561,7 +2743,7 @@ def main() -> int:
         args.artifact_root,
         allow_existing=args.phase in {
             "extract", "extract-perplexity-report-card",
-            "extract-perplexity-report-preview",
+            "extract-perplexity-report-preview", "extract-perplexity-report-open-menu",
         },
     )
 
@@ -2579,6 +2761,7 @@ def main() -> int:
     perplexity_diagnostic_thread_url = None
     preview_source_response = None
     preview_source_sha256 = None
+    preview_source_observation_revision = None
     perplexity_preview_url = None
     if args.phase == "diagnose-chatgpt-model-menu":
         if args.platform != "chatgpt":
@@ -2788,6 +2971,70 @@ def main() -> int:
         ).hexdigest()
         event_id = f"extract-perplexity-report-preview-{digest[:24]}"
         request_text = _request_text(content, 4096)
+    elif args.phase == "extract-perplexity-report-open-menu":
+        if args.platform != "perplexity" or args.display != ":6":
+            raise RuntimeError(
+                "extract-perplexity-report-open-menu requires Perplexity on :6"
+            )
+        perplexity_diagnostic_thread_url = args.thread_url.strip()
+        if re.fullmatch(
+            r"https://www\.perplexity\.ai/search/[A-Za-z0-9_-]+",
+            perplexity_diagnostic_thread_url,
+        ) is None:
+            raise RuntimeError(
+                "open-menu extraction requires one exact Perplexity thread URL"
+            )
+        perplexity_preview_url = perplexity_diagnostic_thread_url + "?preview=1"
+        preview_source_response = _absolute_input(
+            args.source_terminal_response_json, "source terminal response JSON"
+        )
+        _source_payload, preview_source_receipt = _worker_receipt(
+            preview_source_response
+        )
+        preview_source_observation_revision = (
+            _perplexity_report_open_menu_source_provenance(
+                preview_source_receipt, args.display, perplexity_preview_url
+            )
+        )
+        if (
+            not _is_worker_stop_report(preview_source_receipt)
+            or preview_source_observation_revision is None
+        ):
+            raise RuntimeError(
+                "source response lacks exact terminal open-menu provenance"
+            )
+        preview_source_sha256 = _sha256(preview_source_response)
+        response_file = Path(args.response_file).expanduser()
+        if not response_file.is_absolute():
+            raise RuntimeError("response file must be an absolute path")
+        response_file = response_file.parent.resolve(strict=False) / response_file.name
+        if response_file != root / "response.txt":
+            raise RuntimeError("response file must be ARTIFACT_ROOT/response.txt")
+        outputs = (
+            root / "request.json",
+            root / "response.headers",
+            root / "worker_response.json",
+            response_file,
+        )
+        existing = [str(path) for path in outputs if path.exists()]
+        if existing:
+            raise RuntimeError(
+                f"open-menu extraction output exists; refusing retry: {existing}"
+            )
+        content = _perplexity_report_open_menu_extraction_content(
+            args.display,
+            preview_source_sha256,
+            preview_source_observation_revision,
+            perplexity_preview_url,
+            response_file,
+        )
+        digest = hashlib.sha256(
+            f"{seat_id}\0perplexity\0{args.display}\0{preview_source_sha256}\0"
+            f"{preview_source_observation_revision}\0{perplexity_preview_url}\0"
+            f"{response_file}\0{content}".encode("utf-8")
+        ).hexdigest()
+        event_id = f"extract-perplexity-report-open-menu-{digest[:24]}"
+        request_text = _request_text(content, 4096)
     elif args.phase == "recover-claude-pre-send":
         exception_key = _identity(args.exception_key, "exception key")
         source_terminal_identity = _identity(
@@ -2971,6 +3218,7 @@ def main() -> int:
     try:
         request_must_be_new = args.phase in {
             "extract-perplexity-report-card", "extract-perplexity-report-preview",
+            "extract-perplexity-report-open-menu",
         }
         if args.phase == "extract" and args.platform == "claude":
             try:
@@ -3099,6 +3347,7 @@ def main() -> int:
                 "diagnose-perplexity-report-card",
                 "extract-perplexity-report-card",
                 "extract-perplexity-report-preview",
+                "extract-perplexity-report-open-menu",
             }
             raise RuntimeError(f"worker returned a terminal {args.phase} report")
         if args.phase == "extract" and args.platform == "claude":
@@ -3478,6 +3727,19 @@ def main() -> int:
                 receipt, args.display, preview_source_sha256,
                 perplexity_preview_url, response_file,
             )
+        if args.phase == "extract-perplexity-report-open-menu":
+            assert preview_source_sha256 is not None
+            assert preview_source_observation_revision is not None
+            assert perplexity_preview_url is not None
+            assert response_file is not None
+            _validate_perplexity_report_open_menu_extraction_receipt(
+                receipt,
+                args.display,
+                preview_source_sha256,
+                preview_source_observation_revision,
+                perplexity_preview_url,
+                response_file,
+            )
         if (
             args.phase in {"send", "recover"}
             and not completed_before_stop
@@ -3504,6 +3766,7 @@ def main() -> int:
             "diagnose-perplexity-report-card",
             "extract-perplexity-report-card",
             "extract-perplexity-report-preview",
+            "extract-perplexity-report-open-menu",
         } or mutation_stop_report or completed_before_stop:
             try:
                 lease_release = _release_extract_lease(args.display, seat_id)
@@ -3572,6 +3835,7 @@ def main() -> int:
         result.update({
             "source_terminal_response_json": str(preview_source_response),
             "source_terminal_response_json_sha256": preview_source_sha256,
+            "source_observation_revision": preview_source_observation_revision,
             "preview_url": perplexity_preview_url,
         })
     if completed_before_stop:
@@ -3599,6 +3863,7 @@ def main() -> int:
         "diagnose-perplexity-report-card",
         "extract-perplexity-report-card",
         "extract-perplexity-report-preview",
+        "extract-perplexity-report-open-menu",
     }:
         result["lease_release"] = lease_release
     if perplexity_diagnostic_thread_url is not None:
