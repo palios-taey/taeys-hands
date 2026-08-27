@@ -87,11 +87,28 @@ def main() -> int:
     tool_step = content.index('3. From that fresh base observation')
     attach_a = content.index('4. Attach Bundle A')
     attach_b = content.index('5. Attach Bundle B')
-    paste = content.index('6. From the immediately preceding fresh base observation')
-    send = content.index('7. focus element=send_button')
+    attachment_barrier = content.index(
+        '6. Before any prompt mutation, observe scope=base exactly once more.'
+    )
+    paste = content.index('7. From that second fresh attachment-settle observation')
+    send = content.index('8. focus element=send_button')
+    start_research_wait = content.index(
+        '9. Use read-only base observations to wait at most 180 seconds'
+    )
+    start_research_click = content.index(
+        '10. click element=start_research exactly once'
+    )
     _require(
-        model_proof < tool_step < attach_a < attach_b < paste < send,
-        'Gemini Deep Research selection is not ordered after Pro Extended and before attachments',
+        model_proof
+        < tool_step
+        < attach_a
+        < attach_b
+        < attachment_barrier
+        < paste
+        < send
+        < start_research_wait
+        < start_research_click,
+        'Gemini Deep Research send sequence or attachment barrier is out of order',
     )
     _require(
         content.count(
@@ -124,12 +141,44 @@ def main() -> int:
     _require(
         content.count(
             'tool_deselect_deep_research match_count 1 with name exactly Deselect Deep research'
-        ) == 5,
-        'Gemini Deep Research active proof is not preserved from selection through send',
+        ) == 7,
+        'Gemini Deep Research active proof is not preserved through Start research',
     )
     _require(
         'the Pro Extended proof, the Deep Research active proof' in content,
         'Gemini send receipt omits the mode-plus-tool proof',
+    )
+    _require(
+        content.count('attachment_settle_revision_1') == 2
+        and content.count('attachment_settle_revision_2') == 2,
+        'Gemini two-observation attachment-settle receipts are missing or duplicated',
+    )
+    _require(
+        content.count(
+            'The current Gemini YAML exposes no mapped upload-in-progress, upload-busy, or '
+            'upload-error element'
+        ) == 1,
+        'Gemini worker card invents or omits the current upload-state mapping boundary',
+    )
+    _require(
+        content.count('key space exactly once; observe scope=base exactly once') == 1
+        and content.count('plan_send_count=1') == 2,
+        'Gemini initial plan send is missing or not receipted exactly once',
+    )
+    _require(
+        content.count('click element=start_research exactly once') == 1
+        and content.count('start_research_click_count=1') == 2,
+        'Gemini Start research action is missing or not receipted exactly once',
+    )
+    _require(
+        'include the same attachment, prompt, plan-send, and Start-research fields in that '
+        'terminal success receipt with research_stop_seen=false' in content,
+        'Gemini completed-before-Stop receipt can omit Start research provenance',
+    )
+    _require(
+        content.index('A stop_button during this phase proves only plan generation')
+        < content.index('Only now follow the post-send confirmation below'),
+        'Gemini worker card can hand plan-generation Stop to the monitor',
     )
     _require(
         'click element=tools_button' not in content
