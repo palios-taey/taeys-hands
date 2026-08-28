@@ -1097,6 +1097,45 @@ def _option_semantic_token(rendered_name: str, contract_kind: str) -> str:
     return semantic_token
 
 
+def _selected_option_matches(
+    surface: Any,
+    action: Mapping[str, Any],
+    action_spec: ActionSpec,
+) -> bool:
+    if not isinstance(surface, BoundSurface):
+        return False
+    combo = _public_control(surface, action['combo_ref'])
+    if combo is None or 'expanded' in (combo.get('states') or []):
+        return False
+    if action['expected_option_name'] in combo.get('semantic_values', []):
+        return True
+    semantic_projection = action_spec.document['options_surface']['semantic_projection']
+    if {
+        'name': combo.get('name'),
+        'role': combo.get('role'),
+    } != semantic_projection['origin']:
+        return False
+    semantic_token = _option_semantic_token(
+        action['expected_option_name'],
+        semantic_projection['kind'],
+    )
+    calling_code = action['expected_option_name'][len(semantic_token) + 1:]
+    element = surface.bindings.get(action['combo_ref'])
+    obj = element.get('atspi_obj') if element is not None else None
+    if obj is None:
+        return False
+    try:
+        parent = obj.get_parent()
+        parent_role = str(parent.get_role_name() or '').strip().lower() if parent else ''
+    except Exception as exc:
+        raise GreenhouseOneActionError(
+            'ATS Country selected-value relation is unavailable'
+        ) from exc
+    if parent is None or parent_role != 'section':
+        return False
+    return _control_text({'atspi_obj': parent}) == calling_code
+
+
 def _capture_options(
     provider_spec: ProviderSpec,
     action_spec: ActionSpec,
@@ -1926,13 +1965,7 @@ def _perform_action(
         after = _post_action_barrier(
             lambda: _capture_form(provider_spec, action_spec, secret),
             barriers['form'],
-            lambda surface: (
-                action['expected_option_name']
-                in (_public_control(surface, action['combo_ref']) or {}).get('semantic_values', [])
-                and 'expanded' not in (
-                    (_public_control(surface, action['combo_ref']) or {}).get('states') or []
-                )
-            ),
+            lambda surface: _selected_option_matches(surface, action, action_spec),
         )
     elif kind == 'activate_choice':
         public = _public_control(source, action['ref'])

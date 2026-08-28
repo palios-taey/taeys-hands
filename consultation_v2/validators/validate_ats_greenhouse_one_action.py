@@ -626,6 +626,108 @@ def _assert_combo_owned_options_surface() -> None:
     ]:
         raise RuntimeError('country tokens lost their exact public rendered-name binding')
 
+    selected_combo = _FakeNode('Country', 'combo box', base_states)
+    selected_section = _FakeNode(
+        '',
+        'section',
+        ['showing', 'visible'],
+        children=[selected_combo],
+        text='+1',
+    )
+    selected_form = [{
+        **collapsed_form[0],
+        'atspi_obj': selected_combo,
+    }]
+    selected_public, selected_bindings = project_form_surface(
+        provider_spec,
+        action_spec,
+        route,
+        selected_form,
+        Rect(0, 100, 1000, 700),
+        secret,
+    )
+    selected_surface = greenhouse.BoundSurface(
+        selected_public,
+        selected_bindings,
+        firefox,
+        document,
+        route,
+    )
+    selected_option = exact.public['controls'][0]
+    selected_action = {
+        'kind': 'select_option',
+        'revision': exact.public['revision'],
+        'ref': selected_option['ref'],
+        'combo_ref': origin_ref,
+        'expected_option_name': selected_option['name'],
+    }
+    selected_request = {
+        'application_identity_sha256': route.application_identity_sha256,
+        'action': selected_action,
+    }
+
+    def selected_control_text(element: dict) -> str:
+        return str(element['atspi_obj'].text)
+
+    with (
+        mock.patch.object(
+            greenhouse,
+            '_resolve_option_source',
+            return_value=(
+                exact,
+                exact.bindings[selected_option['ref']],
+                (),
+            ),
+        ),
+        mock.patch.object(greenhouse, 'atspi_click', return_value=True),
+        mock.patch.object(greenhouse, '_capture_form', return_value=selected_surface),
+        mock.patch.object(greenhouse, '_control_text', side_effect=selected_control_text),
+        mock.patch.object(greenhouse.time, 'sleep', return_value=None),
+    ):
+        selected_result, selected_mutation_started = greenhouse._perform_action(
+            selected_request,
+            provider_spec,
+            action_spec,
+            secret,
+        )
+        if (
+            selected_mutation_started is not True
+            or selected_result['mutation_count'] != 1
+            or selected_result['next_mutation_authorized'] is not True
+            or selected_result['surface'] != selected_public
+            or len(selected_result['postcondition_samples']) != 2
+            or any(
+                sample['postcondition_matched'] is not True
+                for sample in selected_result['postcondition_samples']
+            )
+        ):
+            raise RuntimeError('exact Country parent-section postcondition did not pass')
+
+        selected_section.text = '+44'
+        if greenhouse._selected_option_matches(
+            selected_surface,
+            selected_action,
+            action_spec,
+        ):
+            raise RuntimeError('wrong Country calling-code suffix passed')
+        selected_section.text = '+1'
+        selected_section._role = 'group'
+        if greenhouse._selected_option_matches(
+            selected_surface,
+            selected_action,
+            action_spec,
+        ):
+            raise RuntimeError('non-section Country selected-value relation passed')
+        selected_section._role = 'section'
+        selected_public['controls'][0]['semantic_values'] = [selected_option['name']]
+        selected_section.text = '+44'
+        if not greenhouse._selected_option_matches(
+            selected_surface,
+            selected_action,
+            action_spec,
+        ):
+            raise RuntimeError('existing exact combo semantic-value proof regressed')
+
     try:
         capture(collapsed_form, option_elements)
     except GreenhouseOneActionError as exc:
@@ -667,6 +769,23 @@ def _assert_combo_owned_options_surface() -> None:
         for item in [*referral.public['controls'], *referral_capsule['controls']]
     ):
         raise RuntimeError('non-Country option received a semantic token')
+    referral_surface = greenhouse.BoundSurface(
+        referral_public,
+        {referral_ref: referral_form[0]},
+        firefox,
+        document,
+        route,
+    )
+    if greenhouse._selected_option_matches(
+        referral_surface,
+        {
+            **selected_action,
+            'combo_ref': referral_ref,
+            'expected_option_name': 'Employee referral',
+        },
+        action_spec,
+    ):
+        raise RuntimeError('Country parent-section proof leaked to another combo')
 
     for drifted_name in ('Canada', 'Canada  +1', 'Canada +1234', 'Canada +١'):
         try:
