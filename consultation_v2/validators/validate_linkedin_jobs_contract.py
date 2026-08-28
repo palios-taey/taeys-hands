@@ -1092,6 +1092,7 @@ def _validate_engagement_schema_fixtures() -> list[str]:
 
 def _validate_restore_projection() -> list[str]:
     from consultation_v2.platforms.linkedin.driver import (
+        _uri_matches,
         _notifications_target,
         observe_engagement_start,
         observe_engagement_restore,
@@ -1179,6 +1180,47 @@ def _validate_restore_projection() -> list[str]:
         )
 
     errors: list[str] = []
+    query_contract = {
+        'scheme': 'https',
+        'host': 'www.linkedin.com',
+        'normalized_path': '/notifications',
+        'exact_query_variants': [
+            {},
+            {'filter': 'all', 'refresh': 'true'},
+        ],
+    }
+    for uri in (
+        'https://www.linkedin.com/notifications/?',
+        'https://www.linkedin.com/notifications/?filter=all&refresh=true',
+    ):
+        if not _uri_matches(uri, query_contract):
+            errors.append(f'exact Notifications query variant was rejected: {uri}')
+    for uri in (
+        'https://www.linkedin.com/notifications/?filter=all',
+        'https://www.linkedin.com/notifications/?refresh=true',
+        'https://www.linkedin.com/notifications/?filter=my_posts_all&refresh=true',
+        'https://www.linkedin.com/notifications/?filter=all&refresh=false',
+        'https://www.linkedin.com/notifications/?filter=all&refresh=true&extra=true',
+    ):
+        if _uri_matches(uri, query_contract):
+            errors.append(f'undeclared Notifications query variant was accepted: {uri}')
+    invalid_query_contracts = (
+        {**query_contract, 'exact_query': {}},
+        {**query_contract, 'exact_query_variants': []},
+        {**query_contract, 'exact_query_variants': [[], {}]},
+        {**query_contract, 'exact_query_variants': [{'': 'all'}]},
+        {**query_contract, 'exact_query_variants': [{'filter': 1}]},
+        {**query_contract, 'exact_query_variants': [{}, {}]},
+    )
+    for index, invalid_contract in enumerate(invalid_query_contracts, 1):
+        try:
+            _uri_matches(
+                'https://www.linkedin.com/notifications/?',
+                invalid_contract,
+            )
+        except RuntimeError:
+            continue
+        errors.append(f'invalid Notifications query contract {index} did not fail loud')
     current_name = 'Notifications, 15 new notifications'
     notifications_uri = (
         'https://www.linkedin.com/notifications?filter=all&refresh=true'
