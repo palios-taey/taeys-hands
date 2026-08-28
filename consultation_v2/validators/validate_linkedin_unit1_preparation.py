@@ -175,15 +175,28 @@ def notification_article(
     uri: str,
 ) -> tuple[Node, list[ElementRef]]:
     article = Node('article', name)
-    link = Node(
+    profile_link = Node(
+        'link',
+        'View exact profile.',
+        states=['enabled', 'focusable'],
+        uri='https://www.linkedin.com/in/exact-profile',
+    )
+    content_link = Node(
         'link',
         text,
         states=['enabled', 'focusable'],
         uri=uri,
     )
     age_node = Node('paragraph', text=age)
-    article.add(link, age_node)
-    return article, [ref(article), ref(link), ref(age_node, text=age)]
+    metadata = Node('section')
+    article.add(profile_link, content_link, age_node, metadata)
+    return article, [
+        ref(article),
+        ref(profile_link),
+        ref(content_link),
+        ref(age_node, text=age),
+        ref(metadata),
+    ]
 
 
 def inventory_snapshot(
@@ -502,15 +515,77 @@ def main() -> int:
         'inventory digest ignored raw notification text',
     )
 
-    malformed = inventory_snapshot(include_categories=True)
-    malformed_article = next(
-        item for item in malformed.unknown if item.role == 'article'
+    obsolete_one_link = inventory_snapshot(include_categories=True)
+    obsolete_article = next(
+        item for item in obsolete_one_link.unknown if item.role == 'article'
     )
-    malformed_article.atspi_obj.add(Node('link', 'Second direct link'))
-    malformed.unknown.append(ref(malformed_article.atspi_obj.children[-1]))
+    obsolete_children = obsolete_article.atspi_obj.children
+    obsolete_article.atspi_obj.children = [
+        obsolete_children[1],
+        obsolete_children[2],
+    ]
     expect_error(
-        lambda: project_notification_inventory(malformed, REVISION),
-        'malformed article was silently omitted',
+        lambda: project_notification_inventory(obsolete_one_link, REVISION),
+        'obsolete one-link notification article was accepted',
+    )
+
+    extra_child = inventory_snapshot(include_categories=True)
+    extra_article = next(
+        item for item in extra_child.unknown if item.role == 'article'
+    )
+    extra_article.atspi_obj.add(Node('link', 'Unexpected direct link'))
+    extra_child.unknown.append(ref(extra_article.atspi_obj.children[-1]))
+    expect_error(
+        lambda: project_notification_inventory(extra_child, REVISION),
+        'extra direct child was accepted',
+    )
+
+    missing_child = inventory_snapshot(include_categories=True)
+    missing_article = next(
+        item for item in missing_child.unknown if item.role == 'article'
+    )
+    missing_article.atspi_obj.children.pop()
+    expect_error(
+        lambda: project_notification_inventory(missing_child, REVISION),
+        'missing direct child was accepted',
+    )
+
+    reordered_child = inventory_snapshot(include_categories=True)
+    reordered_article = next(
+        item for item in reordered_child.unknown if item.role == 'article'
+    )
+    reordered_article.atspi_obj.children[1:3] = [
+        reordered_article.atspi_obj.children[2],
+        reordered_article.atspi_obj.children[1],
+    ]
+    expect_error(
+        lambda: project_notification_inventory(reordered_child, REVISION),
+        'reordered direct child was accepted',
+    )
+
+    unmapped_content = inventory_snapshot(include_categories=True)
+    unmapped_article = next(
+        item for item in unmapped_content.unknown if item.role == 'article'
+    )
+    unmapped_node = unmapped_article.atspi_obj.children[1]
+    unmapped_content.unknown = [
+        item
+        for item in unmapped_content.unknown
+        if id(item.atspi_obj) != id(unmapped_node)
+    ]
+    expect_error(
+        lambda: project_notification_inventory(unmapped_content, REVISION),
+        'unmapped content-link index was accepted',
+    )
+
+    invalid_uri = inventory_snapshot(include_categories=True)
+    invalid_uri_article = next(
+        item for item in invalid_uri.unknown if item.role == 'article'
+    )
+    invalid_uri_article.atspi_obj.children[1].uri = '/relative-content'
+    expect_error(
+        lambda: project_notification_inventory(invalid_uri, REVISION),
+        'invalid content-link URI was accepted',
     )
     duplicated = inventory_snapshot(include_categories=True)
     duplicate_root = next(

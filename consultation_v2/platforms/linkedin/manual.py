@@ -15,7 +15,7 @@ from consultation_v2.platforms.linkedin.driver import (
     _notifications_target_state_digest,
 )
 from consultation_v2.snapshot import build_snapshot
-from consultation_v2.types import Snapshot
+from consultation_v2.types import ElementRef, Snapshot
 from consultation_v2.yaml_contract import load_platform_yaml
 
 
@@ -113,6 +113,15 @@ def _manual_notification_contract() -> dict[str, Any]:
     expected = {
         'route_key': 'notifications_all',
         'article_names': ['Notification', 'Notification.', 'Unread notification.'],
+        'article_structure': {
+            'direct_child_roles_exact': [
+                'link',
+                'link',
+                'paragraph',
+                'section',
+            ],
+            'content_link_direct_child_index': 1,
+        },
         'candidate': {
             'name_prefix': 'Unread notification.',
             'role': 'link',
@@ -144,7 +153,7 @@ def _manual_notification_contract() -> dict[str, Any]:
             'states_include': ['enabled', 'focusable'],
             'postcondition': {
                 'kind': 'notification_stream_count_growth',
-                'identity': 'exact_first_child_link_uri',
+                'identity': 'exact_yaml_content_link_uri',
                 'ordered_prefix_digest': 'sha256_uri_digests_truncated_16',
                 'candidate_projection': 'separate',
             },
@@ -451,6 +460,55 @@ def _direct_children(node: Any) -> list[Any]:
         ]
     except Exception:
         return []
+
+
+def _notification_article_content_link(
+    article: ElementRef,
+    elements_by_identity: dict[int, ElementRef],
+    contract: dict[str, Any],
+) -> tuple[ElementRef, str]:
+    structure = contract['article_structure']
+    children = _direct_children(article.atspi_obj)
+    observed_roles = [_node_role(child) for child in children]
+    expected_roles = structure['direct_child_roles_exact']
+    if observed_roles != expected_roles:
+        raise ValueError(
+            'LinkedIn mounted notification direct-child role vector is not exact'
+        )
+    content_index = structure['content_link_direct_child_index']
+    if (
+        not isinstance(content_index, int)
+        or isinstance(content_index, bool)
+        or content_index < 0
+        or content_index >= len(children)
+    ):
+        raise ValueError(
+            'LinkedIn mounted notification content-link index is invalid'
+        )
+    content_node = children[content_index]
+    content_link = elements_by_identity.get(id(content_node))
+    if (
+        content_link is None
+        or content_link.role != 'link'
+        or content_link.atspi_obj is None
+        or id(content_link.atspi_obj) != id(content_node)
+    ):
+        raise ValueError(
+            'LinkedIn mounted notification content link is not canonically mapped'
+        )
+    uri = _element_uri(content_link)
+    if (
+        not isinstance(uri, str)
+        or not uri
+        or uri != uri.strip()
+        or any(character.isspace() for character in uri)
+        or urlsplit(uri).scheme not in {'http', 'https'}
+        or not urlsplit(uri).hostname
+    ):
+        raise ValueError(
+            'LinkedIn mounted notification lacks one exact absolute content URI'
+        )
+    return content_link, uri
 
 
 def _node_at_index_path(node: Any, index_path: list[int]) -> Any | None:
@@ -889,33 +947,11 @@ def _notification_stream_uri_digests(
                 'LinkedIn mounted notification structural paths are duplicated'
             )
         seen_paths.add(structural_path)
-        children = _direct_children(article.atspi_obj)
-        direct_links = [
-            elements_by_identity.get(id(child))
-            for child in children
-            if _node_role(child) == 'link'
-        ]
-        if (
-            len(direct_links) != 1
-            or direct_links[0] is None
-            or not children
-            or id(children[0]) != id(direct_links[0].atspi_obj)
-        ):
-            raise ValueError(
-                'LinkedIn mounted notification lacks one canonical first-child link'
-            )
-        uri = _element_uri(direct_links[0])
-        if (
-            not isinstance(uri, str)
-            or not uri
-            or uri != uri.strip()
-            or any(character.isspace() for character in uri)
-            or urlsplit(uri).scheme not in {'http', 'https'}
-            or not urlsplit(uri).hostname
-        ):
-            raise ValueError(
-                'LinkedIn mounted notification lacks one exact absolute link URI'
-            )
+        _content_link, uri = _notification_article_content_link(
+            article,
+            elements_by_identity,
+            contract,
+        )
         uri_digests.append(hashlib.sha256(uri.encode('utf-8')).hexdigest())
     return uri_digests
 

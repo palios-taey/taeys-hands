@@ -61,7 +61,7 @@ activity happen to match.
 Preparation stops without a readiness result when any of these is true:
 
 - a mounted notification article is missing, duplicated, or lacks one exact structural path;
-- an article does not contain exactly one canonical first-child content link;
+- an article does not expose the exact YAML-owned direct-child role vector and mapped content-link index;
 - raw notification text or the single exact relative age is unreadable;
 - two structural paths expose the same raw article/text/age/URI identity;
 - activity identities or structural paths are duplicated;
