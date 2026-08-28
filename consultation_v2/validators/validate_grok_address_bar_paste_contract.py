@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import ast
-import sys
 from pathlib import Path
 from types import MethodType, SimpleNamespace
 
@@ -22,13 +21,38 @@ def load_yaml(path: Path) -> dict:
     return value
 
 
-def function_names(source: str) -> set[str]:
+def runtime_under_test(source: str) -> tuple[type, set[str]]:
     tree = ast.parse(source)
-    return {
-        node.name
-        for node in ast.walk(tree)
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    runtime_class = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.ClassDef) and node.name == 'ConsultationRuntime'
+    )
+    selected_names = {
+        '_address_bar_exact_paste_values',
+        '_address_bar_exact_paste_proof',
     }
+    selected = [
+        node
+        for node in runtime_class.body
+        if isinstance(node, ast.FunctionDef) and node.name in selected_names
+    ]
+    assert {node.name for node in selected} == selected_names
+    isolated = ast.Module(
+        body=[
+            ast.ClassDef(
+                name='RuntimeUnderTest',
+                bases=[],
+                keywords=[],
+                body=selected,
+                decorator_list=[],
+            )
+        ],
+        type_ignores=[],
+    )
+    namespace: dict[str, object] = {}
+    exec(compile(ast.fix_missing_locations(isolated), str(RUNTIME_PATH), 'exec'), namespace)
+    return namespace['RuntimeUnderTest'], selected_names
 
 
 def bind_entry(runtime: object, *, text: str, focused: bool = True) -> None:
@@ -46,7 +70,7 @@ def main() -> int:
     assert urls.get('address_bar_exact_paste_values') == EXACT_VALUES
 
     source = RUNTIME_PATH.read_text(encoding='utf-8')
-    names = function_names(source)
+    runtime_type, names = runtime_under_test(source)
     assert '_address_bar_exact_paste_values' in names
     assert '_address_bar_exact_paste_proof' in names
     assert 'address_bar_observed_text' in source
@@ -54,10 +78,7 @@ def main() -> int:
     assert '_navigation_tree_ready(settled_snapshot)' in source
     assert '_navigation_target_loaded(current, url)' in source
 
-    sys.path.insert(0, str(REPO_ROOT))
-    from consultation_v2.runtime import ConsultationRuntime
-
-    runtime = object.__new__(ConsultationRuntime)
+    runtime = object.__new__(runtime_type)
     runtime.cfg = {'urls': {'fresh': FRESH_URL}}
     assert runtime._address_bar_exact_paste_values(FRESH_URL) == (FRESH_URL,)
 
