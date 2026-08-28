@@ -53,11 +53,12 @@ if 'gi' not in sys.modules:
 from consultation_v2.platforms.linkedin import manual  # noqa: E402
 from consultation_v2.platforms.linkedin.unit1_prepare import (  # noqa: E402
     LinkedInUnit1PreparationError,
+    _category_authority_sha256,
     accept_preparation_step,
     compile_preparation_step,
     extract_selected_source,
     preparation_transaction_sha256,
-    project_notification_inventory,
+    project_notification_inventory as project_notification_inventory_with_authority,
 )
 from consultation_v2.types import ElementRef, Snapshot  # noqa: E402
 
@@ -68,6 +69,19 @@ ACTIVITY_A = '1234567890123456789'
 ACTIVITY_B = '2234567890123456789'
 BODY = 'One exact public post body.'
 BODY_SHA256 = hashlib.sha256(BODY.encode('utf-8')).hexdigest()
+INVENTORY_TRANSACTION_SHA256 = '3' * 64
+INVENTORY_CATEGORY_AUTHORITY_SHA256 = _category_authority_sha256(
+    INVENTORY_TRANSACTION_SHA256
+)
+
+
+def project_notification_inventory(snapshot, snapshot_revision):
+    return project_notification_inventory_with_authority(
+        snapshot,
+        snapshot_revision,
+        transaction_sha256=INVENTORY_TRANSACTION_SHA256,
+        category_authority_sha256=INVENTORY_CATEGORY_AUTHORITY_SHA256,
+    )
 
 
 def canonical_sha256(value) -> str:
@@ -244,6 +258,13 @@ def inventory_snapshot(
     )
 
 
+def without_visible_categories(snapshot: Snapshot) -> Snapshot:
+    snapshot.unknown = [
+        item for item in snapshot.unknown if item.role != 'radio button'
+    ]
+    return snapshot
+
+
 def navigation_snapshot() -> Snapshot:
     node = Node(
         'push button',
@@ -359,6 +380,17 @@ def with_thread_opener(snapshot: Snapshot, count: int = 2) -> Snapshot:
 
 
 def barrier(card: dict) -> dict:
+    postcondition = {
+        'element_key': card['element'],
+        'operation': card['verification_operation'],
+        'effect_class': card['effect_class'],
+        'postcondition': card['postcondition_kind'],
+    }
+    if card['phase'] == 'notifications_navigation':
+        postcondition.update({
+            'route_exact': True,
+            'category_exact': True,
+        })
     return {
         'result': 'PASS',
         'next_mutation_authorized': card['phase'] != 'thread_scroll',
@@ -372,12 +404,7 @@ def barrier(card: dict) -> dict:
             {'sample': 1, 'route_exact': True},
             {'sample': 2, 'route_exact': True},
         ],
-        'postcondition_receipt': {
-            'element_key': card['element'],
-            'operation': card['verification_operation'],
-            'effect_class': card['effect_class'],
-            'postcondition': card['postcondition_kind'],
-        },
+        'postcondition_receipt': postcondition,
     }
 
 
@@ -630,7 +657,94 @@ def main() -> int:
         == set(navigation),
         'preparation action-card schema drifted',
     )
+    missing_navigation_category = barrier(navigation)
+    missing_navigation_category['postcondition_receipt'].pop('category_exact')
+    expect_error(
+        lambda: accept_preparation_step(
+            navigation,
+            missing_navigation_category,
+            None,
+        ),
+        'navigation receipt accepted missing All-category authority',
+    )
+    wrong_navigation_category = barrier(navigation)
+    wrong_navigation_category['postcondition_receipt']['category_exact'] = False
+    expect_error(
+        lambda: accept_preparation_step(
+            navigation,
+            wrong_navigation_category,
+            None,
+        ),
+        'navigation receipt accepted false All-category authority',
+    )
     receipts.append(accept_preparation_step(navigation, barrier(navigation), None))
+    require(
+        receipts[0]['category_authority_sha256']
+        == _category_authority_sha256(transaction_sha256),
+        'navigation receipt category authority is not reconstructable',
+    )
+
+    wrong_token = dict(receipts[0])
+    wrong_token['category_authority_sha256'] = '4' * 64
+    wrong_token_payload = dict(wrong_token)
+    wrong_token_payload.pop('receipt_sha256')
+    wrong_token['receipt_sha256'] = canonical_sha256(wrong_token_payload)
+    expect_error(
+        lambda: compile_preparation_step(
+            stream,
+            REVISION,
+            envelope,
+            [wrong_token],
+        ),
+        're-signed wrong category authority token was accepted',
+    )
+    missing_token = dict(receipts[0])
+    missing_token.pop('category_authority_sha256')
+    missing_token_payload = dict(missing_token)
+    missing_token_payload.pop('receipt_sha256')
+    missing_token['receipt_sha256'] = canonical_sha256(missing_token_payload)
+    expect_error(
+        lambda: compile_preparation_step(
+            stream,
+            REVISION,
+            envelope,
+            [missing_token],
+        ),
+        'missing category authority token was accepted',
+    )
+    wrong_transaction = dict(receipts[0])
+    wrong_transaction['transaction_sha256'] = '5' * 64
+    wrong_transaction['category_authority_sha256'] = (
+        _category_authority_sha256('5' * 64)
+    )
+    wrong_transaction_payload = dict(wrong_transaction)
+    wrong_transaction_payload.pop('receipt_sha256')
+    wrong_transaction['receipt_sha256'] = canonical_sha256(
+        wrong_transaction_payload
+    )
+    expect_error(
+        lambda: compile_preparation_step(
+            stream,
+            REVISION,
+            envelope,
+            [wrong_transaction],
+        ),
+        'wrong-transaction category authority was accepted',
+    )
+    wrong_order = dict(receipts[0])
+    wrong_order['phase'] = 'notifications_continuation'
+    wrong_order_payload = dict(wrong_order)
+    wrong_order_payload.pop('receipt_sha256')
+    wrong_order['receipt_sha256'] = canonical_sha256(wrong_order_payload)
+    expect_error(
+        lambda: compile_preparation_step(
+            stream,
+            REVISION,
+            envelope,
+            [wrong_order],
+        ),
+        'non-navigation-first category authority was accepted',
+    )
 
     exact_route_navigation = inventory_snapshot(include_categories=True)
     exact_route_navigation.mapped[manual.NOTIFICATIONS_NAVIGATION] = (
@@ -650,7 +764,9 @@ def main() -> int:
         'exact Notifications URL skipped mandatory Notifications activation',
     )
 
-    missing_categories = inventory_snapshot(include_categories=False)
+    missing_categories = without_visible_categories(
+        inventory_snapshot(include_categories=True)
+    )
     missing_categories.mapped[manual.NOTIFICATIONS_NAVIGATION] = (
         navigation_snapshot().mapped[manual.NOTIFICATIONS_NAVIGATION]
     )
@@ -675,14 +791,25 @@ def main() -> int:
     require(
         not any(
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
-            or key.startswith(manual.NOTIFICATIONS_CONTINUATION_PREFIX)
             for key in augmented_missing_categories.mapped
         ),
-        'missing category proof exposed notification inventory actions',
+        'missing category proof exposed notification candidate actions',
+    )
+    require(
+        project_notification_inventory(
+            missing_categories,
+            REVISION,
+        ).artifact['mounted_article_count'] == 3,
+        'chain-authorized inventory still depended on visible category controls',
     )
     expect_error(
-        lambda: project_notification_inventory(missing_categories, REVISION),
-        'notification inventory bypassed exact All-category proof',
+        lambda: project_notification_inventory_with_authority(
+            missing_categories,
+            REVISION,
+            transaction_sha256=INVENTORY_TRANSACTION_SHA256,
+            category_authority_sha256='6' * 64,
+        ),
+        'inventory accepted a wrong category authority token',
     )
     navigation_postcondition = manual.verify_post_action(
         stream,
@@ -706,6 +833,22 @@ def main() -> int:
         raise AssertionError(
             'Notifications activation accepted a missing All-category proof'
         )
+    wrong_selected_category = inventory_snapshot(include_categories=True)
+    for item in wrong_selected_category.unknown:
+        if item.role == 'radio button':
+            item.states = ['checked'] if item.name == 'Jobs' else []
+    try:
+        manual.verify_post_action(
+            wrong_selected_category,
+            manual.NOTIFICATIONS_NAVIGATION,
+            'activate',
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            'Notifications activation accepted selected Jobs category'
+        )
     near_route = inventory_snapshot(include_categories=True)
     near_route.url = 'https://www.linkedin.com/notifications/?filter=mentions'
     near_route.mapped[manual.NOTIFICATIONS_NAVIGATION] = (
@@ -721,8 +864,85 @@ def main() -> int:
         'non-exact Notifications route did not compile mandatory activation',
     )
 
+    first_continuation_surface = inventory_snapshot(include_categories=True)
+    first_continuation_surface.unknown.append(ref(Node(
+        'push button',
+        'Show more results',
+        states=['enabled', 'focusable'],
+    )))
+    first_continuation_surface = manual.augment_snapshot(
+        first_continuation_surface
+    )
+    continuation_receipts = list(receipts)
+    first_continuation = compile_preparation_step(
+        first_continuation_surface,
+        REVISION,
+        envelope,
+        continuation_receipts,
+    )
+    require(
+        first_continuation['phase'] == 'notifications_continuation',
+        'first category-authorized continuation did not compile',
+    )
+    continuation_receipts.append(accept_preparation_step(
+        first_continuation,
+        barrier(first_continuation),
+        continuation_receipts[-1]['receipt_sha256'],
+    ))
+    require(
+        continuation_receipts[-1]['category_authority_sha256']
+        == continuation_receipts[0]['category_authority_sha256'],
+        'continuation did not carry category authority',
+    )
+
+    second_continuation_surface = without_visible_categories(
+        inventory_snapshot(include_categories=True)
+    )
+    second_root = next(
+        item
+        for item in second_continuation_surface.unknown
+        if item.role == 'article'
+    ).atspi_obj.get_parent()
+    fourth_article, fourth_references = notification_article(
+        'Notification.',
+        'Someone viewed your profile.',
+        '4d',
+        uri='https://www.linkedin.com/me/profile-views/',
+    )
+    second_root.add(fourth_article)
+    second_continuation_surface.unknown.extend(fourth_references)
+    second_continuation_surface.unknown.append(ref(Node(
+        'push button',
+        'Show more results',
+        states=['enabled', 'focusable'],
+    )))
+    second_continuation_surface = manual.augment_snapshot(
+        second_continuation_surface
+    )
+    require(
+        not any(
+            key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
+            for key in second_continuation_surface.mapped
+        ),
+        'second continuation exposed candidate keys without live category proof',
+    )
+    second_continuation = compile_preparation_step(
+        second_continuation_surface,
+        REVISION,
+        envelope,
+        continuation_receipts,
+    )
+    require(
+        second_continuation['phase'] == 'notifications_continuation',
+        'second continuation required category controls to re-enter viewport',
+    )
+
+    stream_without_categories = without_visible_categories(
+        inventory_snapshot(include_categories=True)
+    )
+
     ready_selection = compile_preparation_step(
-        stream,
+        stream_without_categories,
         REVISION,
         envelope,
         receipts,
@@ -756,7 +976,7 @@ def main() -> int:
     }
     selected_envelope = {**envelope, 'selection': selection}
     candidate = compile_preparation_step(
-        stream,
+        stream_without_categories,
         REVISION,
         selected_envelope,
         receipts,

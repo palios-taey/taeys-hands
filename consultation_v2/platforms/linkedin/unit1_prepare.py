@@ -20,7 +20,6 @@ from consultation_v2.platforms.linkedin.manual import (
     _manual_comment_contract,
     _manual_notification_contract,
     _notification_article_content_link,
-    _notification_categories_exact,
     _node_at_index_path,
     _notification_activity,
     _notification_relative_age,
@@ -36,6 +35,9 @@ PREPARATION_ENVELOPE_SCHEMA = 'linkedin_unit1_preparation_envelope_v1'
 PREPARATION_ACTION_CARD_SCHEMA = 'linkedin_unit1_preparation_action_card_v1'
 PREPARATION_RECEIPT_SCHEMA = 'linkedin_unit1_preparation_receipt_v1'
 PREPARATION_RESULT_SCHEMA = 'linkedin_unit1_preparation_result_v1'
+NOTIFICATIONS_ALL_CATEGORY_AUTHORITY_SCHEMA = (
+    'linkedin_notifications_all_category_authority_v1'
+)
 NOTIFICATION_INVENTORY_SCHEMA = 'linkedin_notification_inventory_v1'
 SELECTED_SOURCE_SCHEMA = 'linkedin_selected_post_thread_source_v1'
 _SHA256 = re.compile(r'^[0-9a-f]{64}$')
@@ -85,6 +87,7 @@ _CARD_KEYS = frozenset({
 })
 _RECEIPT_KEYS = frozenset({
     'card_sha256',
+    'category_authority_sha256',
     'effect_class',
     'element_sha256',
     'fresh_observation_required',
@@ -141,6 +144,20 @@ def _canonical_bytes(value: Any) -> bytes:
         sort_keys=True,
         separators=(',', ':'),
     ).encode('utf-8')
+
+
+def _category_authority_sha256(transaction_sha256: str) -> str:
+    return _sha256({
+        'schema': NOTIFICATIONS_ALL_CATEGORY_AUTHORITY_SCHEMA,
+        'transaction_sha256': _require_sha256(
+            transaction_sha256,
+            'transaction_sha256',
+        ),
+        'route_key': 'notifications_all',
+        'selected_category': 'All',
+        'route_exact': True,
+        'category_exact': True,
+    })
 
 
 def _sha256(value: Any) -> str:
@@ -311,6 +328,9 @@ def preparation_transaction_sha256(value: Mapping[str, Any]) -> str:
 def project_notification_inventory(
     snapshot: Snapshot,
     snapshot_revision: str,
+    *,
+    transaction_sha256: str,
+    category_authority_sha256: str,
 ) -> NotificationInventoryProjection:
     _require_linkedin_snapshot(snapshot)
     revision = _require_sha256(snapshot_revision, 'snapshot_revision')
@@ -318,11 +338,17 @@ def project_notification_inventory(
         raise LinkedInUnit1PreparationError(
             'notification inventory requires exact Notifications-All'
         )
-    contract = _manual_notification_contract()
-    if not _notification_categories_exact(snapshot, contract):
-        raise LinkedInUnit1PreparationError(
-            'notification inventory requires exact Notifications-All category'
+    if (
+        _require_sha256(
+            category_authority_sha256,
+            'category_authority_sha256',
         )
+        != _category_authority_sha256(transaction_sha256)
+    ):
+        raise LinkedInUnit1PreparationError(
+            'notification inventory category authority is invalid'
+        )
+    contract = _manual_notification_contract()
     elements = _all_elements(snapshot)
     elements_by_identity = {
         id(element.atspi_obj): element
@@ -666,8 +692,9 @@ def _receipt_payload(receipt: Mapping[str, Any]) -> dict[str, Any]:
 def verify_preparation_receipts(
     receipts: Sequence[Mapping[str, Any]],
     transaction_sha256: str,
-) -> str | None:
+) -> tuple[str | None, str | None]:
     _require_sha256(transaction_sha256, 'transaction_sha256')
+    expected_category_authority = _category_authority_sha256(transaction_sha256)
     previous_digest: str | None = None
     previous_phase: str | None = None
     for sequence, receipt in enumerate(receipts, 1):
@@ -677,6 +704,8 @@ def verify_preparation_receipts(
             or payload.get('transaction_sha256') != transaction_sha256
             or payload.get('sequence') != sequence
             or payload.get('previous_receipt_sha256') != previous_digest
+            or payload.get('category_authority_sha256')
+            != expected_category_authority
             or payload.get('postcondition_passed') is not True
             or payload.get('fresh_observation_required') is not True
             or payload.get('next_step_authorized') is not True
@@ -707,7 +736,10 @@ def verify_preparation_receipts(
             )
         previous_phase = str(phase)
         previous_digest = str(receipt['receipt_sha256'])
-    return previous_phase
+    return (
+        previous_phase,
+        expected_category_authority if receipts else None,
+    )
 
 
 def _mapped_singleton(snapshot: Snapshot, element_key: str) -> ElementRef:
@@ -821,7 +853,10 @@ def compile_preparation_step(
     _require_linkedin_snapshot(snapshot)
     frozen = validate_preparation_envelope(envelope)
     transaction_sha256 = preparation_transaction_sha256(frozen)
-    previous_phase = verify_preparation_receipts(receipts, transaction_sha256)
+    previous_phase, category_authority_sha256 = verify_preparation_receipts(
+        receipts,
+        transaction_sha256,
+    )
     previous_receipt_sha256 = (
         str(receipts[-1]['receipt_sha256']) if receipts else None
     )
@@ -862,7 +897,16 @@ def compile_preparation_step(
                 phase='notifications_continuation',
                 element_key=continuation_keys[0],
             )
-        inventory = project_notification_inventory(snapshot, snapshot_revision)
+        if category_authority_sha256 is None:
+            raise LinkedInUnit1PreparationError(
+                'notification inventory lacks category authority'
+            )
+        inventory = project_notification_inventory(
+            snapshot,
+            snapshot_revision,
+            transaction_sha256=transaction_sha256,
+            category_authority_sha256=category_authority_sha256,
+        )
         selection = frozen['selection']
         if selection is None:
             return _preparation_result(
@@ -1063,6 +1107,21 @@ def accept_preparation_step(
         raise LinkedInUnit1PreparationError(
             'preparation barrier does not match the exact action card'
         )
+    phase = card['phase']
+    if phase == 'notifications_navigation':
+        if (
+            card['sequence'] != 1
+            or previous_receipt_sha256 is not None
+            or postcondition.get('route_exact') is not True
+            or postcondition.get('category_exact') is not True
+        ):
+            raise LinkedInUnit1PreparationError(
+                'Notifications navigation lacks exact All-category authority'
+            )
+    elif card['sequence'] <= 1 or previous_receipt_sha256 is None:
+        raise LinkedInUnit1PreparationError(
+            'preparation continuation lacks prior receipt authority'
+        )
     receipt = {
         'schema': PREPARATION_RECEIPT_SCHEMA,
         'transaction_sha256': card['transaction_sha256'],
@@ -1070,6 +1129,9 @@ def accept_preparation_step(
         'phase': card['phase'],
         'previous_receipt_sha256': previous_receipt_sha256,
         'card_sha256': card_digest,
+        'category_authority_sha256': _category_authority_sha256(
+            str(card['transaction_sha256'])
+        ),
         'snapshot_revision': card['snapshot_revision'],
         'element_sha256': card['element_sha256'],
         'method': card['method'],

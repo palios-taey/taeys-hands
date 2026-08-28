@@ -1002,7 +1002,6 @@ def _notification_continuation_measurement(
         name
         for name, passed in (
             ('route', route_exact),
-            ('category', category_exact),
             ('raw_stream_projection', stream_projection_error is None),
             ('raw_count_growth', raw_count_grew),
             ('raw_prefix', raw_prefix_exact),
@@ -1107,28 +1106,26 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
         else []
     )
     contract = _manual_notification_contract()
-    if (
-        _exact_engagement_route(snapshot.url, 'notifications_all')
-        and _notification_categories_exact(snapshot, contract)
-    ):
+    if _exact_engagement_route(snapshot.url, 'notifications_all'):
         uri_digests = _notification_stream_uri_digests(snapshot, contract)
         candidates = _notification_candidates(snapshot, contract)
-        for ordinal, (candidate, activity, age) in enumerate(candidates, 1):
-            key = (
-                f'{NOTIFICATION_CANDIDATE_PREFIX}{ordinal:03d}_activity_{activity}'
-            )
-            raw = {
-                **dict(candidate.raw),
-                'notification_activity': activity,
-                'notification_age': age,
-                'notification_ordinal': ordinal,
-            }
-            mapped[key] = [replace(
-                candidate,
-                key=key,
-                description=f'newest_order={ordinal}; relative_age={age}',
-                raw=raw,
-            )]
+        if _notification_categories_exact(snapshot, contract):
+            for ordinal, (candidate, activity, age) in enumerate(candidates, 1):
+                key = (
+                    f'{NOTIFICATION_CANDIDATE_PREFIX}{ordinal:03d}_activity_{activity}'
+                )
+                raw = {
+                    **dict(candidate.raw),
+                    'notification_activity': activity,
+                    'notification_age': age,
+                    'notification_ordinal': ordinal,
+                }
+                mapped[key] = [replace(
+                    candidate,
+                    key=key,
+                    description=f'newest_order={ordinal}; relative_age={age}',
+                    raw=raw,
+                )]
         continuation_contract = contract['continuation']
         continuations = [
             element
