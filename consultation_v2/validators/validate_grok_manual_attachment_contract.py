@@ -2,8 +2,11 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
 from pathlib import Path
 import sys
+import tempfile
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -16,7 +19,13 @@ from consultation_v2.platforms.grok.manual import (
     key_requires_state,
 )
 from consultation_v2.yaml_contract import load_platform_yaml
-from scripts.run_manual_chat_worker import _send_content
+from scripts.run_manual_chat_worker import (
+    _recovery_content,
+    _send_content,
+    _sha256,
+    _validate_consultation_recovery_source,
+    build_parser,
+)
 
 
 def _require(condition: bool, message: str) -> None:
@@ -51,6 +60,99 @@ def _function_source(
     segment = ast.get_source_segment(source, candidates[0])
     _require(segment is not None, f'could not read source for {owner or "module"}.{name}')
     return str(segment)
+
+
+def _write_consultation_recovery_fixture(
+    root: Path,
+    *,
+    mutate_payload=None,
+    display: str = ':5',
+) -> tuple[Path, str, Path]:
+    root.mkdir()
+    session_url = 'https://grok.com/c/fixture'
+    payload = {
+        'ok': False,
+        'platform': 'grok',
+        'request': {'platform': 'grok'},
+        'response_text': '',
+        'session_url_after': session_url,
+        'steps': [
+            {
+                'step': 'send_action',
+                'success': True,
+                'evidence': {'click_returned': True},
+            },
+            {
+                'step': 'send',
+                'success': True,
+                'evidence': {
+                    'stop_seen': True,
+                    'answer_thread': True,
+                    'url_after': session_url,
+                },
+            },
+            {
+                'step': 'monitor_register',
+                'success': True,
+                'evidence': {'monitor_id': 'grok:fixture', 'url': session_url},
+            },
+            {
+                'step': 'monitor',
+                'success': True,
+                'evidence': {'seed_stop_seen': True, 'stop_seen': True},
+            },
+            {
+                'step': 'extract',
+                'success': False,
+                'evidence': {
+                    'snapshot': {
+                        'platform': 'grok',
+                        'url': session_url,
+                        'mapped': {
+                            'usage_limit_updated_alert': [{}],
+                            'retry_button': [{}],
+                        },
+                    },
+                },
+            },
+            {'step': 'notify_operator_failure', 'success': True, 'evidence': {}},
+        ],
+    }
+    if mutate_payload is not None:
+        mutate_payload(payload)
+    consultation_receipt = root / 'consultation_receipt.json'
+    consultation_receipt.write_text(
+        json.dumps(payload, sort_keys=True) + '\n',
+        encoding='utf-8',
+    )
+    receipt_sha256 = _sha256(consultation_receipt)
+    source_receipt = (
+        'The consultation failed on the first attempt.\n\n'
+        '**Result: Failed**\n'
+        f'- **Display:** {display}\n'
+        f'- **Receipt path:** `{consultation_receipt}`\n'
+        f'- **Receipt SHA256:** `{receipt_sha256}`\n'
+    )
+    source_response = root / 'worker_response.json'
+    source_response.write_text(
+        json.dumps({
+            'choices': [{
+                'finish_reason': 'stop',
+                'message': {'content': source_receipt},
+            }],
+        }, sort_keys=True) + '\n',
+        encoding='utf-8',
+    )
+    return source_response, source_receipt, consultation_receipt
+
+
+def _require_rejected(call, expected: str) -> None:
+    try:
+        call()
+    except RuntimeError as exc:
+        _require(expected in str(exc), f'unexpected rejection: {exc}')
+        return
+    raise AssertionError(f'consultation recovery source accepted invalid {expected}')
 
 
 def main() -> int:
@@ -223,7 +325,167 @@ def main() -> int:
         'focus element=attach_trigger' not in content and 'key space' not in content,
         'Grok worker card still exposes a focus/key attachment path',
     )
-    print('grok mapped-pointer attachment contract: PASS')
+
+    legacy_recovery = _recovery_content(
+        'grok',
+        ':5',
+        'usage_limit_updated',
+        'a' * 64,
+    )
+    _require(
+        hashlib.sha256(legacy_recovery.encode('utf-8')).hexdigest()
+        == '8b199efdfdc2bb477b69d4a115dbba21d8bc35bc5123e97664f296d2f560ab2c',
+        'existing manual-worker recovery content changed',
+    )
+    consultation_recovery = _recovery_content(
+        'grok',
+        ':5',
+        'usage_limit_updated',
+        'a' * 64,
+        'b' * 64,
+    )
+    _require(
+        'Source evidence SHA-256 is ' + ('a' * 64) in consultation_recovery
+        and 'Source consultation receipt SHA-256 is ' + ('b' * 64)
+        in consultation_recovery,
+        'one-call recovery content does not bind both source hashes',
+    )
+    parsed = build_parser().parse_args([
+        'recover',
+        '--platform', 'grok',
+        '--display', ':5',
+        '--seat-id', 'fixture',
+        '--artifact-root', '/tmp/uncreated-fixture',
+        '--exception-key', 'usage_limit_updated',
+        '--source-response-json', '/tmp/worker_response.json',
+        '--source-consultation-receipt', '/tmp/consultation_receipt.json',
+    ])
+    _require(
+        parsed.source_consultation_receipt == '/tmp/consultation_receipt.json',
+        'recover parser does not expose the explicit consultation receipt',
+    )
+
+    worker_main_source = _function_source(
+        REPO_ROOT / 'scripts/run_manual_chat_worker.py',
+        'main',
+    )
+    _require(
+        worker_main_source.index('_validate_consultation_recovery_source(')
+        < worker_main_source.index('root.mkdir(mode=0o700)')
+        < worker_main_source.index('_invoke('),
+        'consultation recovery validation does not precede artifact creation and invoke',
+    )
+
+    with tempfile.TemporaryDirectory() as raw_tmp:
+        tmp = Path(raw_tmp)
+        source_response, source_receipt, consultation_receipt = (
+            _write_consultation_recovery_fixture(tmp / 'valid')
+        )
+        accepted_sha256 = _validate_consultation_recovery_source(
+            source_response=source_response,
+            source_receipt=source_receipt,
+            consultation_receipt=consultation_receipt,
+            platform='grok',
+            display=':5',
+            exception_key='usage_limit_updated',
+        )
+        _require(
+            accepted_sha256 == _sha256(consultation_receipt),
+            'valid one-call recovery source returned the wrong receipt hash',
+        )
+
+        wrong_display = _write_consultation_recovery_fixture(
+            tmp / 'wrong-display',
+            display=':6',
+        )
+        _require_rejected(
+            lambda: _validate_consultation_recovery_source(
+                source_response=wrong_display[0],
+                source_receipt=wrong_display[1],
+                consultation_receipt=wrong_display[2],
+                platform='grok',
+                display=':5',
+                exception_key='usage_limit_updated',
+            ),
+            'display',
+        )
+        _require_rejected(
+            lambda: _validate_consultation_recovery_source(
+                source_response=source_response,
+                source_receipt=source_receipt.replace(
+                    _sha256(consultation_receipt),
+                    '0' * 64,
+                ),
+                consultation_receipt=consultation_receipt,
+                platform='grok',
+                display=':5',
+                exception_key='usage_limit_updated',
+            ),
+            'sibling receipt SHA-256',
+        )
+
+        invalid_cases = {
+            'platform': lambda payload: payload.update(platform='gemini'),
+            'response_text': lambda payload: payload.update(response_text='not empty'),
+            'URL prefix': lambda payload: payload.update(
+                session_url_after='https://example.invalid/c/fixture'
+            ),
+            'send or monitor evidence': lambda payload: payload['steps'][0][
+                'evidence'
+            ].update(click_returned=False),
+            'prior retry or recovery': lambda payload: payload['steps'].insert(
+                1,
+                {'step': 'retry', 'success': True, 'evidence': {}},
+            ),
+            'exact send_action steps': lambda payload: payload['steps'].insert(
+                1,
+                {
+                    'step': 'send_action',
+                    'success': True,
+                    'evidence': {'click_returned': True},
+                },
+            ),
+            'singleton counts': lambda payload: payload['steps'][4]['evidence'][
+                'snapshot'
+            ]['mapped'].update(retry_button=[{}, {}]),
+            'still maps Stop': lambda payload: payload['steps'][4]['evidence'][
+                'snapshot'
+            ]['mapped'].update(stop_button=[{}]),
+        }
+        for index, (expected, mutate_payload) in enumerate(invalid_cases.items()):
+            invalid = _write_consultation_recovery_fixture(
+                tmp / f'invalid-{index}',
+                mutate_payload=mutate_payload,
+            )
+            _require_rejected(
+                lambda invalid=invalid: _validate_consultation_recovery_source(
+                    source_response=invalid[0],
+                    source_receipt=invalid[1],
+                    consultation_receipt=invalid[2],
+                    platform='grok',
+                    display=':5',
+                    exception_key='usage_limit_updated',
+                ),
+                expected,
+            )
+
+        other = _write_consultation_recovery_fixture(tmp / 'other')
+        _require_rejected(
+            lambda: _validate_consultation_recovery_source(
+                source_response=source_response,
+                source_receipt=source_receipt.replace(
+                    str(consultation_receipt),
+                    str(other[2]),
+                ).replace(_sha256(consultation_receipt), _sha256(other[2])),
+                consultation_receipt=other[2],
+                platform='grok',
+                display=':5',
+                exception_key='usage_limit_updated',
+            ),
+            'exact sibling',
+        )
+
+    print('grok mapped-pointer and one-call recovery contracts: PASS')
     return 0
 
 
