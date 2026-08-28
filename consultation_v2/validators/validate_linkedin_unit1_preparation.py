@@ -404,7 +404,7 @@ def selected_snapshot(*, count: int = 2, visible: bool = True) -> Snapshot:
     heading = Node('heading', 'Feed post')
     body = Node('section', text=BODY, states=['showing'])
     body_wrapper = Node('generic').add(body)
-    fillers = [Node('generic') for _index in range(7)]
+    fillers = [Node('generic') for _index in range(8)]
     count_node = (
         Node(
             'push button',

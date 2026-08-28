@@ -194,7 +194,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'name': 'Feed post',
             },
             'body': {
-                'index_path': [0, 8, 0],
+                'index_path': [0, 9, 0],
                 'role': 'section',
                 'states_include': ['showing'],
                 'content_digest': 'sha256_utf8',
@@ -209,7 +209,7 @@ def _manual_notification_contract() -> dict[str, Any]:
             'open_element_key_prefix': SELECTED_THREAD_OPEN_PREFIX,
             'comment_count': {
                 'role': 'push button',
-                'index_path': [0, 11],
+                'index_path': [0, 12],
                 'states_include': ['enabled', 'focusable'],
             },
             'visible_comment': {
@@ -657,7 +657,7 @@ def _selected_post_root_and_body(
             or not set(body_contract['states_include']).issubset(body_element.states)
         ):
             continue
-        text = body_element.text or _node_text(body)
+        text = _node_text(body) or body_element.text
         if text:
             roots.append((element, body_element, text))
     if len(roots) != root_contract['exact_match_count']:
