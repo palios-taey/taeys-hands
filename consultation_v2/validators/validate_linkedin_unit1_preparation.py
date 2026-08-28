@@ -65,6 +65,7 @@ from consultation_v2.types import ElementRef, Snapshot  # noqa: E402
 
 
 REVISION = '1' * 64
+REVISION_B = '9' * 64
 POLICY_SHA256 = '2' * 64
 ACTIVITY_A = '1234567890123456789'
 ACTIVITY_B = '2234567890123456789'
@@ -290,6 +291,79 @@ def without_visible_categories(snapshot: Snapshot) -> Snapshot:
         item for item in snapshot.unknown if item.role != 'radio button'
     ]
     return snapshot
+
+
+def with_continuation(snapshot: Snapshot) -> Snapshot:
+    snapshot.unknown.append(ref(Node(
+        'push button',
+        'Show more results',
+        states=['enabled', 'focusable'],
+    )))
+    return manual.augment_snapshot(snapshot)
+
+
+def semantic_inventory_variants() -> list[tuple[str, Snapshot]]:
+    changed_text = inventory_snapshot(
+        notification_text='Unread notification. Alice changed the exact update.',
+        include_categories=True,
+    )
+
+    changed_activity = inventory_snapshot(include_categories=True)
+    activity_link = next(
+        item
+        for item in changed_activity.unknown
+        if item.role == 'link' and item.atspi_obj.uri == activity_uri(ACTIVITY_A)
+    )
+    activity_link.atspi_obj.uri = activity_uri(ACTIVITY_A + '2')
+
+    changed_age = inventory_snapshot(include_categories=True)
+    age = next(
+        item
+        for item in changed_age.unknown
+        if item.role == 'paragraph' and item.text == '2h'
+    )
+    age.text = '3h'
+    age.atspi_obj.text = '3h'
+
+    changed_uri = inventory_snapshot(include_categories=True)
+    uri_link = next(
+        item
+        for item in changed_uri.unknown
+        if item.role == 'link' and item.atspi_obj.uri == activity_uri(ACTIVITY_A)
+    )
+    uri_link.atspi_obj.uri = activity_uri(ACTIVITY_A) + '&trk=changed'
+
+    changed_path = inventory_snapshot(include_categories=True)
+    path_root = next(
+        item for item in changed_path.unknown if item.role == 'article'
+    ).atspi_obj.get_parent()
+    prefix = Node('generic')
+    prefix.parent = path_root
+    path_root.children.insert(0, prefix)
+
+    changed_ordinal = inventory_snapshot(include_categories=True)
+    ordinal_root = next(
+        item for item in changed_ordinal.unknown if item.role == 'article'
+    ).atspi_obj.get_parent()
+    article_indexes = [
+        index
+        for index, child in enumerate(ordinal_root.children)
+        if child.role == 'article'
+    ]
+    first, second = article_indexes[:2]
+    ordinal_root.children[first], ordinal_root.children[second] = (
+        ordinal_root.children[second],
+        ordinal_root.children[first],
+    )
+
+    return [
+        ('text', changed_text),
+        ('activity', changed_activity),
+        ('age', changed_age),
+        ('uri', changed_uri),
+        ('structural_path', changed_path),
+        ('ordinal', changed_ordinal),
+    ]
 
 
 def navigation_snapshot() -> Snapshot:
@@ -557,17 +631,47 @@ def main() -> int:
         == 'Unread notification. Alice posted an exact update.',
         'raw notification text was not preserved',
     )
-    changed = project_notification_inventory(
-        inventory_snapshot(
-            notification_text='Unread notification. Alice changed the exact update.',
-            include_categories=True,
-        ),
-        REVISION,
+    require(
+        artifact['inventory_sha256'] == canonical_sha256({
+            'schema': artifact['schema'],
+            'platform': artifact['platform'],
+            'route': artifact['route'],
+            'mounted_article_count': artifact['mounted_article_count'],
+            'rows': [
+                {
+                    key: value
+                    for key, value in row.items()
+                    if key != 'snapshot_revision'
+                }
+                for row in artifact['rows']
+            ],
+            'actionable_links': artifact['actionable_links'],
+        }),
+        'inventory digest material included provenance or omitted semantics',
+    )
+    same_surface_next_observation = project_notification_inventory(
+        inventory_snapshot(include_categories=True),
+        REVISION_B,
     )
     require(
-        changed.artifact['inventory_sha256'] != artifact['inventory_sha256'],
-        'inventory digest ignored raw notification text',
+        artifact['snapshot_revision'] == REVISION
+        and all(row['snapshot_revision'] == REVISION for row in artifact['rows'])
+        and same_surface_next_observation.artifact['snapshot_revision'] == REVISION_B
+        and all(
+            row['snapshot_revision'] == REVISION_B
+            for row in same_surface_next_observation.artifact['rows']
+        )
+        and same_surface_next_observation.artifact['inventory_sha256']
+        == artifact['inventory_sha256'],
+        'equivalent observations did not preserve provenance with one semantic digest',
     )
+    semantic_variants = semantic_inventory_variants()
+    for changed_field, changed_surface in semantic_variants:
+        changed = project_notification_inventory(changed_surface, REVISION_B)
+        require(
+            changed.artifact['inventory_sha256'] != artifact['inventory_sha256'],
+            f'inventory digest ignored changed {changed_field}',
+        )
 
     obsolete_one_link = inventory_snapshot(include_categories=True)
     obsolete_article = next(
@@ -891,14 +995,8 @@ def main() -> int:
         'non-exact Notifications route did not compile mandatory activation',
     )
 
-    first_continuation_surface = inventory_snapshot(include_categories=True)
-    first_continuation_surface.unknown.append(ref(Node(
-        'push button',
-        'Show more results',
-        states=['enabled', 'focusable'],
-    )))
-    first_continuation_surface = manual.augment_snapshot(
-        first_continuation_surface
+    first_continuation_surface = with_continuation(
+        inventory_snapshot(include_categories=True)
     )
     continuation_receipts = list(receipts)
     first_continuation_readiness = compile_preparation_step(
@@ -919,13 +1017,14 @@ def main() -> int:
     first_excluded_envelope = {**envelope, 'selection': first_exclusions}
     first_continuation = compile_preparation_step(
         first_continuation_surface,
-        REVISION,
+        REVISION_B,
         first_excluded_envelope,
         continuation_receipts,
     )
     require(
-        first_continuation['phase'] == 'notifications_continuation',
-        'complete exact exclusions did not authorize continuation',
+        first_continuation['phase'] == 'notifications_continuation'
+        and first_continuation['snapshot_revision'] == REVISION_B,
+        'equivalent fresh observation refused exact prior exclusions',
     )
     continuation_receipts.append(accept_preparation_step(
         first_continuation,
@@ -1122,20 +1221,45 @@ def main() -> int:
     )
     candidate_before_continuation = compile_preparation_step(
         first_continuation_surface,
-        REVISION,
+        REVISION_B,
         selected_envelope,
         receipts,
     )
     require(
         candidate_before_continuation['phase'] == 'notification_candidate'
+        and candidate_before_continuation['snapshot_revision'] == REVISION_B
         and candidate_before_continuation['element'].endswith(ACTIVITY_A)
         and len(
             first_continuation_surface.mapped.get(
                 candidate_before_continuation['element'],
             ) or []
         ) == 1,
-        'exact qualifying selection did not outrank continuation availability',
+        'equivalent fresh observation refused exact qualifying selection',
     )
+    for changed_field, changed_surface in semantic_variants:
+        changed_continuation_surface = with_continuation(changed_surface)
+        expect_error(
+            lambda changed_continuation_surface=changed_continuation_surface: (
+                compile_preparation_step(
+                    changed_continuation_surface,
+                    REVISION_B,
+                    selected_envelope,
+                    receipts,
+                )
+            ),
+            f'changed {changed_field} retained stale selection authority',
+        )
+        expect_error(
+            lambda changed_continuation_surface=changed_continuation_surface: (
+                compile_preparation_step(
+                    changed_continuation_surface,
+                    REVISION_B,
+                    first_excluded_envelope,
+                    receipts,
+                )
+            ),
+            f'changed {changed_field} retained stale exclusion authority',
+        )
     candidate = compile_preparation_step(
         stream_without_categories,
         REVISION,
