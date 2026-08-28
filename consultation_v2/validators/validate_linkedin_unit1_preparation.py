@@ -576,6 +576,10 @@ class Clock:
 
 
 def validate_initial_observation_barrier() -> None:
+    require(
+        manual._initial_preparation_observation_contract()['timeout_ms'] == 45000,
+        'initial barrier does not cover two measured LinkedIn tree traversals',
+    )
     exact = navigation_snapshot()
     missing = Snapshot(platform='linkedin', url=exact.url)
     sequence = [missing, exact, exact]

@@ -61,6 +61,9 @@ After Notifications activation has produced the transaction-bound exact-route an
 candidate projection continues on the exact `notifications_all` route even if LinkedIn virtualizes the category
 radio controls. Navigation verification still requires the live All-category controls; their later unmount does
 not erase the established receipt or hide exact URI-, state-, activity-, and age-qualified candidates.
+The initial Notifications target remains a two-sample read-only barrier. Its LinkedIn-local 45-second budget
+covers two measured full AT-SPI traversals on the production display; it does not add a sleep, action retry, or
+mutation authority.
 
 `ready_for_private_draft` is emitted only after the selected activity exposes one exact mapped post body and a
 separately receipted exact thread-open action exposes the selected thread. When the displayed count is greater
