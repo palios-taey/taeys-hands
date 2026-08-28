@@ -189,6 +189,7 @@ def notification_article(
 def inventory_snapshot(
     *,
     notification_text: str = 'Unread notification. Alice posted an exact update.',
+    include_categories: bool = False,
 ) -> Snapshot:
     root = Node('document web', 'LinkedIn Notifications')
     article_a, refs_a = notification_article(
@@ -209,11 +210,24 @@ def inventory_snapshot(
         '3d',
         uri='https://www.linkedin.com/me/search-appearances/',
     )
-    root.add(article_a, article_b, article_c)
+    categories = [
+        Node(
+            'radio button',
+            name,
+            states=['checked'] if name == 'All' else [],
+        )
+        for name in ('All', 'Jobs', 'My posts', 'Mentions')
+    ] if include_categories else []
+    root.add(*categories, article_a, article_b, article_c)
     return Snapshot(
         platform='linkedin',
         url='https://www.linkedin.com/notifications/?filter=all',
-        unknown=[*refs_a, *refs_b, *refs_c],
+        unknown=[
+            *(ref(category) for category in categories),
+            *refs_a,
+            *refs_b,
+            *refs_c,
+        ],
     )
 
 
@@ -373,7 +387,7 @@ def schema_required(name: str) -> set[str]:
 
 
 def main() -> int:
-    stream = inventory_snapshot()
+    stream = inventory_snapshot(include_categories=True)
     inventory = project_notification_inventory(stream, REVISION)
     artifact = inventory.artifact
     require(artifact['mounted_article_count'] == 3, 'full stream omitted an article')
@@ -386,7 +400,8 @@ def main() -> int:
     )
     changed = project_notification_inventory(
         inventory_snapshot(
-            notification_text='Unread notification. Alice changed the exact update.'
+            notification_text='Unread notification. Alice changed the exact update.',
+            include_categories=True,
         ),
         REVISION,
     )
@@ -395,7 +410,7 @@ def main() -> int:
         'inventory digest ignored raw notification text',
     )
 
-    malformed = inventory_snapshot()
+    malformed = inventory_snapshot(include_categories=True)
     malformed_article = next(
         item for item in malformed.unknown if item.role == 'article'
     )
@@ -405,7 +420,7 @@ def main() -> int:
         lambda: project_notification_inventory(malformed, REVISION),
         'malformed article was silently omitted',
     )
-    duplicated = inventory_snapshot()
+    duplicated = inventory_snapshot(include_categories=True)
     duplicate_root = next(
         item for item in duplicated.unknown if item.role == 'article'
     ).atspi_obj.get_parent()
@@ -450,41 +465,93 @@ def main() -> int:
     )
     receipts.append(accept_preparation_step(navigation, barrier(navigation), None))
 
-    route_proof = compile_preparation_step(
-        stream,
+    exact_route_navigation = inventory_snapshot(include_categories=True)
+    exact_route_navigation.mapped[manual.NOTIFICATIONS_NAVIGATION] = (
+        navigation_snapshot().mapped[manual.NOTIFICATIONS_NAVIGATION]
+    )
+    exact_route_card = compile_preparation_step(
+        exact_route_navigation,
         REVISION,
         envelope,
         [],
     )
     require(
-        route_proof['schema'] == 'linkedin_unit1_preparation_receipt_v1'
-        and route_proof['phase'] == 'notifications_navigation'
-        and route_proof['method'] == 'observe'
-        and route_proof['effect_class'] == 'read_only'
-        and route_proof['snapshot_revision'] == REVISION
-        and route_proof['previous_receipt_sha256'] is None,
-        'fresh exact Notifications route did not become phase proof',
+        exact_route_card['schema'] == 'linkedin_unit1_preparation_action_card_v1'
+        and exact_route_card['phase'] == 'notifications_navigation'
+        and exact_route_card['method'] == 'activate'
+        and exact_route_card['element'] == manual.NOTIFICATIONS_NAVIGATION,
+        'exact Notifications URL skipped mandatory Notifications activation',
+    )
+
+    missing_categories = inventory_snapshot(include_categories=False)
+    missing_categories.mapped[manual.NOTIFICATIONS_NAVIGATION] = (
+        navigation_snapshot().mapped[manual.NOTIFICATIONS_NAVIGATION]
+    )
+    original_notifications_target = manual._notifications_target
+    manual._notifications_target = lambda _snapshot: (
+        missing_categories.mapped[manual.NOTIFICATIONS_NAVIGATION][0],
+        1,
+    )
+    try:
+        augmented_missing_categories = manual.augment_snapshot(missing_categories)
+    finally:
+        manual._notifications_target = original_notifications_target
+    require(
+        compile_preparation_step(
+            augmented_missing_categories,
+            REVISION,
+            envelope,
+            [],
+        )['element'] == manual.NOTIFICATIONS_NAVIGATION,
+        'missing category proof hid the mandatory Notifications target',
     )
     require(
-        schema_required('unit1-preparation-receipt.schema.json')
-        == set(route_proof),
-        'Notifications route proof did not preserve the receipt schema',
+        not any(
+            key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
+            or key.startswith(manual.NOTIFICATIONS_CONTINUATION_PREFIX)
+            for key in augmented_missing_categories.mapped
+        ),
+        'missing category proof exposed notification inventory actions',
     )
-    route_ready_selection = compile_preparation_step(
-        stream,
-        REVISION,
-        envelope,
-        [route_proof],
-    )
-    require(
-        route_ready_selection['state'] == 'ready_for_private_selection',
-        'Notifications route proof did not require a new compile observation',
-    )
-    near_route = inventory_snapshot()
-    near_route.url = 'https://www.linkedin.com/notifications/?filter=mentions'
     expect_error(
-        lambda: compile_preparation_step(near_route, REVISION, envelope, []),
-        'non-exact Notifications route became phase proof',
+        lambda: project_notification_inventory(missing_categories, REVISION),
+        'notification inventory bypassed exact All-category proof',
+    )
+    navigation_postcondition = manual.verify_post_action(
+        stream,
+        manual.NOTIFICATIONS_NAVIGATION,
+        'activate',
+    )
+    require(
+        navigation_postcondition['route_exact'] is True
+        and navigation_postcondition['category_exact'] is True,
+        'Notifications activation did not prove exact route and All category',
+    )
+    try:
+        manual.verify_post_action(
+            missing_categories,
+            manual.NOTIFICATIONS_NAVIGATION,
+            'activate',
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            'Notifications activation accepted a missing All-category proof'
+        )
+    near_route = inventory_snapshot(include_categories=True)
+    near_route.url = 'https://www.linkedin.com/notifications/?filter=mentions'
+    near_route.mapped[manual.NOTIFICATIONS_NAVIGATION] = (
+        navigation_snapshot().mapped[manual.NOTIFICATIONS_NAVIGATION]
+    )
+    require(
+        compile_preparation_step(
+            near_route,
+            REVISION,
+            envelope,
+            [],
+        )['element'] == manual.NOTIFICATIONS_NAVIGATION,
+        'non-exact Notifications route did not compile mandatory activation',
     )
 
     ready_selection = compile_preparation_step(

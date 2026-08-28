@@ -30,7 +30,7 @@
     "card_sha256": {"$ref": "#/$defs/sha256"},
     "snapshot_revision": {"$ref": "#/$defs/sha256"},
     "element_sha256": {"$ref": "#/$defs/sha256"},
-    "method": {"enum": ["observe", "activate", "scroll_into_view", "mapped_pointer_activate"]},
+    "method": {"enum": ["activate", "scroll_into_view", "mapped_pointer_activate"]},
     "effect_class": {"type": "string", "minLength": 1},
     "postcondition_sha256": {"$ref": "#/$defs/sha256"},
     "postcondition_passed": {"const": true},

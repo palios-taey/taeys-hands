@@ -180,7 +180,7 @@ def _validate_yaml() -> list[str]:
         'element_key': 'notifications_navigation',
         'operation': 'activate',
         'postcondition': {
-            'projection': 'exact_route',
+            'projection': 'exact_route_and_all_category',
             'route_key': 'notifications_all',
         },
         'observation_barrier': {
