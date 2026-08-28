@@ -450,6 +450,43 @@ def main() -> int:
     )
     receipts.append(accept_preparation_step(navigation, barrier(navigation), None))
 
+    route_proof = compile_preparation_step(
+        stream,
+        REVISION,
+        envelope,
+        [],
+    )
+    require(
+        route_proof['schema'] == 'linkedin_unit1_preparation_receipt_v1'
+        and route_proof['phase'] == 'notifications_navigation'
+        and route_proof['method'] == 'observe'
+        and route_proof['effect_class'] == 'read_only'
+        and route_proof['snapshot_revision'] == REVISION
+        and route_proof['previous_receipt_sha256'] is None,
+        'fresh exact Notifications route did not become phase proof',
+    )
+    require(
+        schema_required('unit1-preparation-receipt.schema.json')
+        == set(route_proof),
+        'Notifications route proof did not preserve the receipt schema',
+    )
+    route_ready_selection = compile_preparation_step(
+        stream,
+        REVISION,
+        envelope,
+        [route_proof],
+    )
+    require(
+        route_ready_selection['state'] == 'ready_for_private_selection',
+        'Notifications route proof did not require a new compile observation',
+    )
+    near_route = inventory_snapshot()
+    near_route.url = 'https://www.linkedin.com/notifications/?filter=mentions'
+    expect_error(
+        lambda: compile_preparation_step(near_route, REVISION, envelope, []),
+        'non-exact Notifications route became phase proof',
+    )
+
     ready_selection = compile_preparation_step(
         stream,
         REVISION,

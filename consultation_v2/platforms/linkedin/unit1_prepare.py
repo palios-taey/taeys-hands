@@ -39,6 +39,7 @@ PREPARATION_RECEIPT_SCHEMA = 'linkedin_unit1_preparation_receipt_v1'
 PREPARATION_RESULT_SCHEMA = 'linkedin_unit1_preparation_result_v1'
 NOTIFICATION_INVENTORY_SCHEMA = 'linkedin_notification_inventory_v1'
 SELECTED_SOURCE_SCHEMA = 'linkedin_selected_post_thread_source_v1'
+NOTIFICATIONS_ROUTE_PROOF_ELEMENT = 'notifications_all'
 
 _SHA256 = re.compile(r'^[0-9a-f]{64}$')
 _PUBLIC_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
@@ -710,6 +711,22 @@ def verify_preparation_receipts(
             raise LinkedInUnit1PreparationError(
                 'Unit 1 preparation must begin from Notifications navigation'
             )
+        method = payload.get('method')
+        if method == 'observe':
+            if (
+                sequence != 1
+                or phase != 'notifications_navigation'
+                or payload.get('element_sha256')
+                != _text_sha256(NOTIFICATIONS_ROUTE_PROOF_ELEMENT)
+                or payload.get('effect_class') != 'read_only'
+            ):
+                raise LinkedInUnit1PreparationError(
+                    'Notifications route proof receipt is invalid'
+                )
+        elif method != _PHASE_METHODS[phase]:
+            raise LinkedInUnit1PreparationError(
+                'preparation receipt method does not match its phase'
+            )
         if (
             previous_phase is not None
             and phase not in _PHASE_TRANSITIONS[previous_phase]
@@ -824,6 +841,50 @@ def _preparation_result(
     return result
 
 
+def _notifications_route_proof_receipt(
+    *,
+    snapshot: Snapshot,
+    snapshot_revision: str,
+    transaction_sha256: str,
+) -> dict[str, Any]:
+    if not _exact_engagement_route(snapshot.url, NOTIFICATIONS_ROUTE_PROOF_ELEMENT):
+        raise LinkedInUnit1PreparationError(
+            'Notifications route proof requires exact Notifications-All'
+        )
+    revision = _require_sha256(snapshot_revision, 'snapshot_revision')
+    proof = {
+        'schema': 'linkedin_unit1_preparation_route_proof_v1',
+        'transaction_sha256': transaction_sha256,
+        'sequence': 1,
+        'phase': 'notifications_navigation',
+        'snapshot_revision': revision,
+        'route': NOTIFICATIONS_ROUTE_PROOF_ELEMENT,
+        'url': snapshot.url,
+    }
+    receipt = {
+        'schema': PREPARATION_RECEIPT_SCHEMA,
+        'transaction_sha256': transaction_sha256,
+        'sequence': 1,
+        'phase': 'notifications_navigation',
+        'previous_receipt_sha256': None,
+        'card_sha256': _sha256(proof),
+        'snapshot_revision': revision,
+        'element_sha256': _text_sha256(NOTIFICATIONS_ROUTE_PROOF_ELEMENT),
+        'method': 'observe',
+        'effect_class': 'read_only',
+        'postcondition_sha256': _sha256({
+            'postcondition': NOTIFICATIONS_ROUTE_PROOF_ELEMENT,
+            'snapshot_revision': revision,
+            'url': snapshot.url,
+        }),
+        'postcondition_passed': True,
+        'fresh_observation_required': True,
+        'next_step_authorized': True,
+    }
+    receipt['receipt_sha256'] = _sha256(receipt)
+    return receipt
+
+
 def compile_preparation_step(
     snapshot: Snapshot,
     snapshot_revision: str,
@@ -839,6 +900,15 @@ def compile_preparation_step(
     )
     sequence = len(receipts) + 1
     if previous_phase is None:
+        if _exact_engagement_route(
+            snapshot.url,
+            NOTIFICATIONS_ROUTE_PROOF_ELEMENT,
+        ):
+            return _notifications_route_proof_receipt(
+                snapshot=snapshot,
+                snapshot_revision=snapshot_revision,
+                transaction_sha256=transaction_sha256,
+            )
         return _preparation_card(
             snapshot=snapshot,
             snapshot_revision=snapshot_revision,
