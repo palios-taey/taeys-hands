@@ -253,10 +253,12 @@ workflow:
           - enabled
           - focusable
         postcondition:
-          kind: notification_stream_count_growth
+          kind: notification_stream_stable_novelty
           identity: exact_yaml_content_link_uri
-          ordered_prefix_digest: sha256_uri_digests_truncated_16
-          candidate_projection: separate
+          frozen_inventory_digest: sha256_uri_digests_truncated_16
+          frozen_inventory_members: sha256_uri_digests
+          novelty: at_least_one_exact_unseen_identity
+          candidate_projection: exact_separate
       selected_activity_postcondition:
         identity_sources:
           - document_url
