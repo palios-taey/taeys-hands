@@ -67,6 +67,9 @@ cannot be interpreted as an already-open or zero-comment thread. Every visible c
 `text` or `media_link_only` kind, exact text, and text digest. The displayed comment count must equal the
 typed-row count. Absence is accepted only as exact zero after the thread-open receipt: no count control and no
 visible comment row.
+The current LinkedIn feed-card contract maps the complete body at structural path `[0,9,0]` and the exact
+comment-count control at `[0,12]`. Body bytes come from the complete AT-SPI node text before any shallow mapped
+text projection; a changed role, state, path, or empty body stops preparation before drafting.
 
 The private selection repeats the public preparation `transaction_sha256` inside its own signed bytes. A
 selection from another cycle, transaction, display, or policy envelope is rejected even when its inventory and

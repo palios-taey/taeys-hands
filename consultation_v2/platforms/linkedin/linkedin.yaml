@@ -287,7 +287,7 @@ workflow:
         body:
           index_path:
             - 0
-            - 8
+            - 9
             - 0
           role: section
           states_include:
@@ -303,7 +303,7 @@ workflow:
           role: push button
           index_path:
             - 0
-            - 11
+            - 12
           states_include:
             - enabled
             - focusable
