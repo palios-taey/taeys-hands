@@ -95,7 +95,11 @@ current refs, public control labels, declared operations, completion booleans,
 surface revision, and source-surface digest needed to derive one next action.
 Applicant values, value digests, selected semantic values, native paths, and
 native text are absent. Options are included only from the freshly observed
-options surface.
+options surface. For the exact Greenhouse `Country` combo, each public rendered
+option name must satisfy the YAML-owned `country_calling_code_suffix_v1`
+contract. The capsule preserves that rendered name for exact selection and
+separately exposes its public country-name `semantic_token`; every other combo
+continues to expose no semantic token.
 
 The native chooser is also one action per call. The ATS lane supplies its
 validated YAML contract, one exact Firefox object, and the exact configured

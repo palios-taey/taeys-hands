@@ -495,6 +495,11 @@ def _assert_confirmation_capsule_receipt_order() -> None:
 def _assert_combo_owned_options_surface() -> None:
     provider_spec = load_provider_spec('greenhouse')
     action_spec = load_action_spec()
+    if action_spec.document['options_surface']['semantic_projection'] != {
+        'origin': {'name': 'Country', 'role': 'combo box'},
+        'kind': 'country_calling_code_suffix_v1',
+    }:
+        raise RuntimeError('Greenhouse country semantic contract is not exact')
     route = match_provider_route(
         provider_spec,
         'https://boards.greenhouse.io/example/jobs/123456',
@@ -525,37 +530,45 @@ def _assert_combo_owned_options_surface() -> None:
 
     collapsed_node = _FakeNode('Country', 'combo box', base_states)
     collapsed_form = [{**expanded_form[0], 'states': base_states, 'atspi_obj': collapsed_node}]
-    option_a = _FakeNode('Canada', 'list item', ['showing', 'visible', 'enabled'])
-    option_b = _FakeNode('United States', 'list item', ['showing', 'visible', 'enabled'])
-    container = _FakeNode(
-        '',
-        'list box',
-        ['showing', 'visible'],
-        children=[option_a, option_b],
-    )
-    option_tree = [
-        {'name': '', 'role': 'list box', 'states': ['showing'], 'atspi_obj': container},
-        {
-            'name': 'Canada',
-            'role': 'list item',
-            'states': ['showing', 'enabled'],
-            'x': 120,
-            'y': 240,
-            'atspi_obj': option_a,
-        },
-        {
-            'name': 'United States',
-            'role': 'list item',
-            'states': ['showing', 'enabled'],
-            'x': 120,
-            'y': 280,
-            'atspi_obj': option_b,
-        },
-    ]
     firefox = _FakeNode('Firefox', 'application', ['enabled'])
     document = _FakeNode('Greenhouse', 'document web', ['showing', 'visible'])
 
-    def capture(form_elements: list[dict], option_elements: list[dict]):
+    def option_tree(names: list[str]) -> list[dict]:
+        nodes = [
+            _FakeNode(name, 'list item', ['showing', 'visible', 'enabled'])
+            for name in names
+        ]
+        container = _FakeNode(
+            '',
+            'list box',
+            ['showing', 'visible'],
+            children=nodes,
+        )
+        return [
+            {
+                'name': '',
+                'role': 'list box',
+                'states': ['showing'],
+                'atspi_obj': container,
+            },
+            *[
+                {
+                    'name': name,
+                    'role': 'list item',
+                    'states': ['showing', 'enabled'],
+                    'x': 120,
+                    'y': 240 + (index * 40),
+                    'atspi_obj': node,
+                }
+                for index, (name, node) in enumerate(zip(names, nodes, strict=True))
+            ],
+        ]
+
+    def capture(
+        form_elements: list[dict],
+        option_elements: list[dict],
+        combo_ref: str = origin_ref,
+    ):
         with (
             mock.patch.object(greenhouse, '_firefox_pid', return_value=4242),
             mock.patch.object(greenhouse.atspi, 'find_all_firefox', return_value=[firefox]),
@@ -580,27 +593,107 @@ def _assert_combo_owned_options_surface() -> None:
                 return_value=Rect(0, 100, 1000, 700),
             ),
         ):
-            return _capture_options(provider_spec, action_spec, secret, origin_ref)
+            return _capture_options(provider_spec, action_spec, secret, combo_ref)
 
-    exact = capture(expanded_form, option_tree)
+    option_elements = option_tree(['Canada +1', 'United States +1'])
+    exact = capture(expanded_form, option_elements)
     if exact.public['origin']['combo_ref'] != origin_ref:
         raise RuntimeError('options surface lost its exact origin combo ref')
     if exact.public['origin']['form_revision'] != expanded_public['revision']:
         raise RuntimeError('options surface lost its expanded form revision')
     if exact.public['container']['match_count'] != 1:
         raise RuntimeError('options surface did not prove one exact container')
-    if [item['name'] for item in exact.public['controls']] != ['Canada', 'United States']:
+    if [item['name'] for item in exact.public['controls']] != [
+        'Canada +1',
+        'United States +1',
+    ]:
         raise RuntimeError('options surface did not expose exact container descendants')
+    if [item.get('semantic_token') for item in exact.public['controls']] != [
+        'Canada',
+        'United States',
+    ]:
+        raise RuntimeError('country option semantic tokens are not exact')
+    capsule = greenhouse._next_action_surface_capsule(
+        exact.public,
+        route.application_identity_sha256,
+    )
+    if [
+        (item.get('name'), item.get('semantic_token'))
+        for item in capsule['controls']
+    ] != [
+        ('Canada +1', 'Canada'),
+        ('United States +1', 'United States'),
+    ]:
+        raise RuntimeError('country tokens lost their exact public rendered-name binding')
 
     try:
-        capture(collapsed_form, option_tree)
+        capture(collapsed_form, option_elements)
     except GreenhouseOneActionError as exc:
         if 'not owned by the activated combo' not in str(exc):
             raise
     else:
         raise RuntimeError('unrelated nonempty options passed a collapsed combo')
 
-    duplicate_option = _FakeNode('Other', 'list item', ['showing', 'visible', 'enabled'])
+    referral_node = _FakeNode(
+        'Referral source',
+        'combo box',
+        [*base_states, 'expanded'],
+    )
+    referral_form = [{
+        **expanded_form[0],
+        'name': 'Referral source',
+        'atspi_obj': referral_node,
+    }]
+    referral_public, _ = project_form_surface(
+        provider_spec,
+        action_spec,
+        route,
+        referral_form,
+        Rect(0, 100, 1000, 700),
+        secret,
+    )
+    referral_ref = referral_public['controls'][0]['ref']
+    referral = capture(
+        referral_form,
+        option_tree(['Employee referral', 'LinkedIn']),
+        referral_ref,
+    )
+    referral_capsule = greenhouse._next_action_surface_capsule(
+        referral.public,
+        route.application_identity_sha256,
+    )
+    if any(
+        'semantic_token' in item
+        for item in [*referral.public['controls'], *referral_capsule['controls']]
+    ):
+        raise RuntimeError('non-Country option received a semantic token')
+
+    for drifted_name in ('Canada', 'Canada  +1', 'Canada +1234', 'Canada +١'):
+        try:
+            capture(expanded_form, option_tree([drifted_name]))
+        except GreenhouseOneActionError as exc:
+            if 'country_calling_code_suffix_v1' not in str(exc):
+                raise
+        else:
+            raise RuntimeError(f'country option drift passed: {drifted_name!r}')
+
+    try:
+        capture(expanded_form, option_tree(['Canada +1', 'Canada +7']))
+    except GreenhouseOneActionError as exc:
+        if 'duplicate semantic tokens' not in str(exc):
+            raise
+    else:
+        raise RuntimeError('duplicate country semantic tokens did not fail loud')
+
+    try:
+        capture(expanded_form, option_tree([]))
+    except GreenhouseOneActionError as exc:
+        if 'cardinality is 0' not in str(exc):
+            raise
+    else:
+        raise RuntimeError('zero country semantic tokens did not fail loud')
+
+    duplicate_option = _FakeNode('Other +2', 'list item', ['showing', 'visible', 'enabled'])
     duplicate_container = _FakeNode(
         '',
         'list box',
@@ -608,7 +701,7 @@ def _assert_combo_owned_options_surface() -> None:
         children=[duplicate_option],
     )
     duplicate_tree = [
-        *option_tree,
+        *option_elements,
         {
             'name': '',
             'role': 'list box',
@@ -616,7 +709,7 @@ def _assert_combo_owned_options_surface() -> None:
             'atspi_obj': duplicate_container,
         },
         {
-            'name': 'Other',
+            'name': 'Other +2',
             'role': 'list item',
             'states': ['showing', 'enabled'],
             'x': 500,
