@@ -865,6 +865,28 @@ def _control_semantic_values(element: Mapping[str, Any]) -> tuple[str, ...]:
     return tuple(dict.fromkeys(values))
 
 
+def _required_elements_complete(elements: Iterable[Mapping[str, Any]]) -> bool:
+    required = [
+        element
+        for element in elements
+        if 'required' in _live_states(element)
+    ]
+    if not required:
+        return False
+    for element in required:
+        role = str(element.get('role') or '').strip().lower()
+        states = _live_states(element)
+        if role in {'entry', 'password text'} and not _control_text(element):
+            return False
+        if role == 'combo box' and not _control_semantic_values(element):
+            return False
+        if role in {'check box', 'radio button', 'toggle button'} and not (
+            {'checked', 'selected'} & states
+        ):
+            return False
+    return True
+
+
 def _combo_safety(element: Mapping[str, Any], document_rect: Rect) -> dict[str, Any]:
     rect = _element_rect(element)
     if rect is None or not rect.valid:
@@ -997,6 +1019,7 @@ def project_form_surface(
         'application_identity_sha256': route.application_identity_sha256,
         'route_grammar': route.grammar_id,
         'controls': public_controls,
+        'required_controls_complete': _required_elements_complete(bindings.values()),
     }
     public['complete_form_sha256'] = _complete_form_sha256(
         route.application_identity_sha256,
@@ -1439,25 +1462,7 @@ def _artifact_proven(
 
 
 def _required_controls_complete(surface: BoundSurface) -> bool:
-    required = [
-        (ref, element)
-        for ref, element in surface.bindings.items()
-        if 'required' in _live_states(element)
-    ]
-    if not required:
-        return False
-    for _ref, element in required:
-        role = str(element.get('role') or '').strip().lower()
-        states = _live_states(element)
-        if role in {'entry', 'password text'} and not _control_text(element):
-            return False
-        if role == 'combo box' and not _control_semantic_values(element):
-            return False
-        if role in {'check box', 'radio button', 'toggle button'} and not (
-            {'checked', 'selected'} & states
-        ):
-            return False
-    return True
+    return _required_elements_complete(surface.bindings.values())
 
 
 def _confirmation_matches(
@@ -1599,8 +1604,14 @@ def _next_action_surface_capsule(
             'controls': controls,
         }
         if surface.get('surface') == 'form':
+            required_controls_complete = surface.get('required_controls_complete')
+            if not isinstance(required_controls_complete, bool):
+                raise GreenhouseOneActionError(
+                    'form required-controls completion evidence is ambiguous'
+                )
             capsule['route_grammar'] = surface.get('route_grammar')
             capsule['complete_form_sha256'] = surface.get('complete_form_sha256')
+            capsule['required_controls_complete'] = required_controls_complete
         elif surface.get('surface') == 'options':
             origin = surface.get('origin') or {}
             capsule['origin'] = {
