@@ -1465,13 +1465,22 @@ def _confirmation_matches(
     provider_spec: ProviderSpec,
     action_spec: ActionSpec,
 ) -> bool:
+    return _confirmation_anchor(surface, provider_spec, action_spec) is not None
+
+
+def _confirmation_anchor(
+    surface: BoundSurface,
+    provider_spec: ProviderSpec,
+    action_spec: ActionSpec,
+) -> dict[str, str] | None:
     confirmation = action_spec.document['confirmation']
     if surface.route.grammar_id != confirmation['route_grammar']:
-        return False
+        return None
     elements = find_elements(
         surface.document,
         max_depth=provider_spec.document['form_projection']['max_depth'],
     )
+    proven: list[dict[str, str]] = []
     for anchor in confirmation['anchors_any']:
         matches = [
             element
@@ -1481,10 +1490,146 @@ def _confirmation_matches(
             and {'showing', 'visible'}.issubset(_live_states(element))
         ]
         if len(matches) == 1:
-            return True
+            proven.append({
+                'name': anchor['name'],
+                'role': str(matches[0].get('role') or '').strip().lower(),
+            })
         if len(matches) > 1:
             raise GreenhouseOneActionError('employer confirmation anchor is ambiguous')
-    return False
+    if len(proven) > 1:
+        raise GreenhouseOneActionError('multiple employer confirmation anchors are visible')
+    return proven[0] if proven else None
+
+
+def _route_sha256(route: RouteMatch) -> str:
+    return hashlib.sha256(canonical_json_bytes({
+        'provider': route.provider,
+        'route_id': route.grammar_id,
+        'host': route.host,
+        'application_identity_sha256': route.application_identity_sha256,
+    })).hexdigest()
+
+
+def _trailing_stable_sample_count(samples: Iterable[Mapping[str, Any]]) -> int:
+    materialized = list(samples)
+    if not materialized:
+        return 0
+    revision = materialized[-1].get('revision')
+    count = 0
+    for sample in reversed(materialized):
+        if (
+            sample.get('postcondition_matched') is not True
+            or sample.get('revision') != revision
+        ):
+            break
+        count += 1
+    return count
+
+
+def _employer_confirmation_evidence(
+    surface: BoundSurface,
+    provider_spec: ProviderSpec,
+    action_spec: ActionSpec,
+    samples: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    materialized = list(samples)
+    anchor = _confirmation_anchor(surface, provider_spec, action_spec)
+    stable_sample_count = _trailing_stable_sample_count(materialized)
+    stable_surface_revision = (
+        str(materialized[-1].get('revision') or '')
+        if materialized
+        else ''
+    )
+    if (
+        anchor is None
+        or stable_sample_count < 2
+        or stable_surface_revision != surface.public.get('revision')
+    ):
+        raise GreenhouseOneActionError(
+            'stable employer confirmation evidence is incomplete',
+            mutation_started=True,
+        )
+    _sha256_text(
+        stable_surface_revision,
+        'employer confirmation stable surface revision',
+    )
+    return {
+        'schema': 'ats_greenhouse_employer_confirmation_v1',
+        'provider': 'greenhouse',
+        'application_identity_sha256': surface.route.application_identity_sha256,
+        'route_id': surface.route.grammar_id,
+        'route_sha256': _route_sha256(surface.route),
+        'anchor_sha256': hashlib.sha256(canonical_json_bytes(anchor)).hexdigest(),
+        'stable_surface_revision': stable_surface_revision,
+        'stable_sample_count': stable_sample_count,
+        'observation_samples_sha256': hashlib.sha256(
+            canonical_json_bytes(materialized)
+        ).hexdigest(),
+    }
+
+
+def _next_action_surface_capsule(
+    surface: Mapping[str, Any],
+    application_identity_sha256: str,
+) -> dict[str, Any]:
+    source_sha256 = hashlib.sha256(canonical_json_bytes(surface)).hexdigest()
+    if surface.get('schema') == SURFACE_SCHEMA:
+        controls: list[dict[str, Any]] = []
+        for raw in surface.get('controls') or []:
+            control = {
+                key: raw[key]
+                for key in ('ref', 'name', 'role', 'operations')
+                if key in raw
+            }
+            if 'value_length' in raw:
+                control['is_empty'] = raw['value_length'] == 0
+            if 'semantic_values' in raw:
+                control['has_semantic_value'] = bool(raw['semantic_values'])
+            for key in ('artifact_slot', 'boundary', 'combo_safety'):
+                if key in raw:
+                    control[key] = raw[key]
+            controls.append(control)
+        capsule: dict[str, Any] = {
+            'schema': 'ats_greenhouse_next_action_surface_v1',
+            'provider': 'greenhouse',
+            'application_identity_sha256': application_identity_sha256,
+            'surface': surface.get('surface'),
+            'revision': surface.get('revision'),
+            'source_surface_sha256': source_sha256,
+            'controls': controls,
+        }
+        if surface.get('surface') == 'form':
+            capsule['route_grammar'] = surface.get('route_grammar')
+            capsule['complete_form_sha256'] = surface.get('complete_form_sha256')
+        elif surface.get('surface') == 'options':
+            origin = surface.get('origin') or {}
+            capsule['origin'] = {
+                key: origin[key]
+                for key in ('combo_ref', 'name', 'role', 'form_revision', 'match_count')
+                if key in origin
+            }
+        return capsule
+    if surface.get('schema') == 'native_dialog_snapshot.v1':
+        mapped: dict[str, list[dict[str, Any]]] = {}
+        for key, elements in (surface.get('mapped') or {}).items():
+            mapped[key] = [
+                {
+                    field: element[field]
+                    for field in ('key', 'ref', 'role', 'states')
+                    if field in element
+                }
+                for element in elements
+            ]
+        return {
+            'schema': 'ats_greenhouse_next_action_surface_v1',
+            'provider': 'greenhouse',
+            'application_identity_sha256': application_identity_sha256,
+            'surface': 'native_dialog',
+            'revision': surface.get('revision'),
+            'source_surface_sha256': source_sha256,
+            'mapped': mapped,
+        }
+    raise GreenhouseOneActionError('next-action surface type is unsupported')
 
 
 def _action_summary(action: Mapping[str, Any]) -> dict[str, Any]:
@@ -1534,6 +1679,10 @@ def _perform_action(
         return {
             'state': 'action_ready',
             'surface': surface.public,
+            'surface_capsule': _next_action_surface_capsule(
+                surface.public,
+                identity,
+            ),
             'samples': list(barrier.samples),
             'mutation_count': 0,
             'next_mutation_authorized': True,
@@ -1795,14 +1944,28 @@ def _perform_action(
 
     public_after = _surface_public(after.surface)
     state = 'employer_confirmation_proven' if kind == 'submit' else 'action_ready'
-    return {
+    result = {
         'state': state,
         'source_samples': list(source_samples),
         'postcondition_samples': list(after.samples),
         'surface': public_after,
         'mutation_count': 1,
         'next_mutation_authorized': kind != 'submit',
-    }, mutation_started
+    }
+    if kind == 'submit':
+        assert isinstance(after.surface, BoundSurface)
+        result['employer_confirmation'] = _employer_confirmation_evidence(
+            after.surface,
+            provider_spec,
+            action_spec,
+            after.samples,
+        )
+    else:
+        result['surface_capsule'] = _next_action_surface_capsule(
+            public_after,
+            identity,
+        )
+    return result, mutation_started
 
 
 def execute_frozen_action_fd(fd_value: int, expected_sha256: str) -> dict[str, Any]:
@@ -1870,7 +2033,12 @@ def execute_frozen_action_fd(fd_value: int, expected_sha256: str) -> dict[str, A
                 payload,
                 observation_id=observation_id,
             )
-            return {**payload, 'receipt_event_hash': receipt['event_hash']}
+            returned = {**payload, 'receipt_event_hash': receipt['event_hash']}
+            if request['action']['kind'] == 'submit':
+                confirmation = dict(returned['employer_confirmation'])
+                confirmation['receipt_sha256'] = receipt['event_hash']
+                returned['employer_confirmation'] = confirmation
+            return returned
         except Exception as exc:
             if isinstance(exc, GreenhouseOneActionError):
                 mutation_started = mutation_started or exc.mutation_started

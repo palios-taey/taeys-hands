@@ -304,6 +304,148 @@ def _assert_greenhouse_surface() -> None:
         public['controls'],
     ):
         raise RuntimeError('Greenhouse complete-form digest is not reproducible')
+    public['controls'][0]['semantic_values'] = ['private-applicant-value']
+    public['controls'][0]['value_length'] = len('private-applicant-value')
+    public['controls'][0]['value_sha256'] = hashlib.sha256(
+        b'private-applicant-value'
+    ).hexdigest()
+    capsule = greenhouse._next_action_surface_capsule(
+        public,
+        job.application_identity_sha256,
+    )
+    encoded_capsule = json.dumps(capsule, sort_keys=True)
+    if (
+        capsule['schema'] != 'ats_greenhouse_next_action_surface_v1'
+        or capsule['revision'] != public['revision']
+        or capsule['controls'][0].get('has_semantic_value') is not True
+        or 'private-applicant-value' in encoded_capsule
+        or 'value_sha256' in encoded_capsule
+        or 'semantic_values' in encoded_capsule
+    ):
+        raise RuntimeError('next-action surface capsule exposed applicant values')
+
+
+def _assert_confirmation_capsule_receipt_order() -> None:
+    provider_spec = load_provider_spec('greenhouse')
+    action_spec = load_action_spec()
+    route = match_provider_route(
+        provider_spec,
+        'https://boards.greenhouse.io/example/jobs/123456/confirmation',
+    )
+    revision = '8' * 64
+    samples = [
+        {
+            'sample': index,
+            'elapsed_ms': index * 100,
+            'revision': revision,
+            'postcondition_matched': True,
+            'refresh_policy': 'invalidate_reacquire',
+        }
+        for index in (1, 2)
+    ]
+    surface = greenhouse.BoundSurface(
+        public={'revision': revision},
+        bindings={},
+        firefox=None,
+        document=object(),
+        route=route,
+    )
+    anchor = {
+        'name': 'Application submitted',
+        'role': 'heading',
+        'states': ['showing', 'visible'],
+    }
+    with mock.patch.object(greenhouse, 'find_elements', return_value=[anchor]):
+        evidence = greenhouse._employer_confirmation_evidence(
+            surface,
+            provider_spec,
+            action_spec,
+            samples,
+        )
+    if (
+        evidence['schema'] != 'ats_greenhouse_employer_confirmation_v1'
+        or evidence['route_id'] != 'hosted_confirmation'
+        or evidence['stable_surface_revision'] != revision
+        or evidence['stable_sample_count'] != 2
+        or 'receipt_sha256' in evidence
+    ):
+        raise RuntimeError('employer confirmation evidence is not exact')
+
+    class ReceiptStore:
+        def __init__(self) -> None:
+            self.raw_payloads: list[dict[str, object]] = []
+            self.events: tuple[dict[str, object], ...] = ()
+
+        def __enter__(self) -> 'ReceiptStore':
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def has_execution(self, _action_id: str) -> bool:
+            return False
+
+        def write_once(
+            self,
+            _event: dict[str, object],
+            raw: bytes,
+        ) -> dict[str, str]:
+            self.raw_payloads.append(json.loads(raw))
+            return {
+                'event_hash': ('a' if len(self.raw_payloads) == 1 else 'b') * 64,
+            }
+
+    store = ReceiptStore()
+    request = {
+        'schema': 'ats_greenhouse_frozen_action_v1',
+        'provider': 'greenhouse',
+        'transaction_id': '00000000-0000-4000-8000-000000000000',
+        'action_id': '00000000-0000-4000-8000-000000000001',
+        'application_identity_sha256': route.application_identity_sha256,
+        'expected_prior_event_hash': None,
+        'action': {
+            'kind': 'submit',
+            'ref': 'r_' + ('1' * 32),
+            'revision': revision,
+            'precondition': {
+                'required_controls_complete': True,
+                'truth_attested': True,
+                'complete_form_sha256': '2' * 64,
+                'truth_attestation_sha256': '3' * 64,
+                'artifacts': [],
+            },
+        },
+    }
+    performed = {
+        'state': 'employer_confirmation_proven',
+        'source_samples': samples,
+        'postcondition_samples': samples,
+        'surface': {'revision': revision},
+        'mutation_count': 1,
+        'next_mutation_authorized': False,
+        'employer_confirmation': evidence,
+    }
+    fake_spec = types.SimpleNamespace(sha256='4' * 64)
+    with (
+        mock.patch.object(greenhouse, 'load_frozen_action_fd', return_value=request),
+        mock.patch.object(greenhouse, 'load_provider_spec', return_value=fake_spec),
+        mock.patch.object(greenhouse, 'load_action_spec', return_value=fake_spec),
+        mock.patch.object(greenhouse, '_lease_secret', return_value=b'x' * 32),
+        mock.patch.object(greenhouse, '_display', return_value=':17'),
+        mock.patch.object(greenhouse, '_firefox_pid', return_value=4242),
+        mock.patch.object(greenhouse, '_receipt_store', return_value=store),
+        mock.patch.object(greenhouse, '_perform_action', return_value=(performed, True)),
+        mock.patch.dict(os.environ, {'AT_SPI_BUS_ADDRESS': 'unix:path=/synthetic'}),
+    ):
+        returned = greenhouse.execute_frozen_action_fd(9, '5' * 64)
+    durable = store.raw_payloads[-1]['employer_confirmation']
+    if (
+        not isinstance(durable, dict)
+        or 'receipt_sha256' in durable
+        or returned['employer_confirmation']['receipt_sha256'] != 'b' * 64
+        or returned['receipt_event_hash'] != 'b' * 64
+    ):
+        raise RuntimeError('confirmation receipt binding became self-referential')
 
 
 def _assert_combo_owned_options_surface() -> None:
@@ -730,6 +872,7 @@ def main() -> int:
     _assert_native_text_redaction()
     _assert_fd_only_frozen_action_boundary()
     _assert_public_native_walker()
+    _assert_confirmation_capsule_receipt_order()
     print('ATS_GREENHOUSE_ONE_ACTION_OK')
     return 0
 
