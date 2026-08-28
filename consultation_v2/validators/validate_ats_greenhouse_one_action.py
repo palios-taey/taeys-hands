@@ -304,6 +304,8 @@ def _assert_greenhouse_surface() -> None:
         public['controls'],
     ):
         raise RuntimeError('Greenhouse complete-form digest is not reproducible')
+    if public['required_controls_complete'] is not False:
+        raise RuntimeError('absent required controls did not fail closed')
     public['controls'][0]['semantic_values'] = ['private-applicant-value']
     public['controls'][0]['value_length'] = len('private-applicant-value')
     public['controls'][0]['value_sha256'] = hashlib.sha256(
@@ -317,12 +319,54 @@ def _assert_greenhouse_surface() -> None:
     if (
         capsule['schema'] != 'ats_greenhouse_next_action_surface_v1'
         or capsule['revision'] != public['revision']
+        or capsule['required_controls_complete'] is not False
         or capsule['controls'][0].get('has_semantic_value') is not True
         or 'private-applicant-value' in encoded_capsule
         or 'value_sha256' in encoded_capsule
         or 'semantic_values' in encoded_capsule
     ):
         raise RuntimeError('next-action surface capsule exposed applicant values')
+
+    complete_elements = [
+        {
+            'name': 'Accept terms',
+            'role': 'check box',
+            'states': [*states, 'required', 'checked'],
+            'x': 120,
+            'y': 440,
+        },
+        elements[-1],
+    ]
+    complete_public, _ = project_form_surface(
+        provider_spec,
+        action_spec,
+        job,
+        complete_elements,
+        Rect(0, 100, 1000, 700),
+        b'y' * 32,
+    )
+    complete_capsule = greenhouse._next_action_surface_capsule(
+        complete_public,
+        job.application_identity_sha256,
+    )
+    if (
+        complete_public['required_controls_complete'] is not True
+        or complete_capsule['required_controls_complete'] is not True
+    ):
+        raise RuntimeError('complete required controls were not carried into the capsule')
+
+    ambiguous_public = dict(complete_public)
+    ambiguous_public.pop('required_controls_complete')
+    try:
+        greenhouse._next_action_surface_capsule(
+            ambiguous_public,
+            job.application_identity_sha256,
+        )
+    except GreenhouseOneActionError as exc:
+        if 'completion evidence is ambiguous' not in str(exc):
+            raise
+    else:
+        raise RuntimeError('missing required-controls evidence did not fail closed')
 
 
 def _assert_confirmation_capsule_receipt_order() -> None:
