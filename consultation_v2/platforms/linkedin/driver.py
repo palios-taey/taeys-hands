@@ -495,13 +495,19 @@ def _uri_matches(url: str | None, contract: Mapping[str, Any]) -> bool:
     if not isinstance(url, str) or not url:
         return False
     parsed = urlsplit(url)
-    return (
+    if not (
         parsed.scheme == contract.get('scheme')
         and parsed.hostname == contract.get('host')
         and parsed.port is None
         and (parsed.path.rstrip('/') or '/') == contract.get('normalized_path')
         and not parsed.fragment
-    )
+    ):
+        return False
+    expected_query = contract.get('exact_query')
+    return expected_query is None or parse_qs(
+        parsed.query,
+        keep_blank_values=True,
+    ) == {str(key): [str(value)] for key, value in expected_query.items()}
 
 
 def _nearest_document_url(element: ElementRef) -> str | None:
@@ -529,38 +535,47 @@ def _notifications_target(snapshot: Snapshot) -> tuple[ElementRef | None, int]:
     target = navigation.get('target') or {}
     action = navigation.get('action') or {}
     action_name = action.get('name')
+    action_names_exact = target.get('action_names_exact')
+    states_exact = target.get('states_exact')
+    ancestor_document = target.get('ancestor_document')
     if (
-        target.get('scope') != 'current_platform_document'
+        snapshot.platform != 'linkedin'
+        or target.get('scope') != 'exact_linkedin_navigation_preload_document'
+        or not isinstance(ancestor_document, dict)
+        or not isinstance(states_exact, list)
+        or not states_exact
+        or len(states_exact) != len(set(states_exact))
+        or not all(isinstance(state, str) and state for state in states_exact)
+        or not isinstance(action_names_exact, list)
+        or action_names_exact != [action_name]
         or not isinstance(action_name, str)
         or not action_name
         or action.get('index') != 0
     ):
         raise RuntimeError('LinkedIn Notifications authority is invalid')
 
-    def exact_action(element: ElementRef) -> bool:
+    def action_names(element: ElementRef) -> list[str] | None:
         if element.atspi_obj is None:
-            return False
+            return None
         try:
             action_iface = element.atspi_obj.get_action_iface()
             action_count = int(action_iface.get_n_actions()) if action_iface else 0
-            indexes = [
-                index
+            return [
+                str(action_iface.get_action_name(index) or '')
                 for index in range(action_count)
-                if str(action_iface.get_action_name(index) or '') == action_name
             ]
         except Exception as exc:
             raise RuntimeError('cannot read LinkedIn Notifications actions') from exc
-        return indexes == [0]
 
     matches = [
         element
         for element in _all_elements(snapshot)
         if (
             element.role == target.get('role')
-            and _states_match(element, target.get('states_include'))
+            and set(element.states) == set(states_exact)
             and _uri_matches(_element_uri(element), target.get('uri') or {})
-            and _nearest_document_url(element) == snapshot.url
-            and exact_action(element)
+            and _uri_matches(_nearest_document_url(element), ancestor_document)
+            and action_names(element) == action_names_exact
         )
     ]
     return (matches[0] if len(matches) == 1 else None), len(matches)
@@ -573,14 +588,14 @@ def _notifications_target_state_digest(
 ) -> str:
     navigation = _engagement_workflow().get('navigation') or {}
     authority = navigation.get('target') or {}
-    action = navigation.get('action') or {}
     return sha256_hex(canonical_json_bytes({
         'current_document_url': snapshot.url,
+        'ancestor_document_url': _nearest_document_url(target),
+        'target_uri': _element_uri(target),
         'role': target.role,
-        'states_include': authority.get('states_include'),
-        'normalized_uri': authority.get('uri'),
-        'action_name': action.get('name'),
-        'action_index': action.get('index'),
+        'states_exact': sorted(target.states),
+        'action_names_exact': authority.get('action_names_exact'),
+        'authority': authority,
         'match_count': match_count,
     }))
 

@@ -143,15 +143,27 @@ workflow:
           filter: my_posts_all
     navigation:
       target:
-        scope: current_platform_document
+        scope: exact_linkedin_navigation_preload_document
+        ancestor_document:
+          scheme: https
+          host: www.linkedin.com
+          normalized_path: /preload
+          exact_query:
+            _bprMode: vanilla
         role: link
-        states_include:
-          - showing
+        states_exact:
           - enabled
+          - focusable
+          - showing
         uri:
           scheme: https
           host: www.linkedin.com
           normalized_path: /notifications
+          exact_query:
+            filter: all
+            refresh: "true"
+        action_names_exact:
+          - jump
       action:
         name: jump
         index: 0
