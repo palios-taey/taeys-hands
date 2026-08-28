@@ -631,6 +631,39 @@ def main() -> int:
         == 'Unread notification. Alice posted an exact update.',
         'raw notification text was not preserved',
     )
+    offset_surface = inventory_snapshot(include_categories=True)
+    offset_root = next(
+        item.atspi_obj.get_parent()
+        for item in offset_surface.unknown
+        if item.role == 'article'
+    )
+    article_indexes = [
+        index
+        for index, child in enumerate(offset_root.children)
+        if child.role == 'article'
+    ]
+    first, second = article_indexes[:2]
+    offset_root.children[first], offset_root.children[second] = (
+        offset_root.children[second],
+        offset_root.children[first],
+    )
+    offset_surface = manual.augment_snapshot(offset_surface)
+    offset_inventory = project_notification_inventory(offset_surface, REVISION)
+    offset_actionable = offset_inventory.artifact['actionable_links'][0]
+    offset_target = offset_inventory.targets[offset_actionable['element']]
+    require(
+        offset_actionable['activity'] == ACTIVITY_A
+        and offset_actionable['ordinal'] == 2
+        and offset_actionable['element']
+        == f'{manual.NOTIFICATION_CANDIDATE_PREFIX}001_activity_{ACTIVITY_A}'
+        and offset_target.raw['notification_ordinal'] == 1
+        and len(
+            offset_surface.mapped.get(offset_actionable['element']) or []
+        ) == 1
+        and offset_surface.mapped[offset_actionable['element']][0].atspi_obj
+        is offset_target.atspi_obj,
+        'non-actionable article offset the exact runtime candidate key',
+    )
     require(
         artifact['inventory_sha256'] == canonical_sha256({
             'schema': artifact['schema'],

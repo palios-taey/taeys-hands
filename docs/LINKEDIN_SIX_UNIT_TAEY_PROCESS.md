@@ -157,7 +157,9 @@ has not been completely observed.
    exact. Each further continuation is a new transition with a new observation.
 6. Apply the runtime-injected freshness, target, dedup, and author-cooloff policy to each newly mounted exact
    inventory. A comment target must be no older than 72 hours.
-7. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.
+7. Activate one exact `notification_candidate_<actionable_ordinal>_activity_<id>` and require that same activity
+   in the selected route. The key ordinal is contiguous actionable-candidate order; the private selection's
+   notification ordinal remains full mounted-article order.
 8. Bind the exact observed `selected_post_activity_<id>` key, its activity identity, and its body SHA-256. Read the full selected post.
 9. If exact `selected_post_thread_open_activity_<id>_body_<digest>` is observed off-screen, invoke its declared
    `scroll_into_view` primitive once, require that same exact activity/body key fully inside the actual display,

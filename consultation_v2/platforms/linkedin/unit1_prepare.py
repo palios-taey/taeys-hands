@@ -544,8 +544,10 @@ def project_notification_inventory(
                 'mounted notification activity identities are duplicated'
             )
         seen_activities.add(activity)
+        candidate_ordinal = len(actionable_links) + 1
         key = (
-            f'{NOTIFICATION_CANDIDATE_PREFIX}{ordinal:03d}_activity_{activity}'
+            f'{NOTIFICATION_CANDIDATE_PREFIX}'
+            f'{candidate_ordinal:03d}_activity_{activity}'
         )
         element_sha256 = _text_sha256(key)
         actionable_links.append({
@@ -564,7 +566,7 @@ def project_notification_inventory(
                 **dict(content_link.raw or {}),
                 'notification_activity': activity,
                 'notification_age': age,
-                'notification_ordinal': ordinal,
+                'notification_ordinal': candidate_ordinal,
             },
         )
     artifact = {
