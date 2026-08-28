@@ -8,7 +8,6 @@ from typing import Any, Mapping, Sequence
 
 from consultation_v2.platforms.linkedin.driver import (
     _all_elements,
-    _element_uri,
     _exact_engagement_route,
 )
 from consultation_v2.platforms.linkedin.manual import (
@@ -18,12 +17,11 @@ from consultation_v2.platforms.linkedin.manual import (
     SELECTED_POST_PREFIX,
     SELECTED_THREAD_OPEN_PREFIX,
     _comment_relative_text,
-    _direct_children,
     _manual_comment_contract,
     _manual_notification_contract,
+    _notification_article_content_link,
     _notification_categories_exact,
     _node_at_index_path,
-    _node_role,
     _notification_activity,
     _notification_relative_age,
     _selected_post_root_and_body,
@@ -310,31 +308,6 @@ def preparation_transaction_sha256(value: Mapping[str, Any]) -> str:
     return transaction_sha256
 
 
-def _article_content_link(
-    article: ElementRef,
-    elements_by_identity: Mapping[int, ElementRef],
-) -> ElementRef:
-    children = _direct_children(article.atspi_obj)
-    direct_links = [
-        elements_by_identity.get(id(child))
-        for child in children
-        if _node_role(child) == 'link'
-    ]
-    if (
-        len(direct_links) != 1
-        or direct_links[0] is None
-        or not children
-        or id(children[0]) != id(direct_links[0].atspi_obj)
-        or id(_node_at_index_path(article.atspi_obj, [0]))
-        != id(direct_links[0].atspi_obj)
-    ):
-        raise LinkedInUnit1PreparationError(
-            'mounted notification article does not expose exactly one '
-            'canonical first-child content link'
-        )
-    return direct_links[0]
-
-
 def project_notification_inventory(
     snapshot: Snapshot,
     snapshot_revision: str,
@@ -390,7 +363,14 @@ def project_notification_inventory(
                 'mounted notification article structural paths are duplicated'
             )
         seen_paths.add(structural_path)
-        content_link = _article_content_link(article, elements_by_identity)
+        try:
+            content_link, uri = _notification_article_content_link(
+                article,
+                elements_by_identity,
+                contract,
+            )
+        except ValueError as exc:
+            raise LinkedInUnit1PreparationError(str(exc)) from exc
         notification_text = content_link.name
         if (
             not isinstance(notification_text, str)
@@ -407,7 +387,6 @@ def project_notification_inventory(
                 'mounted notification article does not expose exactly one exact age'
             )
         age_seconds = _age_seconds(age)
-        uri = _element_uri(content_link)
         activity = _notification_activity(uri or '', contract)
         raw_identity = (
             article.name,

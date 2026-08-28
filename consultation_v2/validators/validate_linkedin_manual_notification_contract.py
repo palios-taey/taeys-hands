@@ -41,6 +41,24 @@ def main() -> int:
         ((cfg.get('workflow') or {}).get('engagement_signal_capture') or {})
         .get('manual_notification_selection') or {}
     )
+    _require(
+        selection.get('article_structure') == {
+            'direct_child_roles_exact': [
+                'link',
+                'link',
+                'paragraph',
+                'section',
+            ],
+            'content_link_direct_child_index': 1,
+        },
+        'LinkedIn mounted-article structure contract drifted',
+    )
+    _require(
+        ((selection.get('continuation') or {}).get('postcondition') or {}).get(
+            'identity'
+        ) == 'exact_yaml_content_link_uri',
+        'LinkedIn continuation identity is not bound to the YAML content link',
+    )
     selected_thread = selection.get('selected_thread') or {}
     _require(
         selected_thread.get('scroll_into_view') == {

@@ -69,6 +69,24 @@ def main() -> int:
         'continuation card does not bind the full mounted stream',
     )
 
+    obsolete_one_link = with_controls(inventory_snapshot())
+    obsolete_article = next(
+        item for item in obsolete_one_link.unknown if item.role == 'article'
+    )
+    obsolete_children = obsolete_article.atspi_obj.children
+    obsolete_article.atspi_obj.children = [
+        obsolete_children[1],
+        obsolete_children[2],
+    ]
+    try:
+        manual.augment_snapshot(obsolete_one_link)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            'continuation accepted the obsolete one-link notification fixture'
+        )
+
     after = expanded_snapshot()
     receipt = manual.verify_post_action(after, continuation_key, 'activate')
     require(

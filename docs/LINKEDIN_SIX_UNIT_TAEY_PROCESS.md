@@ -133,7 +133,7 @@ has not been completely observed.
 3. Observe all mounted notification cards raw before filtering. Do not narrow the read to one activity type.
 4. If exact `notifications_show_more_after_<count>_<prefix>` is mapped, activate that continuation once and
    require the exact Notifications-All route and category plus growth of the full mounted-article count and
-   preservation of the ordered prefix digest of every article's exact canonical first-child URI. Candidate
+   preservation of the ordered prefix digest of every article's exact YAML-declared content-link URI. Candidate
    count is reported separately and does not prove that the mounted stream expanded. Each further continuation
    is a new transition with a new observation.
 5. Only after the mounted stream is fully evidenced, apply the runtime-injected freshness, target, dedup, and

@@ -205,6 +205,13 @@ workflow:
         - Notification
         - Notification.
         - Unread notification.
+      article_structure:
+        direct_child_roles_exact:
+          - link
+          - link
+          - paragraph
+          - section
+        content_link_direct_child_index: 1
       candidate:
         name_prefix: Unread notification.
         role: link
@@ -245,7 +252,7 @@ workflow:
           - focusable
         postcondition:
           kind: notification_stream_count_growth
-          identity: exact_first_child_link_uri
+          identity: exact_yaml_content_link_uri
           ordered_prefix_digest: sha256_uri_digests_truncated_16
           candidate_projection: separate
       selected_activity_postcondition:
