@@ -953,6 +953,43 @@ def _selected_thread_expander(
     return matches[0] if matches else (None, None)
 
 
+def _selected_thread_typed_rows(
+    visible_comments: list[Any],
+    comment_contract: dict[str, Any],
+) -> list[dict[str, Any]]:
+    ordered = list(visible_comments)
+    ordered.sort(key=lambda item: _structural_index_path(item.atspi_obj))
+    prefix = comment_contract['control_name_prefix']
+    suffixes = comment_contract['control_name_suffixes']
+    rows: list[dict[str, Any]] = []
+    for ordinal, control in enumerate(ordered, 1):
+        matched_suffixes = [
+            suffix for suffix in suffixes if control.name.endswith(suffix)
+        ]
+        if not control.name.startswith(prefix) or len(matched_suffixes) != 1:
+            raise ValueError(
+                'LinkedIn selected thread comment control name is not exact'
+            )
+        suffix = matched_suffixes[0]
+        author = _validate_private_author_name(
+            control.name[len(prefix):-len(suffix)]
+        )
+        text = _comment_relative_text(
+            control.atspi_obj,
+            comment_contract['relative_text'],
+        )
+        if '\x00' in text:
+            raise ValueError('LinkedIn selected thread comment text contains NUL')
+        rows.append({
+            'author_name': author,
+            'kind': 'text' if text else 'media_link_only',
+            'ordinal': ordinal,
+            'text': text,
+            'text_sha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
+        })
+    return rows
+
+
 def _notification_relative_age(element: Any, contract: dict[str, Any]) -> str | None:
     try:
         parent = element.atspi_obj.get_parent()
@@ -2213,6 +2250,17 @@ def verify_post_action(
         )
         observed_visible_count = len(visible_comments)
         remaining_count = expected_count - observed_visible_count
+        typed_rows = _selected_thread_typed_rows(
+            visible_comments,
+            _manual_comment_contract()['own_comment'],
+        )
+        typed_rows_sha256 = hashlib.sha256(json.dumps(
+            typed_rows,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(',', ':'),
+        ).encode('utf-8')).hexdigest()
         if (
             activity != expected_activity
             or observed_body_digest != expected_body_digest
@@ -2248,6 +2296,8 @@ def verify_post_action(
             'prior_visible_comment_count': prior_visible_count,
             'declared_more_comment_count': declared_more_count,
             'visible_comment_count': observed_visible_count,
+            'typed_row_count': len(typed_rows),
+            'typed_rows_sha256': typed_rows_sha256,
             'remaining_comment_count': remaining_count,
             'next_expander_count': 1 if expand_target is not None else 0,
             'observed_url': snapshot.url,
@@ -2647,6 +2697,8 @@ def stable_post_action_observation(
                 'prior_visible_comment_count',
                 'declared_more_comment_count',
                 'visible_comment_count',
+                'typed_row_count',
+                'typed_rows_sha256',
                 'remaining_comment_count',
                 'next_expander_count',
             ):

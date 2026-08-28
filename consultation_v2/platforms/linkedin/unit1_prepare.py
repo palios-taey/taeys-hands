@@ -17,7 +17,6 @@ from consultation_v2.platforms.linkedin.manual import (
     SELECTED_POST_PREFIX,
     SELECTED_THREAD_EXPAND_PREFIX,
     SELECTED_THREAD_OPEN_PREFIX,
-    _comment_relative_text,
     _manual_comment_contract,
     _manual_notification_contract,
     _notification_article_content_link,
@@ -26,6 +25,7 @@ from consultation_v2.platforms.linkedin.manual import (
     _notification_relative_age,
     _selected_post_root_and_body,
     _selected_thread_controls,
+    _selected_thread_typed_rows,
     _structural_index_path,
     element_operation,
 )
@@ -617,31 +617,6 @@ def _comment_count(name: str) -> int:
     )
 
 
-def _comment_author(name: str, contract: Mapping[str, Any]) -> str:
-    prefix = contract['control_name_prefix']
-    suffixes = [
-        suffix
-        for suffix in contract['control_name_suffixes']
-        if name.endswith(suffix)
-    ]
-    if not name.startswith(prefix) or len(suffixes) != 1:
-        raise LinkedInUnit1PreparationError(
-            'selected thread comment control name is not exact'
-        )
-    suffix = suffixes[0]
-    author = name[len(prefix):-len(suffix)]
-    if (
-        not author
-        or author != author.strip()
-        or len(author) > 200
-        or any(ord(character) < 32 or ord(character) == 127 for character in author)
-    ):
-        raise LinkedInUnit1PreparationError(
-            'selected thread comment author is invalid'
-        )
-    return author
-
-
 def extract_selected_source(
     snapshot: Snapshot,
     snapshot_revision: str,
@@ -726,12 +701,6 @@ def extract_selected_source(
         raise LinkedInUnit1PreparationError(
             'selected thread comment count is ambiguous'
         )
-    try:
-        visible_controls.sort(
-            key=lambda item: _structural_index_path(item.atspi_obj)
-        )
-    except ValueError as exc:
-        raise LinkedInUnit1PreparationError(str(exc)) from exc
     count_contract = notification_contract['selected_thread']['comment_count']
     count_elements = {
         id(element.atspi_obj): element
@@ -760,28 +729,13 @@ def extract_selected_source(
         raise LinkedInUnit1PreparationError(
             'selected thread count does not equal the typed visible row count'
         )
-    comment_contract = _manual_comment_contract()['own_comment']
-    rows: list[dict[str, Any]] = []
-    for ordinal, control in enumerate(visible_controls, 1):
-        author = _comment_author(control.name, comment_contract)
-        try:
-            text = _comment_relative_text(
-                control.atspi_obj,
-                comment_contract['relative_text'],
-            )
-        except ValueError as exc:
-            raise LinkedInUnit1PreparationError(str(exc)) from exc
-        if '\x00' in text:
-            raise LinkedInUnit1PreparationError(
-                'selected thread comment text contains NUL'
-            )
-        rows.append({
-            'author_name': author,
-            'kind': 'text' if text else 'media_link_only',
-            'ordinal': ordinal,
-            'text': text,
-            'text_sha256': _text_sha256(text),
-        })
+    try:
+        rows = _selected_thread_typed_rows(
+            visible_controls,
+            _manual_comment_contract()['own_comment'],
+        )
+    except ValueError as exc:
+        raise LinkedInUnit1PreparationError(str(exc)) from exc
     source = {
         'schema': SELECTED_SOURCE_SCHEMA,
         'platform': 'linkedin',

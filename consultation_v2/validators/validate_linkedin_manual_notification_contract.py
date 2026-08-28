@@ -118,6 +118,8 @@ def main() -> int:
         "'exact_selected_thread_growth'",
         'observed_visible_count != prior_visible_count + declared_more_count',
         'expected_count != declared_total_count',
+        '_selected_thread_typed_rows(',
+        "'typed_rows_sha256'",
     ):
         _require(
             required in verification_source,

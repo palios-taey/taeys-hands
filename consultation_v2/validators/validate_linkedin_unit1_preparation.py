@@ -1400,6 +1400,30 @@ def main() -> int:
         and '_total_9_visible_2_more_6' in first_expand['element'],
         'partial selected thread did not compile one exact expansion',
     )
+    invalid_typed_growth = with_thread_expander(
+        selected_snapshot(count=9, visible_count=8),
+        1,
+    )
+    invalid_control = next(
+        item
+        for item in invalid_typed_growth.unknown
+        if item.name.startswith('View more options for Carol North')
+    )
+    invalid_control.name = 'View more options for Bad\nName’s comment.'
+    invalid_control.atspi_obj.name = invalid_control.name
+    invalid_typed_growth = manual.augment_snapshot(invalid_typed_growth)
+    try:
+        manual.verify_post_action(
+            invalid_typed_growth,
+            first_expand['element'],
+            first_expand['verification_operation'],
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            'thread expansion accepted a mounted control that was not a typed row'
+        )
     eight_visible = manual.augment_snapshot(with_thread_expander(
         selected_snapshot(count=9, visible_count=8),
         1,
