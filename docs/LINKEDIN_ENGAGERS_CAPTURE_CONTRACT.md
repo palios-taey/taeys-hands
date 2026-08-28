@@ -16,17 +16,18 @@ qualified Jobs operations. There is no second platform or runner.
 The private canonical transaction contains exactly `schema`, `operation`,
 `source_ref`, `sink_ref`, and `return_url`. `return_url` must be the exact HTTPS
 LinkedIn Jobs search-results URL occupied at the start. The Notifications
-authority is public and platform-owned: exactly one showing, enabled link with
-the exact normalized LinkedIn Notifications URI, the exact `jump` action at
-index `0`, and a nearest `document web` ancestor whose URL equals the current
-platform document. LinkedIn's separate `/preload/` document is not authority,
-and the mutable unread count in the accessible name is never transaction input.
+authority is public and platform-owned: exactly one showing, focusable, enabled
+link with the exact normalized LinkedIn Notifications URI, either the empty
+query or exact `filter=all&refresh=true` query, the exact `jump` action at index
+`0`, and the exact `/preload/?_bprMode=vanilla` nearest `document web`
+ancestor. The mutable unread count in the accessible name is never transaction
+input.
 
 While holding one CAREERS lock, Hands:
 
-1. Proves the exact private Jobs URL and one current-platform-document
-   Notifications link, then invokes its already-proven YAML-owned `jump` action
-   at index `0` once.
+1. Proves the exact private Jobs URL and one preload-document Notifications
+   link with one of the two exact query shapes, then invokes its already-proven
+   YAML-owned `jump` action at index `0` once.
 2. Requires two fresh cache-invalidating observations of the exact
    `/notifications?filter=all` route and one exact `My posts` radio control.
 3. Requires exactly the YAML-owned `press` action at index `0`, invokes it
@@ -46,10 +47,11 @@ While holding one CAREERS lock, Hands:
    sends `Ctrl+L` once, proves the exact address bar is focused, selects its
    complete AT-SPI Text range, pastes the private return URL once, proves the
    exact text, sends `Return` once, and requires two stable observations of
-   the exact return URL and exactly one current Notifications target by the
-   YAML-owned role, states, and exact Notifications URI. Its full current
-   state digest must remain unchanged for both observations; the mutable unread
-   count in its label is not restoration identity.
+   the exact return URL and exactly one preload Notifications target by the
+   YAML-owned role, states, exact ancestor, action, and closed URI-query
+   variants. Its full current state digest must remain unchanged for both
+   observations; the mutable unread count in its label is not restoration
+   identity.
 
 There is no Back action, pointer action, coordinate, shell UI command, default
 action, alternate focus, alternate selector, blind retry, or outward social

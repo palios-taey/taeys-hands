@@ -504,10 +504,42 @@ def _uri_matches(url: str | None, contract: Mapping[str, Any]) -> bool:
     ):
         return False
     expected_query = contract.get('exact_query')
-    return expected_query is None or parse_qs(
-        parsed.query,
-        keep_blank_values=True,
-    ) == {str(key): [str(value)] for key, value in expected_query.items()}
+    query_variants = contract.get('exact_query_variants')
+    if expected_query is not None and query_variants is not None:
+        raise RuntimeError('LinkedIn URI query authority is ambiguous')
+    observed_query = parse_qs(parsed.query, keep_blank_values=True)
+    if expected_query is not None:
+        if not isinstance(expected_query, Mapping):
+            raise RuntimeError('LinkedIn exact URI query authority is invalid')
+        return observed_query == {
+            str(key): [str(value)] for key, value in expected_query.items()
+        }
+    if query_variants is None:
+        return True
+    if (
+        not isinstance(query_variants, list)
+        or not query_variants
+        or any(
+            not isinstance(variant, dict)
+            or any(
+                not isinstance(key, str)
+                or not key
+                or not isinstance(value, str)
+                for key, value in variant.items()
+            )
+            for variant in query_variants
+        )
+    ):
+        raise RuntimeError('LinkedIn exact URI query variants are invalid')
+    canonical_variants = [
+        tuple(sorted(variant.items())) for variant in query_variants
+    ]
+    if len(canonical_variants) != len(set(canonical_variants)):
+        raise RuntimeError('LinkedIn exact URI query variants are duplicated')
+    return observed_query in [
+        {key: [value] for key, value in variant.items()}
+        for variant in query_variants
+    ]
 
 
 def _nearest_document_url(element: ElementRef) -> str | None:
