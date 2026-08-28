@@ -953,11 +953,11 @@ def main() -> int:
         'missing category proof hid the mandatory Notifications target',
     )
     require(
-        not any(
+        any(
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
             for key in augmented_missing_categories.mapped
         ),
-        'missing category proof exposed notification candidate actions',
+        'exact-route candidate projection depended on mounted category controls',
     )
     require(
         project_notification_inventory(
@@ -1095,11 +1095,11 @@ def main() -> int:
         second_continuation_surface
     )
     require(
-        not any(
+        any(
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
             for key in second_continuation_surface.mapped
         ),
-        'second continuation exposed candidate keys without live category proof',
+        'second virtualized continuation hid exact-route candidate keys',
     )
     expect_error(
         lambda: compile_preparation_step(
