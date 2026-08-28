@@ -1051,7 +1051,7 @@ def accept_preparation_step(
     })
     if (
         not isinstance(barrier, Mapping)
-        or frozenset(barrier) != expected_barrier_keys
+        or not expected_barrier_keys.issubset(barrier)
         or barrier.get('result') != 'PASS'
         or barrier.get('next_mutation_authorized') is not True
         or barrier.get('terminal_delivery_verified') is not False
