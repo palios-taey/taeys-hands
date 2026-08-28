@@ -247,7 +247,11 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
 
     # --- Phase 3: Run driver ---
     driver = _REGISTRY[request.platform]()
-    result = driver.run(request)
+    monitor_id = durable_monitor_id(request)
+    try:
+        result = driver.run(request)
+    finally:
+        primitives.deregister_owned_monitor_session(monitor_id)
     if plan_create_error:
         result.add_step(
             'plan_store',
@@ -479,17 +483,6 @@ def run_consultation(request: ConsultationRequest) -> ConsultationResult:
                 'ISMA ingestion failed; consultation result still delivered locally',
                 error=str(exc),
             )
-
-    # --- Teardown (FLOW §8 / CONTRACT §3): a fully-delivered consultation is
-    # DONE, but the request_id remains poisoned by the notification evidence so
-    # caller-level retry wrappers cannot re-drive the terminal session. Only the
-    # monitor registration is removed here.
-    if delivered and notification_delivered:
-        monitor_id = durable_monitor_id(request)
-        try:
-            primitives.deregister_monitor_session(monitor_id)
-        except Exception as exc:
-            logger.error("Monitor deregistration failed: %s", exc)
 
     return result
 
