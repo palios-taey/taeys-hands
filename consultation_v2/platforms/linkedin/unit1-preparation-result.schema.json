@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios.org/schemas/linkedin-unit1-preparation-result.schema.json",
+  "title": "LinkedIn Unit 1 autonomous preparation result",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "state",
+    "transaction_sha256",
+    "previous_receipt_sha256",
+    "snapshot_revision",
+    "input",
+    "input_sha256",
+    "result_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "linkedin_unit1_preparation_result_v1"},
+    "state": {"enum": ["ready_for_private_selection", "ready_for_private_draft"]},
+    "transaction_sha256": {"$ref": "#/$defs/sha256"},
+    "previous_receipt_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+    "snapshot_revision": {"$ref": "#/$defs/sha256"},
+    "input": {"type": "object"},
+    "input_sha256": {"$ref": "#/$defs/sha256"},
+    "result_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

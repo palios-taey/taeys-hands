@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios.org/schemas/linkedin-unit1-preparation-envelope.schema.json",
+  "title": "LinkedIn Unit 1 autonomous preparation envelope",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "operation",
+    "cycle_id",
+    "transaction_id",
+    "display",
+    "policy_sha256",
+    "selection"
+  ],
+  "properties": {
+    "schema": {"const": "linkedin_unit1_preparation_envelope_v1"},
+    "operation": {"const": "comment_from_notifications_prepare"},
+    "cycle_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "transaction_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"},
+    "display": {"type": "string", "pattern": "^:[1-9][0-9]{0,2}$"},
+    "policy_sha256": {"$ref": "#/$defs/sha256"},
+    "selection": {
+      "oneOf": [
+        {"type": "null"},
+        {"$ref": "#/$defs/selection"}
+      ]
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "notification_inventory_sha256",
+        "selected_activity",
+        "selected_age_seconds",
+        "selected_notification_ordinal",
+        "selected_notification_text",
+        "selected_notification_text_sha256",
+        "target_passed",
+        "dedup_passed",
+        "author_cooloff_passed",
+        "transaction_sha256",
+        "selection_sha256"
+      ],
+      "properties": {
+        "notification_inventory_sha256": {"$ref": "#/$defs/sha256"},
+        "selected_activity": {"type": "string", "pattern": "^[0-9]+$"},
+        "selected_age_seconds": {"type": "integer", "minimum": 0, "maximum": 259200},
+        "selected_notification_ordinal": {"type": "integer", "minimum": 1},
+        "selected_notification_text": {"type": "string", "minLength": 1},
+        "selected_notification_text_sha256": {"$ref": "#/$defs/sha256"},
+        "target_passed": {"const": true},
+        "dedup_passed": {"const": true},
+        "author_cooloff_passed": {"const": true},
+        "transaction_sha256": {"$ref": "#/$defs/sha256"},
+        "selection_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

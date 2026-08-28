@@ -68,6 +68,9 @@ jobs:
       - name: Prove LinkedIn Unit 1 one-action compiler contract
         run: python3 consultation_v2/validators/validate_linkedin_unit1_one_action.py
 
+      - name: Prove LinkedIn Unit 1 autonomous preparation boundary
+        run: python3 consultation_v2/validators/validate_linkedin_unit1_preparation.py
+
       - name: Prove LinkedIn private comment materialization contract
         run: python3 consultation_v2/validators/validate_linkedin_comment_materialization.py
 
