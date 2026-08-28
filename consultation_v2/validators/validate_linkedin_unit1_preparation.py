@@ -178,7 +178,11 @@ class Node:
         return self.name
 
     def get_text_iface(self):
-        return self if self.role in {'paragraph', 'section'} else None
+        return self if self.role in {'entry', 'paragraph', 'section'} else None
+
+    def get_state_set(self):
+        states = frozenset(self.states)
+        return types.SimpleNamespace(contains=lambda state: state in states)
 
     def get_hyperlink(self):
         return Hyperlink(self.uri) if self.uri is not None else None
@@ -514,6 +518,60 @@ def with_thread_opener(snapshot: Snapshot, count: int = 2) -> Snapshot:
             'selected_post_body_sha256': BODY_SHA256,
         },
     )]
+    return snapshot
+
+
+def with_zero_thread_opener(snapshot: Snapshot) -> Snapshot:
+    post_root = next(
+        item.atspi_obj
+        for item in snapshot.unknown
+        if item.role == 'list item'
+    )
+    post_card = post_root.get_child_at_index(0)
+    post_card.add(
+        Node('generic'),
+        Node('generic'),
+        Node(
+            'push button',
+            'Comment',
+            states=['showing', 'enabled', 'focusable'],
+        ),
+        Node('push button', 'Repost', states=['enabled', 'focusable']),
+        Node('link', 'Send', states=['enabled', 'focusable']),
+    )
+    snapshot.unknown.extend(ref(node) for node in post_card.children[-5:])
+    return snapshot
+
+
+def with_empty_comment_editor(snapshot: Snapshot) -> Snapshot:
+    post_root = next(
+        item.atspi_obj
+        for item in snapshot.unknown
+        if item.role == 'list item'
+    )
+    post_card = post_root.get_child_at_index(0)
+    editor_text = Node(
+        'paragraph',
+        text='Add a comment...',
+        states=['editable', 'visible', 'sensitive'],
+    )
+    editor = Node(
+        'entry',
+        'Text editor for creating comment',
+        text='\uFFFC',
+        states=['editable', 'focusable', 'visible', 'sensitive', 'showing'],
+    ).add(editor_text)
+    wrapper_3 = Node('generic').add(editor)
+    wrapper_2 = Node('generic').add(wrapper_3)
+    wrapper_1 = Node('generic').add(wrapper_2)
+    post_card.add(wrapper_1)
+    snapshot.unknown.extend([
+        ref(wrapper_1),
+        ref(wrapper_2),
+        ref(wrapper_3),
+        ref(editor),
+        ref(editor_text, text='Add a comment...'),
+    ])
     return snapshot
 
 
@@ -1350,6 +1408,7 @@ def main() -> int:
         barrier(candidate),
         receipts[-1]['receipt_sha256'],
     ))
+    candidate_receipts = list(receipts)
     require(
         schema_required('unit1-preparation-receipt.schema.json')
         == set(receipts[-1]),
@@ -1528,23 +1587,75 @@ def main() -> int:
             'two declared comment-count paths authorized a thread opener'
         )
 
-    zero_snapshot = selected_snapshot(count=0)
+    zero_snapshot = manual.augment_snapshot(
+        with_zero_thread_opener(selected_snapshot(count=0))
+    )
+    original_viewport = manual._selected_thread_viewport_state
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'live_extent_in_viewport': True,
+    }
+    try:
+        zero_card = compile_preparation_step(
+            zero_snapshot,
+            REVISION,
+            selected_envelope,
+            candidate_receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        zero_card['phase'] == 'thread_open'
+        and zero_card['element'].startswith(
+            manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
+        ),
+        'exact zero thread did not compile its distinct opener',
+    )
+    zero_after = manual.augment_snapshot(with_empty_comment_editor(
+        with_zero_thread_opener(selected_snapshot(count=0))
+    ))
+    zero_barrier = barrier(zero_card)
+    zero_barrier['postcondition_receipt'] = manual.verify_post_action(
+        zero_after,
+        zero_card['element'],
+        zero_card['verification_operation'],
+    )
+    zero_receipts = [
+        *candidate_receipts,
+        accept_preparation_step(
+            zero_card,
+            zero_barrier,
+            candidate_receipts[-1]['receipt_sha256'],
+        ),
+    ]
     zero_ready = compile_preparation_step(
-        zero_snapshot,
+        zero_after,
         REVISION,
         selected_envelope,
-        thread_open_receipts,
+        zero_receipts,
     )
     zero_source = zero_ready['input']['source']
     require(
         zero_ready['state'] == 'ready_for_private_draft'
         and zero_source['thread_open_receipt_sha256']
-        == thread_open_receipts[-1]['receipt_sha256']
+        == zero_receipts[-1]['receipt_sha256']
         and zero_source['thread_ready_receipt_sha256']
-        == thread_open_receipts[-1]['receipt_sha256']
+        == zero_receipts[-1]['receipt_sha256']
         and zero_source['thread']['exact_comment_count'] == 0
         and zero_source['thread']['typed_rows'] == [],
         'exact zero thread was not represented',
+    )
+    expect_error(
+        lambda: extract_selected_source(
+            zero_after,
+            REVISION,
+            selected_activity=ACTIVITY_A,
+            notification_inventory_sha256=artifact['inventory_sha256'],
+            selection_sha256=selection['selection_sha256'],
+            thread_open_receipt=thread_open_receipts[-1],
+            thread_ready_receipt=thread_open_receipts[-1],
+            transaction_sha256=transaction_sha256,
+        ),
+        'positive-count opener receipt authorized an exact zero thread',
     )
 
     mismatch = selected_snapshot(count=2)

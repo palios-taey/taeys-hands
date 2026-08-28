@@ -14,6 +14,7 @@ from consultation_v2.platforms.linkedin.manual import (
     SELECTED_POST_SUBMIT_PREFIX,
     SELECTED_POST_PREFIX,
     SELECTED_THREAD_OPEN_PREFIX,
+    SELECTED_THREAD_ZERO_OPEN_PREFIX,
     element_operation,
 )
 from consultation_v2.platforms.linkedin.driver import _exact_engagement_route
@@ -447,9 +448,18 @@ def compile_unit1_step(
     body_sha256 = private['selected_post_body_sha256']
 
     if previous_phase in {'notification_candidate', 'thread_scroll'}:
-        thread_key = (
-            f'{SELECTED_THREAD_OPEN_PREFIX}{activity}_body_{body_sha256}'
-        )
+        thread_keys = [
+            f'{SELECTED_THREAD_OPEN_PREFIX}{activity}_body_{body_sha256}',
+            f'{SELECTED_THREAD_ZERO_OPEN_PREFIX}{activity}_body_{body_sha256}',
+        ]
+        mapped_thread_keys = [
+            key for key in thread_keys if snapshot.mapped.get(key)
+        ]
+        if len(mapped_thread_keys) != 1:
+            raise LinkedInUnit1Error(
+                'selected activity lacks one exact mandatory thread opener'
+            )
+        thread_key = mapped_thread_keys[0]
         target = _mapped_singleton(snapshot, thread_key)
         declared = element_operation(thread_key, list(target.states), dict(target.raw or {}))
         if not isinstance(declared, dict):
@@ -457,6 +467,14 @@ def compile_unit1_step(
         phase = 'thread_scroll' if declared.get('method') == 'scroll_into_view' else 'thread_open'
         if previous_phase == 'thread_scroll' and phase != 'thread_open':
             raise LinkedInUnit1Error('thread opener is still outside the verified viewport')
+        if (
+            previous_phase == 'thread_scroll'
+            and receipts[-1]['element_sha256']
+            != hashlib.sha256(thread_key.encode('utf-8')).hexdigest()
+        ):
+            raise LinkedInUnit1Error(
+                'thread opener identity changed after the verified scroll'
+            )
         return _declared_card(
             snapshot=snapshot,
             snapshot_revision=snapshot_revision,
