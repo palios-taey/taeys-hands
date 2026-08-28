@@ -412,12 +412,14 @@ workflow:
         postcondition: exact_comment_delivery
       own_comment:
         control_name_prefix: "View more options for "
-        control_name_suffix: "\u2019s comment."
+        control_name_suffixes:
+          - "\u2019s comment."
+          - "\u2019 comment."
         role: push button
         relative_depth: 5
         states_include:
-          - visible
-          - sensitive
+          - enabled
+          - focusable
         relative_text:
           root_distance: 2
           root_role: section

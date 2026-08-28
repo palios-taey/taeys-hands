@@ -309,10 +309,10 @@ def _manual_comment_contract() -> dict[str, Any]:
         },
         'own_comment': {
             'control_name_prefix': 'View more options for ',
-            'control_name_suffix': '\u2019s comment.',
+            'control_name_suffixes': ['\u2019s comment.', '\u2019 comment.'],
             'role': 'push button',
             'relative_depth': 5,
-            'states_include': ['visible', 'sensitive'],
+            'states_include': ['enabled', 'focusable'],
             'relative_text': {
                 'root_distance': 2,
                 'root_role': 'section',
@@ -778,7 +778,10 @@ def _selected_comment_controls(
             depth == own_contract['relative_depth']
             and element.role == own_contract['role']
             and element.name.startswith(own_contract['control_name_prefix'])
-            and element.name.endswith(own_contract['control_name_suffix'])
+            and any(
+                element.name.endswith(suffix)
+                for suffix in own_contract['control_name_suffixes']
+            )
             and set(own_contract['states_include']).issubset(element.states)
         )
     ]
@@ -829,15 +832,15 @@ def _exact_own_comment_count(
 ) -> int:
     author_name = _validate_private_author_name(expected_author_name)
     own_contract = surface['contract']['own_comment']
-    expected_name = (
-        f"{own_contract['control_name_prefix']}"
-        f"{author_name}{own_contract['control_name_suffix']}"
-    )
+    expected_names = {
+        f"{own_contract['control_name_prefix']}{author_name}{suffix}"
+        for suffix in own_contract['control_name_suffixes']
+    }
     matches = [
         element
         for element in surface['controls']['comment_controls']
         if (
-            element.name == expected_name
+            element.name in expected_names
             and _comment_relative_text(
                 element.atspi_obj,
                 own_contract['relative_text'],
@@ -1882,7 +1885,7 @@ def verify_comment_submit_precondition(
     author_control = (
         f"{surface['contract']['own_comment']['control_name_prefix']}"
         f"{author_name}"
-        f"{surface['contract']['own_comment']['control_name_suffix']}"
+        f"{surface['contract']['own_comment']['control_name_suffixes'][0]}"
     )
     return {
         'element_key': element_key,

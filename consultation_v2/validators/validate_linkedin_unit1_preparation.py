@@ -387,10 +387,11 @@ def comment_root(author: str, text: str) -> tuple[Node, Node, list[ElementRef]]:
     target = Node('section', text=text)
     child_2 = Node('generic').add(Node('generic').add(Node('generic').add(target)))
     control_parent = Node('generic')
+    possessive = '\u2019 comment.' if author.endswith('s') else '\u2019s comment.'
     control = Node(
         'push button',
-        f'View more options for {author}\u2019s comment.',
-        states=['visible', 'sensitive'],
+        f'View more options for {author}{possessive}',
+        states=['enabled', 'focusable'],
     )
     control_parent.add(control)
     root.add(Node('generic'), Node('generic'), child_2, control_parent)
@@ -432,7 +433,7 @@ def selected_snapshot(
         refs.append(ref(count_node))
     if visible and count >= 1:
         comment_a, control_a, comment_refs_a = comment_root(
-            'Alice Example',
+            'Alice Jones',
             'First exact comment.',
         )
         post_card.add(comment_a)
