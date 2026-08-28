@@ -482,7 +482,12 @@ def selected_snapshot(
     )
 
 
-def with_thread_expander(snapshot: Snapshot, more_count: int) -> Snapshot:
+def with_thread_expander(
+    snapshot: Snapshot,
+    more_count: int,
+    *,
+    states: list[str] | None = None,
+) -> Snapshot:
     post_root = next(
         item.atspi_obj
         for item in snapshot.unknown
@@ -493,7 +498,7 @@ def with_thread_expander(snapshot: Snapshot, more_count: int) -> Snapshot:
     expander = Node(
         'push button',
         f'See {more_count} more {suffix}',
-        states=['enabled', 'focusable'],
+        states=states if states is not None else ['enabled', 'focusable'],
     )
     post_card.add(expander)
     snapshot.unknown.append(ref(expander))
@@ -1609,6 +1614,18 @@ def main() -> int:
             manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
         ),
         'exact zero thread did not compile its distinct opener',
+    )
+    disabled_expander = manual.augment_snapshot(with_thread_expander(
+        with_zero_thread_opener(selected_snapshot(count=0)),
+        1,
+        states=['showing'],
+    ))
+    require(
+        not any(
+            key.startswith(manual.SELECTED_THREAD_ZERO_OPEN_PREFIX)
+            for key in disabled_expander.mapped
+        ),
+        'disabled grammatical expander was misclassified as exact zero',
     )
     zero_after = manual.augment_snapshot(with_empty_comment_editor(
         with_zero_thread_opener(selected_snapshot(count=0))

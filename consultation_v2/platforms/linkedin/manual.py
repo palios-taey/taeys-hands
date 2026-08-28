@@ -981,12 +981,11 @@ def _selected_thread_zero_is_exact(
             and int(count_token) > 0
         ):
             return False
-    expand_target, _more_count = _selected_thread_expander(
+    return not _selected_thread_grammatical_expanders(
         snapshot,
         root,
         contract,
     )
-    return expand_target is None
 
 
 def _selected_zero_thread_opener(
@@ -1029,21 +1028,19 @@ def _selected_zero_thread_opener(
     return element
 
 
-def _selected_thread_expander(
+def _selected_thread_grammatical_expanders(
     snapshot: Snapshot,
     root: Any,
     contract: dict[str, Any],
-) -> tuple[Any | None, int | None]:
+) -> list[tuple[Any, int]]:
     expand_contract = contract['selected_thread']['expand']
     prefix = expand_contract['name_prefix']
     suffixes = expand_contract['name_suffixes']
-    required_states = set(expand_contract['states_include'])
     matches: list[tuple[Any, int]] = []
     for element, relative_depth in _selected_post_descendants(snapshot, root):
         if (
             relative_depth != expand_contract['relative_depth']
             or element.role != expand_contract['role']
-            or not required_states.issubset(element.states)
             or not element.name.startswith(prefix)
         ):
             continue
@@ -1063,6 +1060,26 @@ def _selected_thread_expander(
         ):
             continue
         matches.append((element, count))
+    return matches
+
+
+def _selected_thread_expander(
+    snapshot: Snapshot,
+    root: Any,
+    contract: dict[str, Any],
+) -> tuple[Any | None, int | None]:
+    required_states = set(
+        contract['selected_thread']['expand']['states_include']
+    )
+    matches = [
+        match
+        for match in _selected_thread_grammatical_expanders(
+            snapshot,
+            root,
+            contract,
+        )
+        if required_states.issubset(match[0].states)
+    ]
     if len(matches) > 1:
         raise ValueError('LinkedIn selected-thread expansion target is ambiguous')
     return matches[0] if matches else (None, None)
