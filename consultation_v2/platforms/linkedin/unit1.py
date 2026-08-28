@@ -7,7 +7,7 @@ from typing import Any, Mapping, Sequence
 
 from consultation_v2.platforms.linkedin.manual import (
     NOTIFICATION_CANDIDATE_PREFIX,
-    NOTIFICATIONS_CONTINUATION_PREFIX,
+    NOTIFICATIONS_CONTINUATION,
     NOTIFICATIONS_NAVIGATION,
     SELECTED_POST_EDITOR_PREFIX,
     SELECTED_POST_REACTION_PREFIX,
@@ -32,9 +32,7 @@ _CANDIDATE = re.compile(
     r'(?P<activity>[0-9]+)$'
 )
 _CONTINUATION = re.compile(
-    rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_'
-    r'(?P<prefix>[0-9a-f]{16})_members_'
-    r'(?P<members>[0-9a-f]{64}(?:\.[0-9a-f]{64})*)$'
+    rf'^{re.escape(NOTIFICATIONS_CONTINUATION)}$'
 )
 _SUBMIT = re.compile(
     rf'^{SELECTED_POST_SUBMIT_PREFIX}(?P<activity>[0-9]+)_body_'

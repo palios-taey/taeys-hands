@@ -68,78 +68,129 @@ def virtualized_changed_snapshot():
     return without_category_controls(with_controls(snapshot))
 
 
+def continuation_projection(snapshot):
+    augmented = manual.augment_snapshot(snapshot)
+    keys = [
+        key
+        for key, matches in augmented.mapped.items()
+        if key.startswith(manual.NOTIFICATIONS_CONTINUATION_PREFIX) and matches
+    ]
+    require(keys == [manual.NOTIFICATIONS_CONTINUATION], 'continuation key is not stable')
+    targets = list(augmented.mapped[manual.NOTIFICATIONS_CONTINUATION])
+    require(len(targets) == 1, 'continuation target is not exact')
+    return augmented, targets[0]
+
+
+def authorize_runtime(snapshot, ref_value='atspi3:validator-current-ref'):
+    augmented, target = continuation_projection(snapshot)
+    context = {
+        **dict(target.raw),
+        'element': manual.NOTIFICATIONS_CONTINUATION,
+        'ref': ref_value,
+    }
+    declared = manual.element_operation(
+        manual.NOTIFICATIONS_CONTINUATION,
+        list(target.states),
+        context,
+    )
+    require(
+        declared['method'] == 'activate'
+        and declared['allowed_now'] == ['activate']
+        and declared['postcondition']['kind']
+        == 'notification_stream_stable_novelty',
+        'runtime continuation was not exactly authorized',
+    )
+    return augmented, target, declared
+
+
+def require_refused(callback, message):
+    try:
+        callback()
+    except ValueError:
+        return
+    raise AssertionError(message)
+
+
 def main() -> int:
     before = with_controls(inventory_snapshot())
-    augmented = manual.augment_snapshot(before)
-    continuation_keys = [
-        key
-        for key in augmented.mapped
-        if key.startswith(manual.NOTIFICATIONS_CONTINUATION_PREFIX)
-    ]
-    require(len(continuation_keys) == 1, 'continuation key is not exact')
-    continuation_key = continuation_keys[0]
-    declared = manual.element_operation(
-        continuation_key,
-        ['enabled', 'focusable'],
-    )
+    before_augmented, before_target = continuation_projection(before)
+    after = without_category_controls(expanded_snapshot())
+    after_augmented, after_target = continuation_projection(after)
     require(
-        declared['postcondition']['kind']
-        == 'notification_stream_stable_novelty'
-        and declared['postcondition']['prior_raw_notification_count'] == 3,
-        'continuation card does not bind the full mounted stream',
-    )
-    tampered_key = continuation_key[:-1] + (
-        '0' if continuation_key[-1] != '0' else '1'
-    )
-    try:
-        manual._notification_continuation_measurement(
-            before,
-            manual._CONTINUATION_KEY.fullmatch(tampered_key),
-        )
-    except ValueError:
-        pass
-    else:
-        raise AssertionError(
-            'tampered frozen notification inventory retained authority'
-        )
-
-    no_controls = without_category_controls(with_controls(inventory_snapshot()))
-    no_controls_augmented = manual.augment_snapshot(no_controls)
-    require(
-        len([
-            key for key in no_controls_augmented.mapped
-            if key.startswith(manual.NOTIFICATIONS_CONTINUATION_PREFIX)
-        ]) == 1,
-        'continuation disappeared when top-of-page category controls left the viewport',
+        before_target.key == after_target.key
+        and before_target.description == after_target.description
+        and before_target.x is None
+        and before_target.y is None
+        and after_target.x is None
+        and after_target.y is None
+        and before_target.raw['notification_stream_uri_digests']
+        != after_target.raw['notification_stream_uri_digests'],
+        'volatile inventory remained in the semantic action projection',
     )
     require(
         not any(
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
-            for key in no_controls_augmented.mapped
-        ),
-        'candidate keys bypassed live All-category proof',
-    )
-
-    obsolete_one_link = with_controls(inventory_snapshot())
-    obsolete_article = next(
-        item for item in obsolete_one_link.unknown if item.role == 'article'
-    )
-    obsolete_children = obsolete_article.atspi_obj.children
-    obsolete_article.atspi_obj.children = [
-        obsolete_children[1],
-        obsolete_children[2],
-    ]
-    try:
-        manual.augment_snapshot(obsolete_one_link)
-    except ValueError:
-        pass
-    else:
-        raise AssertionError(
-            'continuation accepted the obsolete one-link notification fixture'
+            for key in before_augmented.mapped
         )
+        and not any(
+            key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
+            for key in after_augmented.mapped
+        ),
+        'candidate mappings remained live while continuation was mandatory',
+    )
+    before_declared = manual.element_operation(
+        manual.NOTIFICATIONS_CONTINUATION,
+        list(before_target.states),
+        dict(before_target.raw),
+    )
+    after_declared = manual.element_operation(
+        manual.NOTIFICATIONS_CONTINUATION,
+        list(after_target.states),
+        dict(after_target.raw),
+    )
+    require(
+        before_declared == after_declared
+        and manual._CONTINUATION_PRE_ACTION.get() is None,
+        'compile-time card authority depended on volatile inventory',
+    )
 
-    after = without_category_controls(expanded_snapshot())
-    receipt = manual.verify_post_action(after, continuation_key, 'activate')
+    partial_runtime = {
+        **dict(before_target.raw),
+        'element': manual.NOTIFICATIONS_CONTINUATION,
+    }
+    require_refused(
+        lambda: manual.element_operation(
+            manual.NOTIFICATIONS_CONTINUATION,
+            list(before_target.states),
+            partial_runtime,
+        ),
+        'continuation froze before exact target/ref re-resolution',
+    )
+    require(
+        manual._CONTINUATION_PRE_ACTION.get() is None,
+        'failed partial runtime context leaked authority',
+    )
+
+    authorize_runtime(before)
+    require_refused(
+        lambda: authorize_runtime(before, 'atspi3:second-ref'),
+        'a second live pre-action context replaced the first',
+    )
+    manual._consume_notification_continuation_context(
+        manual.NOTIFICATIONS_CONTINUATION,
+        'activate',
+    )
+    require(
+        manual._CONTINUATION_PRE_ACTION.get() is None,
+        'explicit context consume did not clear authority',
+    )
+
+    authorize_runtime(before)
+    receipt = manual.verify_post_action(
+        after,
+        manual.NOTIFICATIONS_CONTINUATION,
+        'activate',
+    )
     require(
         receipt['postcondition'] == 'notification_stream_stable_novelty'
         and receipt['route_exact'] is True
@@ -153,7 +204,62 @@ def main() -> int:
         and receipt['observed_novel_notification_identity_count'] == 1
         and receipt['candidate_projection_exact'] is True
         and receipt['observed_candidate_count'] == 1,
-        'noncandidate mounted-stream growth did not satisfy continuation',
+        'exact noncandidate inventory novelty did not satisfy continuation',
+    )
+    require(
+        manual._CONTINUATION_PRE_ACTION.get() is None,
+        'successful continuation did not clear one-shot context',
+    )
+    require_refused(
+        lambda: manual.verify_post_action(
+            after,
+            manual.NOTIFICATIONS_CONTINUATION,
+            'activate',
+        ),
+        'one-shot continuation context was reusable',
+    )
+
+    authorize_runtime(before)
+    require_refused(
+        lambda: manual._consume_notification_continuation_context(
+            'notifications_show_more_wrong',
+            'activate',
+        ),
+        'mismatched continuation element retained authority',
+    )
+    require(manual._CONTINUATION_PRE_ACTION.get() is None, 'element mismatch leaked context')
+    authorize_runtime(before)
+    require_refused(
+        lambda: manual._consume_notification_continuation_context(
+            manual.NOTIFICATIONS_CONTINUATION,
+            'mapped_pointer_activate',
+        ),
+        'mismatched continuation operation retained authority',
+    )
+    require(manual._CONTINUATION_PRE_ACTION.get() is None, 'operation mismatch leaked context')
+
+    no_controls = without_category_controls(with_controls(inventory_snapshot()))
+    no_controls_augmented, _no_controls_target = continuation_projection(no_controls)
+    require(
+        not any(
+            key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
+            for key in no_controls_augmented.mapped
+        ),
+        'candidate keys bypassed receipt-bound All-category authority',
+    )
+
+    obsolete_one_link = with_controls(inventory_snapshot())
+    obsolete_article = next(
+        item for item in obsolete_one_link.unknown if item.role == 'article'
+    )
+    obsolete_children = obsolete_article.atspi_obj.children
+    obsolete_article.atspi_obj.children = [
+        obsolete_children[1],
+        obsolete_children[2],
+    ]
+    require_refused(
+        lambda: manual.augment_snapshot(obsolete_one_link),
+        'continuation accepted the obsolete one-link notification fixture',
     )
 
     changed_text = expanded_snapshot()
@@ -164,9 +270,10 @@ def main() -> int:
     )
     read_link.name = 'A changed accessible notification sentence.'
     read_link.atspi_obj.name = read_link.name
+    authorize_runtime(before)
     text_receipt = manual.verify_post_action(
         changed_text,
-        continuation_key,
+        manual.NOTIFICATIONS_CONTINUATION,
         'activate',
     )
     require(
@@ -174,83 +281,52 @@ def main() -> int:
         'mounted-stream identity is brittle to notification text',
     )
 
-    changed_uri = expanded_snapshot()
-    first_link = next(
-        item
-        for item in changed_uri.unknown
-        if item.role == 'link' and item.name.startswith('Unread notification.')
-    )
-    first_link.atspi_obj.uri = activity_uri(ACTIVITY_A + '1')
-    measurement = manual._notification_continuation_measurement(
-        changed_uri,
-        manual._CONTINUATION_KEY.fullmatch(continuation_key),
-    )
-    require(
-        measurement['raw_notification_prefix_exact'] is False
-        and measurement['raw_notification_inventory_changed'] is True
-        and measurement['raw_notification_inventory_novelty_exact'] is True
-        and measurement['postcondition_matched'] is True,
-        'changed exact mounted-stream inventory did not satisfy continuation',
-    )
-
     virtualized_before = without_category_controls(expanded_snapshot())
-    virtualized_augmented = manual.augment_snapshot(virtualized_before)
-    virtualized_key = next(
-        key
-        for key in virtualized_augmented.mapped
-        if key.startswith(manual.NOTIFICATIONS_CONTINUATION_PREFIX)
-    )
     virtualized_after = virtualized_changed_snapshot()
-    virtualized_measurement = manual._notification_continuation_measurement(
+    authorize_runtime(virtualized_before)
+    virtualized_receipt = manual.verify_post_action(
         virtualized_after,
-        manual._CONTINUATION_KEY.fullmatch(virtualized_key),
+        manual.NOTIFICATIONS_CONTINUATION,
+        'activate',
     )
     require(
-        virtualized_measurement['prior_raw_notification_count'] == 4
-        and virtualized_measurement['observed_raw_notification_count'] == 3
-        and virtualized_measurement['raw_notification_count_grew'] is False
-        and virtualized_measurement['raw_notification_prefix_exact'] is False
-        and virtualized_measurement['raw_notification_inventory_changed'] is True
-        and virtualized_measurement['raw_notification_inventory_novelty_exact']
-        is True
-        and virtualized_measurement['observed_novel_notification_identity_count']
-        == 1
-        and virtualized_measurement['candidate_projection_exact'] is True
-        and virtualized_measurement['postcondition_matched'] is True,
-        'stable virtualized inventory transition required monotonic DOM growth',
+        virtualized_receipt['prior_raw_notification_count'] == 4
+        and virtualized_receipt['observed_raw_notification_count'] == 3
+        and virtualized_receipt['raw_notification_count_grew'] is False
+        and virtualized_receipt['raw_notification_prefix_exact'] is False
+        and virtualized_receipt['raw_notification_inventory_changed'] is True
+        and virtualized_receipt['raw_notification_inventory_novelty_exact'] is True
+        and virtualized_receipt['observed_novel_notification_identity_count'] == 1
+        and virtualized_receipt['candidate_projection_exact'] is True,
+        'immediate pre-action inventory did not govern virtualized novelty',
     )
 
-    pure_unmount_measurement = manual._notification_continuation_measurement(
+    negative_snapshots = []
+    negative_snapshots.append((
         without_category_controls(inventory_snapshot()),
-        manual._CONTINUATION_KEY.fullmatch(virtualized_key),
-    )
-    require(
-        pure_unmount_measurement['raw_notification_inventory_changed'] is True
-        and pure_unmount_measurement[
-            'raw_notification_inventory_novelty_exact'
-        ] is False
-        and pure_unmount_measurement['postcondition_matched'] is False
-        and 'raw_inventory_novelty'
-        in pure_unmount_measurement['failed_components'],
         'pure virtualized unmount satisfied continuation novelty',
-    )
-
+    ))
     reordered = expanded_snapshot()
     reordered_root = next(
         item for item in reordered.unknown if item.role == 'article'
     ).atspi_obj.get_parent()
     reordered_root.children.reverse()
-    reordered_measurement = manual._notification_continuation_measurement(
-        reordered,
-        manual._CONTINUATION_KEY.fullmatch(virtualized_key),
-    )
-    require(
-        reordered_measurement['raw_notification_inventory_changed'] is True
-        and reordered_measurement['raw_notification_inventory_novelty_exact']
-        is False
-        and reordered_measurement['postcondition_matched'] is False,
-        'pure inventory reorder satisfied continuation novelty',
-    )
+    negative_snapshots.append((reordered, 'pure inventory reorder satisfied novelty'))
+    negative_snapshots.append((virtualized_before, 'unchanged inventory satisfied novelty'))
+    for observed, message in negative_snapshots:
+        authorize_runtime(virtualized_before)
+        require_refused(
+            lambda observed=observed: manual.verify_post_action(
+                observed,
+                manual.NOTIFICATIONS_CONTINUATION,
+                'activate',
+            ),
+            message,
+        )
+        require(
+            manual._CONTINUATION_PRE_ACTION.get() is None,
+            'failed novelty check leaked one-shot context',
+        )
 
     invalid_candidate = expanded_snapshot()
     invalid_candidate_link = next(
@@ -259,29 +335,25 @@ def main() -> int:
         if item.role == 'link' and item.name.startswith('Unread notification.')
     )
     invalid_candidate_link.atspi_obj.uri = 'https://www.linkedin.com/feed/'
-    invalid_candidate_measurement = manual._notification_continuation_measurement(
-        invalid_candidate,
-        manual._CONTINUATION_KEY.fullmatch(continuation_key),
-    )
-    require(
-        invalid_candidate_measurement['raw_stream_projection_exact'] is True
-        and invalid_candidate_measurement['candidate_projection_exact'] is False
-        and invalid_candidate_measurement['postcondition_matched'] is False
-        and 'candidate_projection'
-        in invalid_candidate_measurement['failed_components'],
+    authorize_runtime(before)
+    require_refused(
+        lambda: manual.verify_post_action(
+            invalid_candidate,
+            manual.NOTIFICATIONS_CONTINUATION,
+            'activate',
+        ),
         'inexact candidate projection satisfied continuation',
     )
 
     wrong_route = expanded_snapshot()
     wrong_route.url = 'https://www.linkedin.com/notifications/?filter=mentions'
-    route_measurement = manual._notification_continuation_measurement(
-        wrong_route,
-        manual._CONTINUATION_KEY.fullmatch(continuation_key),
-    )
-    require(
-        route_measurement['route_exact'] is False
-        and route_measurement['category_exact'] is True
-        and route_measurement['postcondition_matched'] is False,
+    authorize_runtime(before)
+    require_refused(
+        lambda: manual.verify_post_action(
+            wrong_route,
+            manual.NOTIFICATIONS_CONTINUATION,
+            'activate',
+        ),
         'non-exact Notifications route satisfied continuation',
     )
 
@@ -289,95 +361,65 @@ def main() -> int:
     for item in wrong_category.unknown:
         if item.role != 'radio button':
             continue
-        item.states = (
-            ['checked', 'selected'] if item.name == 'Jobs' else []
-        )
-    category_measurement = manual._notification_continuation_measurement(
+        item.states = ['checked', 'selected'] if item.name == 'Jobs' else []
+    authorize_runtime(before)
+    category_receipt = manual.verify_post_action(
         wrong_category,
-        manual._CONTINUATION_KEY.fullmatch(continuation_key),
+        manual.NOTIFICATIONS_CONTINUATION,
+        'activate',
     )
     require(
-        category_measurement['route_exact'] is True
-        and category_measurement['category_exact'] is False
-        and category_measurement['postcondition_matched'] is True
-        and 'category' not in category_measurement['failed_components'],
-        'current viewport category state overrode prior category authority',
+        category_receipt['category_exact'] is False
+        and category_receipt['postcondition_matched'] is True
+        and 'category' not in category_receipt['failed_components'],
+        'live offscreen category state replaced receipt-bound authority',
     )
 
     original_build_snapshot = manual.build_snapshot
+    authorize_runtime(before)
     manual.build_snapshot = lambda _platform: (None, None, after)
     try:
         _snapshot, barrier = manual.stable_post_action_observation(
-            continuation_key,
+            manual.NOTIFICATIONS_CONTINUATION,
             'activate',
             time.monotonic() + 2,
         )
     finally:
         manual.build_snapshot = original_build_snapshot
-    require(barrier['result'] == 'PASS', 'exact continuation barrier did not pass')
     required_sample_fields = {
-        'route_exact',
-        'category_exact',
-        'prior_raw_notification_count',
-        'observed_raw_notification_count',
-        'raw_notification_count_grew',
-        'prior_raw_notification_prefix',
-        'observed_raw_notification_prefix',
-        'raw_notification_prefix_exact',
-        'observed_raw_notification_inventory_digest',
-        'raw_notification_inventory_changed',
+        'candidate_projection_exact',
+        'observed_candidate_count',
         'observed_novel_notification_identity_count',
         'observed_novel_notification_identity_digests',
+        'observed_raw_notification_count',
+        'pre_action_candidate_count',
+        'pre_action_context_sha256',
+        'pre_action_ref_sha256',
+        'prior_raw_notification_count',
         'raw_notification_inventory_novelty_exact',
-        'observed_candidate_count',
-        'candidate_projection_exact',
+        'route_exact',
     }
     require(
-        len(barrier['samples']) == 2
-        and all(required_sample_fields <= set(sample) for sample in barrier['samples']),
-        'continuation samples omitted componentwise evidence',
+        barrier['result'] == 'PASS'
+        and len(barrier['samples']) == 2
+        and all(required_sample_fields <= set(sample) for sample in barrier['samples'])
+        and len({sample['pre_action_context_sha256'] for sample in barrier['samples']}) == 1,
+        'stable continuation barrier omitted exact one-shot evidence',
     )
-    require(
-        all(
-            sample['observed_raw_notification_count'] == 4
-            and sample['observed_candidate_count'] == 1
-            and sample['raw_notification_prefix_exact'] is True
-            and sample['raw_notification_inventory_changed'] is True
-            and sample['raw_notification_inventory_novelty_exact'] is True
-            for sample in barrier['samples']
-        ),
-        'stable samples did not preserve raw/candidate separation',
-    )
-
-    original_build_snapshot = manual.build_snapshot
-    manual.build_snapshot = lambda _platform: (None, None, virtualized_after)
-    try:
-        _snapshot, virtualized_barrier = manual.stable_post_action_observation(
-            virtualized_key,
+    require_refused(
+        lambda: manual.stable_post_action_observation(
+            manual.NOTIFICATIONS_CONTINUATION,
             'activate',
-            time.monotonic() + 2,
-        )
-    finally:
-        manual.build_snapshot = original_build_snapshot
-    require(
-        virtualized_barrier['result'] == 'PASS'
-        and len(virtualized_barrier['samples']) == 2
-        and all(
-            sample['observed_raw_notification_count'] == 3
-            and sample['raw_notification_count_grew'] is False
-            and sample['raw_notification_inventory_changed'] is True
-            and sample['raw_notification_inventory_novelty_exact'] is True
-            and sample['candidate_projection_exact'] is True
-            for sample in virtualized_barrier['samples']
+            time.monotonic() + 0.1,
         ),
-        'stable virtualized post-action state did not pass the barrier',
+        'stable barrier reused a consumed context',
     )
 
-    original_build_snapshot = manual.build_snapshot
+    authorize_runtime(before)
     manual.build_snapshot = lambda _platform: (None, None, before)
     try:
         _snapshot, timeout = manual.stable_post_action_observation(
-            continuation_key,
+            manual.NOTIFICATIONS_CONTINUATION,
             'activate',
             time.monotonic() + 0.05,
         )
@@ -387,16 +429,13 @@ def main() -> int:
         timeout['result'] == 'TIMEOUT'
         and timeout['next_mutation_authorized'] is False
         and timeout['samples']
-        and required_sample_fields <= set(timeout['samples'][0])
-        and timeout['samples'][0]['raw_notification_inventory_novelty_exact']
-        is False
-        and 'raw_inventory_novelty'
-        in timeout['samples'][0]['failed_components']
-        and 'verification_error' in timeout['samples'][0],
-        'continuation failure did not preserve exact sample evidence',
+        and timeout['samples'][0]['raw_notification_inventory_novelty_exact'] is False
+        and 'raw_inventory_novelty' in timeout['samples'][0]['failed_components']
+        and manual._CONTINUATION_PRE_ACTION.get() is None,
+        'unchanged timeout retained mutation authority or context',
     )
 
-    print('linkedin full notification-stream continuation: PASS')
+    print('linkedin one-shot continuation inventory: PASS')
     return 0
 
 

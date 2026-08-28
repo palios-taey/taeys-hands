@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from contextvars import ContextVar
 from dataclasses import replace
 import hashlib
+import json
 import re
 import time
-from typing import Any
+from typing import Any, Mapping
 from urllib.parse import parse_qs, urlsplit
 
 from consultation_v2.platforms.linkedin.driver import (
@@ -21,7 +23,8 @@ from consultation_v2.yaml_contract import load_platform_yaml
 
 NOTIFICATIONS_NAVIGATION = 'notifications_navigation'
 NOTIFICATION_CANDIDATE_PREFIX = 'notification_candidate_'
-NOTIFICATIONS_CONTINUATION_PREFIX = 'notifications_show_more_after_'
+NOTIFICATIONS_CONTINUATION_PREFIX = 'notifications_show_more_'
+NOTIFICATIONS_CONTINUATION = 'notifications_show_more_results'
 SELECTED_POST_PREFIX = 'selected_post_activity_'
 SELECTED_THREAD_OPEN_PREFIX = 'selected_post_thread_open_activity_'
 SELECTED_POST_REACTION_PREFIX = 'selected_post_reaction_activity_'
@@ -32,9 +35,7 @@ _CANDIDATE_KEY = re.compile(
     rf'^{NOTIFICATION_CANDIDATE_PREFIX}(?P<ordinal>[0-9]{{3}})_activity_(?P<activity>[0-9]+)$'
 )
 _CONTINUATION_KEY = re.compile(
-    rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_'
-    r'(?P<prefix>[0-9a-f]{16})_members_'
-    r'(?P<members>[0-9a-f]{64}(?:\.[0-9a-f]{64})*)$'
+    rf'^{re.escape(NOTIFICATIONS_CONTINUATION)}$'
 )
 _SELECTED_POST_KEY = re.compile(
     rf'^{SELECTED_POST_PREFIX}(?P<activity>[0-9]+)$'
@@ -56,6 +57,14 @@ _SELECTED_POST_SUBMIT_KEY = re.compile(
     r'(?P<body>[0-9a-f]{64})_draft_(?P<draft>[0-9a-f]{64})$'
 )
 _RELATIVE_AGE = re.compile(r'^[1-9][0-9]*[smhdw]$')
+_SHA256 = re.compile(r'^[0-9a-f]{64}$')
+_CONTINUATION_PRE_ACTION_SCHEMA = (
+    'linkedin_notification_continuation_pre_action_v1'
+)
+_CONTINUATION_PRE_ACTION: ContextVar[dict[str, Any] | None] = ContextVar(
+    'linkedin_notification_continuation_pre_action',
+    default=None,
+)
 
 
 def _require_linkedin(snapshot: Snapshot) -> None:
@@ -155,7 +164,9 @@ def _manual_notification_contract() -> dict[str, Any]:
             'states_include': ['enabled', 'focusable'],
             'postcondition': {
                 'kind': 'notification_stream_stable_novelty',
+                'action_identity': 'stable_semantic_key',
                 'identity': 'exact_yaml_content_link_uri',
+                'pre_action_freeze': 'exact_live_target_ref_revalidation',
                 'frozen_inventory_digest': 'sha256_uri_digests_truncated_16',
                 'frozen_inventory_members': 'sha256_uri_digests',
                 'novelty': 'at_least_one_exact_unseen_identity',
@@ -969,22 +980,157 @@ def _notification_stream_prefix_digest(
     ).hexdigest()[:16]
 
 
-def _notification_continuation_measurement(
-    snapshot: Snapshot,
-    continuation_match: re.Match[str],
+def _continuation_context_sha256(value: Mapping[str, Any]) -> str:
+    payload = {
+        key: item
+        for key, item in value.items()
+        if key != 'context_sha256'
+    }
+    return hashlib.sha256(json.dumps(
+        payload,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode('utf-8')).hexdigest()
+
+
+def _validate_notification_continuation_context(
+    value: Mapping[str, Any],
 ) -> dict[str, Any]:
-    contract = _manual_notification_contract()
-    prior_raw_count = int(continuation_match.group('count'))
-    prior_raw_prefix = continuation_match.group('prefix')
-    prior_uri_digests = continuation_match.group('members').split('.')
+    expected_keys = {
+        'action_element',
+        'action_operation',
+        'action_ref_sha256',
+        'context_sha256',
+        'pre_action_candidate_count',
+        'prior_notification_identity_digests',
+        'prior_raw_notification_count',
+        'prior_raw_notification_prefix',
+        'schema',
+    }
+    if not isinstance(value, Mapping) or set(value) != expected_keys:
+        raise ValueError(
+            'LinkedIn continuation pre-action context fields are not exact'
+        )
+    frozen = dict(value)
+    members = frozen.get('prior_notification_identity_digests')
+    count = frozen.get('prior_raw_notification_count')
+    candidate_count = frozen.get('pre_action_candidate_count')
     if (
-        len(prior_uri_digests) != prior_raw_count
-        or _notification_stream_prefix_digest(prior_uri_digests)
-        != prior_raw_prefix
+        frozen.get('schema') != _CONTINUATION_PRE_ACTION_SCHEMA
+        or frozen.get('action_element') != NOTIFICATIONS_CONTINUATION
+        or frozen.get('action_operation') != 'activate'
+        or _SHA256.fullmatch(str(frozen.get('action_ref_sha256') or '')) is None
+        or not isinstance(members, list)
+        or not members
+        or not all(
+            isinstance(member, str) and _SHA256.fullmatch(member) is not None
+            for member in members
+        )
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or count != len(members)
+        or frozen.get('prior_raw_notification_prefix')
+        != _notification_stream_prefix_digest(members)
+        or isinstance(candidate_count, bool)
+        or not isinstance(candidate_count, int)
+        or candidate_count < 0
+        or _SHA256.fullmatch(str(frozen.get('context_sha256') or '')) is None
+        or frozen.get('context_sha256') != _continuation_context_sha256(frozen)
     ):
         raise ValueError(
-            'LinkedIn notification continuation frozen inventory is invalid'
+            'LinkedIn continuation pre-action context is invalid'
         )
+    frozen['prior_notification_identity_digests'] = list(members)
+    return frozen
+
+
+def _freeze_notification_continuation_context(
+    context: Mapping[str, Any],
+) -> dict[str, Any]:
+    if _CONTINUATION_PRE_ACTION.get() is not None:
+        raise ValueError(
+            'LinkedIn continuation pre-action context is already live'
+        )
+    if (
+        context.get('element') != NOTIFICATIONS_CONTINUATION
+        or not isinstance(context.get('ref'), str)
+        or not context.get('ref')
+    ):
+        raise ValueError(
+            'LinkedIn continuation freeze requires the re-resolved target/ref'
+        )
+    members = context.get('notification_stream_uri_digests')
+    count = context.get('notification_stream_count')
+    prefix = context.get('notification_stream_prefix')
+    candidate_count = context.get('notification_candidate_count')
+    if (
+        not isinstance(members, list)
+        or not members
+        or not all(
+            isinstance(member, str) and _SHA256.fullmatch(member) is not None
+            for member in members
+        )
+        or isinstance(count, bool)
+        or not isinstance(count, int)
+        or count != len(members)
+        or prefix != _notification_stream_prefix_digest(members)
+        or isinstance(candidate_count, bool)
+        or not isinstance(candidate_count, int)
+        or candidate_count < 0
+    ):
+        raise ValueError(
+            'LinkedIn continuation target lacks exact live inventory'
+        )
+    frozen = {
+        'schema': _CONTINUATION_PRE_ACTION_SCHEMA,
+        'action_element': NOTIFICATIONS_CONTINUATION,
+        'action_operation': 'activate',
+        'action_ref_sha256': hashlib.sha256(
+            context['ref'].encode('utf-8')
+        ).hexdigest(),
+        'prior_raw_notification_count': count,
+        'prior_raw_notification_prefix': prefix,
+        'prior_notification_identity_digests': list(members),
+        'pre_action_candidate_count': candidate_count,
+    }
+    frozen['context_sha256'] = _continuation_context_sha256(frozen)
+    validated = _validate_notification_continuation_context(frozen)
+    _CONTINUATION_PRE_ACTION.set(validated)
+    return dict(validated)
+
+
+def _consume_notification_continuation_context(
+    element_key: str,
+    operation: str,
+) -> dict[str, Any]:
+    frozen = _CONTINUATION_PRE_ACTION.get()
+    _CONTINUATION_PRE_ACTION.set(None)
+    if frozen is None:
+        raise ValueError(
+            'LinkedIn continuation has no one-shot pre-action context'
+        )
+    validated = _validate_notification_continuation_context(frozen)
+    if (
+        validated['action_element'] != element_key
+        or validated['action_operation'] != operation
+    ):
+        raise ValueError(
+            'LinkedIn continuation pre-action context does not match the action'
+        )
+    return validated
+
+
+def _notification_continuation_measurement(
+    snapshot: Snapshot,
+    pre_action_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    contract = _manual_notification_contract()
+    frozen = _validate_notification_continuation_context(pre_action_context)
+    prior_raw_count = frozen['prior_raw_notification_count']
+    prior_raw_prefix = frozen['prior_raw_notification_prefix']
+    prior_uri_digests = frozen['prior_notification_identity_digests']
     observed_raw_count: int | None = None
     observed_raw_prefix: str | None = None
     observed_raw_inventory_digest: str | None = None
@@ -1044,6 +1190,9 @@ def _notification_continuation_measurement(
         if not passed
     ]
     return {
+        'pre_action_context_sha256': frozen['context_sha256'],
+        'pre_action_ref_sha256': frozen['action_ref_sha256'],
+        'pre_action_candidate_count': frozen['pre_action_candidate_count'],
         'route_exact': route_exact,
         'category_exact': category_exact,
         'raw_stream_projection_exact': stream_projection_error is None,
@@ -1157,7 +1306,41 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
     if _exact_engagement_route(snapshot.url, 'notifications_all'):
         uri_digests = _notification_stream_uri_digests(snapshot, contract)
         candidates = _notification_candidates(snapshot, contract)
-        if _notification_categories_exact(snapshot, contract):
+        continuation_contract = contract['continuation']
+        continuations = [
+            element
+            for element in _all_elements(snapshot)
+            if (
+                element.name == continuation_contract['name']
+                and element.role == continuation_contract['role']
+                and set(continuation_contract['states_include']).issubset(
+                    element.states
+                )
+            )
+        ]
+        if len(continuations) > 1:
+            raise ValueError('LinkedIn Show more results target is ambiguous')
+        if continuations:
+            mapped[NOTIFICATIONS_CONTINUATION] = [replace(
+                continuations[0],
+                key=NOTIFICATIONS_CONTINUATION,
+                x=None,
+                y=None,
+                description=(
+                    'continue only after all mounted candidates have '
+                    'evidenced exclusions'
+                ),
+                raw={
+                    **dict(continuations[0].raw),
+                    'notification_stream_count': len(uri_digests),
+                    'notification_stream_prefix': (
+                        _notification_stream_prefix_digest(uri_digests)
+                    ),
+                    'notification_stream_uri_digests': list(uri_digests),
+                    'notification_candidate_count': len(candidates),
+                },
+            )]
+        elif _notification_categories_exact(snapshot, contract):
             for ordinal, (candidate, activity, age) in enumerate(candidates, 1):
                 key = (
                     f'{NOTIFICATION_CANDIDATE_PREFIX}{ordinal:03d}_activity_{activity}'
@@ -1174,43 +1357,6 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     description=f'newest_order={ordinal}; relative_age={age}',
                     raw=raw,
                 )]
-        continuation_contract = contract['continuation']
-        continuations = [
-            element
-            for element in _all_elements(snapshot)
-            if (
-                element.name == continuation_contract['name']
-                and element.role == continuation_contract['role']
-                and set(continuation_contract['states_include']).issubset(
-                    element.states
-                )
-            )
-        ]
-        if len(continuations) > 1:
-            raise ValueError('LinkedIn Show more results target is ambiguous')
-        if continuations:
-            key = (
-                f'{NOTIFICATIONS_CONTINUATION_PREFIX}{len(uri_digests):03d}_'
-                f'{_notification_stream_prefix_digest(uri_digests)}_members_'
-                f'{".".join(uri_digests)}'
-            )
-            mapped[key] = [replace(
-                continuations[0],
-                key=key,
-                description=(
-                    f'mounted_articles={len(uri_digests)}; '
-                    f'candidates={len(candidates)}; continue only after all '
-                    'mounted candidates have evidenced exclusions'
-                ),
-                raw={
-                    **dict(continuations[0].raw),
-                    'notification_stream_count': len(uri_digests),
-                    'notification_stream_prefix': (
-                        _notification_stream_prefix_digest(uri_digests)
-                    ),
-                    'notification_candidate_count': len(candidates),
-                },
-            )]
     selected_activity, activity_sources = _selected_activity_identity(
         snapshot,
         contract,
@@ -1616,6 +1762,15 @@ def element_operation(
         if required_states.issubset(normalized_states)
         else []
     )
+    runtime_context_present = (
+        'element' in selected_context or 'ref' in selected_context
+    )
+    if continuation_match is not None and runtime_context_present:
+        if allowed_now != ['activate']:
+            raise ValueError(
+                'LinkedIn continuation runtime target is not ready to activate'
+            )
+        _freeze_notification_continuation_context(selected_context)
     return {
         'method': declared_primitive,
         'effect_class': declared_action['effect_class'],
@@ -1658,17 +1813,8 @@ def element_operation(
             ),
             **(
                 {
-                    'prior_raw_notification_count': int(
-                        continuation_match.group('count')
-                    )
-                }
-                if continuation_match is not None
-                else {}
-            ),
-            **(
-                {
-                    'prior_raw_notification_prefix': continuation_match.group(
-                        'prefix'
+                    'pre_action_inventory': (
+                        'frozen_after_exact_live_target_ref_revalidation'
                     )
                 }
                 if continuation_match is not None
@@ -1752,6 +1898,7 @@ def verify_post_action(
     *,
     expected_text: str | None = None,
     expected_author_name: str | None = None,
+    pre_action_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     _require_linkedin(snapshot)
     reaction_match = _SELECTED_POST_REACTION_KEY.fullmatch(element_key)
@@ -1934,10 +2081,18 @@ def verify_post_action(
             'observed_url': snapshot.url,
         }
     if continuation_match is not None:
+        frozen = (
+            _validate_notification_continuation_context(pre_action_context)
+            if pre_action_context is not None
+            else _consume_notification_continuation_context(
+                element_key,
+                operation,
+            )
+        )
         return _notification_continuation_receipt(
             element_key,
             operation,
-            _notification_continuation_measurement(snapshot, continuation_match),
+            _notification_continuation_measurement(snapshot, frozen),
         )
     if element_key != NOTIFICATIONS_NAVIGATION:
         raise ValueError('LinkedIn post-action element is not declared')
@@ -2086,6 +2241,11 @@ def stable_post_action_observation(
     selected_editor_match = _SELECTED_POST_EDITOR_KEY.fullmatch(element_key)
     selected_submit_match = _SELECTED_POST_SUBMIT_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
+    continuation_context = (
+        _consume_notification_continuation_context(element_key, operation)
+        if continuation_match is not None
+        else None
+    )
     existing_activate = operation == 'activate' and (
         element_key == navigation_contract['element_key']
         or _CANDIDATE_KEY.fullmatch(element_key) is not None
@@ -2143,6 +2303,8 @@ def stable_post_action_observation(
             'body_sha256': selected_submit_match.group('body'),
             'text_sha256': selected_submit_match.group('draft'),
         }
+    elif continuation_match is not None:
+        postcondition = notification_contract['continuation']['postcondition']
     else:
         postcondition = element_operation(
             element_key,
@@ -2176,8 +2338,8 @@ def stable_post_action_observation(
         _firefox, _document, snapshot = build_snapshot('linkedin')
         last_snapshot = snapshot
         continuation_measurement = (
-            _notification_continuation_measurement(snapshot, continuation_match)
-            if continuation_match is not None
+            _notification_continuation_measurement(snapshot, continuation_context)
+            if continuation_context is not None
             else None
         )
         verification_error: str | None = None
