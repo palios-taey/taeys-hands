@@ -71,7 +71,7 @@ def _manual_post_action_contract() -> dict[str, Any]:
         'element_key': NOTIFICATIONS_NAVIGATION,
         'operation': 'activate',
         'postcondition': {
-            'projection': 'exact_route',
+            'projection': 'exact_route_and_all_category',
             'route_key': 'notifications_all',
         },
         'observation_barrier': {
@@ -1050,10 +1050,11 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
         if target is not None
         else []
     )
-    if _exact_engagement_route(snapshot.url, 'notifications_all'):
-        contract = _manual_notification_contract()
-        if not _notification_categories_exact(snapshot, contract):
-            raise ValueError('LinkedIn Notifications-All category state is not exact')
+    contract = _manual_notification_contract()
+    if (
+        _exact_engagement_route(snapshot.url, 'notifications_all')
+        and _notification_categories_exact(snapshot, contract)
+    ):
         uri_digests = _notification_stream_uri_digests(snapshot, contract)
         candidates = _notification_candidates(snapshot, contract)
         for ordinal, (candidate, activity, age) in enumerate(candidates, 1):
@@ -1108,7 +1109,6 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     'notification_candidate_count': len(candidates),
                 },
             )]
-    contract = _manual_notification_contract()
     selected_activity, activity_sources = _selected_activity_identity(
         snapshot,
         contract,
@@ -1839,10 +1839,16 @@ def verify_post_action(
         )
     if element_key != NOTIFICATIONS_NAVIGATION:
         raise ValueError('LinkedIn post-action element is not declared')
-    if not _exact_engagement_route(snapshot.url, 'notifications_all'):
+    route_exact = _exact_engagement_route(snapshot.url, 'notifications_all')
+    category_exact = _notification_categories_exact(
+        snapshot,
+        _manual_notification_contract(),
+    )
+    if not route_exact or not category_exact:
         raise ValueError(
             'LinkedIn notifications_navigation postcondition failed: '
-            'fresh snapshot is not the exact notifications_all route'
+            'fresh snapshot does not prove the exact notifications_all route '
+            'and All category'
         )
     return {
         'element_key': NOTIFICATIONS_NAVIGATION,
@@ -1850,6 +1856,7 @@ def verify_post_action(
         'effect_class': 'page',
         'postcondition': 'notifications_all',
         'route_exact': True,
+        'category_exact': True,
         'observed_url': snapshot.url,
     }
 
@@ -2097,6 +2104,9 @@ def stable_post_action_observation(
             'sample': len(samples) + 1,
             'elapsed_ms': round((time.monotonic() - started_at) * 1000),
             'route_exact': bool(exact_receipt and exact_receipt.get('route_exact')),
+            'category_exact': bool(
+                exact_receipt and exact_receipt.get('category_exact')
+            ),
             'activity_exact': bool(
                 exact_receipt and exact_receipt.get('activity_exact')
             ),
