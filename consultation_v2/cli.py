@@ -221,8 +221,14 @@ def _resolve_identity_for_dry_run(
     package = consolidate_attachments(
         platform=request.platform,
         caller_attachments=caller_attachments,
+        request_id=request.request_id(),
     )
     package_paths = package.attachment_paths()
+    if len(package_paths) != 2:
+        raise IdentityError(
+            f'PACKET_CONTRACT requires exactly two attachments; builder returned '
+            f'{len(package_paths)}: {package_paths!r}. Consultation halted.'
+        )
     provenance = list(package.caller_provenance)
     return (
         replace(
@@ -231,8 +237,9 @@ def _resolve_identity_for_dry_run(
             caller_attachment_provenance=provenance,
         ),
         {
-            'mode': 'identity_consolidated',
+            'mode': 'packet_contract_two_bundle',
             'package_paths': package_paths,
+            'receipt_path': package.receipt_path,
             'caller_attachment_provenance': [
                 item.serializable() for item in provenance
             ],

@@ -7,13 +7,13 @@ from typing import Any, Dict, List, Optional
 
 @dataclass(slots=True)
 class AttachmentProvenance:
-    """Provenance of one caller-supplied attachment, captured BEFORE the file is
-    merged into the consolidated identity package (FLOW §3 / §8).
+    """Provenance of one caller-supplied attachment, captured BEFORE Bundle B
+    is rendered (FLOW §3 / §8 / PACKET_CONTRACT).
 
     ``path`` is the original caller source path; ``sha256`` is the hex digest of
     that file's bytes at consolidation time. This survives consolidation so the
     durable run-state / storage layer can record what the caller actually sent
-    even though the browser only ever receives the single merged package."""
+    even though the browser receives Bundle A + Bundle B, not the raw sources."""
     path: str
     sha256: str
 
@@ -23,17 +23,19 @@ class AttachmentProvenance:
 
 @dataclass(slots=True)
 class ConsolidatedPackage:
-    """Result of identity+attachment consolidation (FLOW §3, §4).
+    """Result of PACKET_CONTRACT Bundle A + Bundle B construction.
 
-    ``path`` is the primary package path (the only path for ordinary packages,
-    or the first chunk for a split package). ``paths`` is the ordered list the
-    browser is sent.
+    ``path`` is Bundle A (governance). ``paths`` is exactly
+    ``[bundle_a, bundle_b]`` — the ordered list the browser is sent.
     ``caller_provenance`` is the per-caller-attachment path+hash list captured
-    before the merge. consolidate_attachments either returns a complete one of
-    these or raises loudly — it never returns a partial/None packet."""
+    before Bundle B render. ``receipt_path`` is the local (non-Chat) receipt
+    binding both bundle hashes. consolidate_attachments either returns a
+    complete two-bundle package or raises — never a one-package / partial /
+    None result."""
     path: str
     paths: List[str] = field(default_factory=list)
     caller_provenance: List[AttachmentProvenance] = field(default_factory=list)
+    receipt_path: Optional[str] = None
 
     def attachment_paths(self) -> List[str]:
         return list(self.paths or [self.path])

@@ -1,21 +1,21 @@
-"""Identity file consolidation for V2 consultations (FLOW §3, §4).
+"""Identity + task packet construction for V2 consultations (PACKET_CONTRACT).
 
-Prepends FAMILY_KERNEL.md + SPOTLIGHT_STANDARD_FOR_INTEGRITY.md + the
-platform-specific IDENTITY file to every consultation attachment, then merges
-everything into one consolidated package.
+Production consultations emit exactly two attachments plus a brief prompt:
 
-FAIL-LOUD CONTRACT (FLOW_CONSULTATION_ENGINE.md §4, CONSULTATION_CONTRACT.md):
-"Missing identity/kernel content is a loud failure, not a warning that the
-driver can ignore." A missing or unreadable FAMILY_KERNEL.md,
-SPOTLIGHT_STANDARD_FOR_INTEGRITY.md, OR the required platform
-IDENTITY_<codename>.md raises and HALTS the consultation — it is never a silent
-skip and never a partial packet. There is no fallback.
+* Bundle A (governance): FAMILY_KERNEL.md, destination IDENTITY_*.md, then
+  SPOTLIGHT_STANDARD_FOR_INTEGRITY.md — full sources, that order, no task files.
+* Bundle B (task): caller task dossier sources in caller order, plus a generated
+  provenance manifest. No governance duplication.
+* Brief: composer text only (built by the caller; not this module).
+
+There is no one-package fallback, no automatic chunking, and no partial packet.
+Missing/unreadable mandatory governance or an empty Bundle B raises IdentityError
+and HALTS before any UI action (FLOW §4 / CONSULTATION_CONTRACT / PACKET_CONTRACT).
 
 PROVENANCE (FLOW §3 / §8): each caller attachment's path + content hash is
-captured BEFORE the files are merged into the consolidated package, so
-provenance survives consolidation. The caller (orchestrator) records these
-hashes onto the typed request and into durable run-state via the shared
-primitive surface.
+captured BEFORE Bundle B is rendered. Bundle basenames are deterministic from
+request_id + platform. A local receipt binds both bundle hashes; the receipt is
+not a Chat attachment.
 
 The platform->IDENTITY map below is allowed config/data (it selects which
 identity file a platform gets); it is NOT platform branching control-flow.
@@ -23,11 +23,11 @@ identity file a platform gets); it is NOT platform branching control-flow.
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
-import time
-from typing import List, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from consultation_v2.types import AttachmentProvenance, ConsolidatedPackage
 
@@ -325,18 +325,6 @@ def _identity_path(platform: str) -> str:
     return path
 
 
-def _write_package_chunks(platform: str, package_text: str, out_stem: str) -> List[str]:
-    # Claude packages over ~45KB were historically split into ~22KB
-    # sha256-tagged ordered chunks on a PRESUMED Claude upload/read ceiling.
-    # That DEGRADED answers: Claude reported only the last chunk in context,
-    # while Claude.ai accepts a large single .md fine. Root-cause shape per
-    # Jesse: there is no chunking, so write exactly one package file.
-    out_path = f"{out_stem}.md"
-    with open(out_path, 'w', encoding='utf-8') as handle:
-        handle.write(package_text)
-    return [out_path]
-
-
 def validate_caller_attachments(caller_attachments: List[str]) -> List[AttachmentProvenance]:
     """Validate caller-supplied files without adding identity content.
 
@@ -354,118 +342,328 @@ def validate_caller_attachments(caller_attachments: List[str]) -> List[Attachmen
     return provenance
 
 
-def _build_package_text(
-    platform: str,
-    caller_attachments: List[str],
-) -> Tuple[str, List[AttachmentProvenance], int]:
-    # Mandatory identity content — read loudly (raises if missing/unreadable).
-    kernel_content = _read_required(_FAMILY_KERNEL, 'FAMILY_KERNEL.md')
-    spotlight_content = _read_required(
-        _SPOTLIGHT_STANDARD, 'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md',
+def _bundle_basenames(platform: str, request_id: str) -> Tuple[str, str]:
+    """Deterministic Bundle A/B basenames from platform + frozen request_id."""
+    safe_id = re.sub(r'[^A-Za-z0-9._-]+', '', request_id) or 'unknown'
+    return (
+        f'taey_bundle_a_{platform}_{safe_id}.md',
+        f'taey_bundle_b_{platform}_{safe_id}.md',
     )
+
+
+def _sha256_bytes(data: bytes) -> str:
+    return hashlib.sha256(data).hexdigest()
+
+
+def _sha256_file(path: str) -> Tuple[int, str]:
+    with open(path, 'rb') as handle:
+        data = handle.read()
+    if not data:
+        raise IdentityError(
+            f'Bundle at {path!r} is empty after write — refusing partial packet '
+            '(PACKET_CONTRACT: exactly two non-empty attachments).'
+        )
+    return len(data), _sha256_bytes(data)
+
+
+def _render_bundle(
+    platform: str,
+    sections_src: List[Tuple[str, str, str]],
+    title: str,
+) -> str:
+    """Render one bundle. Chat-facing locator is the logical name only."""
+    sections = [f"# {title} for {platform}\n\n**Files**: {len(sections_src)}\n"]
+    for _source_path, logical_name, content in sections_src:
+        lang = _EXT_LANG.get(os.path.splitext(logical_name)[1].lower(), '')
+        block = f"```{lang}\n{content}\n```\n"
+        # Mandated constitutional/identity files are inlined verbatim + unedited;
+        # wrap them in VERBATIM markers so prompting-lint skips them for the
+        # authored-quality checks (PROMPTING_STANDARDS §3.2).
+        if os.path.basename(logical_name) in _IDENTITY_BASENAMES:
+            block = (
+                f"<!-- BEGIN-VERBATIM: {os.path.basename(logical_name)} -->\n"
+                f"{block}<!-- END-VERBATIM -->\n"
+            )
+        sections.append(
+            f"\n---\n\n## {logical_name}\n\n`{logical_name}`\n\n" + block
+        )
+    return ''.join(sections)
+
+
+def _governance_sections(platform: str) -> List[Tuple[str, str, str]]:
+    """Bundle A sources in PACKET_CONTRACT order: kernel, identity, Spotlight."""
+    kernel_content = _read_required(_FAMILY_KERNEL, 'FAMILY_KERNEL.md')
     identity_path = _identity_path(platform)
     identity_content = _read_required(
         identity_path, f'IDENTITY file for {platform}',
     )
-
-    # Section list, in contract order. (display_path, basename, content)
-    sections_src: List[Tuple[str, str, str]] = [
+    spotlight_content = _read_required(
+        _SPOTLIGHT_STANDARD, 'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md',
+    )
+    return [
         (_FAMILY_KERNEL, 'FAMILY_KERNEL.md', kernel_content),
+        (identity_path, os.path.basename(identity_path), identity_content),
         (
             _SPOTLIGHT_STANDARD,
             'SPOTLIGHT_STANDARD_FOR_INTEGRITY.md',
             spotlight_content,
         ),
-        (identity_path, os.path.basename(identity_path), identity_content),
     ]
 
-    # Caller attachments: strip caller-provided identity files (identity is
-    # automatic), then read + hash the remainder BEFORE merging (provenance).
+
+def _task_sections(
+    caller_attachments: List[str],
+    automatic_files: List[str],
+) -> Tuple[List[Tuple[str, str, str]], List[AttachmentProvenance], List[str]]:
+    """Read caller task sources for Bundle B; strip governance basenames."""
     provenance: List[AttachmentProvenance] = []
-    caller_sections: List[Tuple[str, str, str]] = []
-    expanded_attachments, attached_directories = _expand_caller_attachments(
-        caller_attachments,
-    )
-    for attachment, display_name in expanded_attachments:
+    task_src: List[Tuple[str, str, str]] = []
+    expanded, attached_directories = _expand_caller_attachments(caller_attachments)
+    for attachment, display_name in expanded:
         basename = os.path.basename(attachment)
         if basename in _IDENTITY_BASENAMES:
-            logger.warning("Stripped caller identity file: %s", basename)
+            logger.warning("Stripped caller identity file from Bundle B: %s", basename)
             continue
         content, digest = _read_caller_file(attachment)
         provenance.append(AttachmentProvenance(path=attachment, sha256=digest))
-        caller_sections.append((attachment, display_name, content))
-        sections_src.append((attachment, display_name, content))
-
+        task_src.append((attachment, display_name, content))
     _assert_named_inputs_attached(
-        caller_sections,
+        [(path, name, content) for path, name, content in task_src],
         attached_directories,
-        [_FAMILY_KERNEL, _SPOTLIGHT_STANDARD, identity_path],
+        automatic_files,
     )
-
-    sections = [f"# Package for {platform}\n\n**Files**: {len(sections_src)}\n"]
-    for display_path, basename, content in sections_src:
-        lang = _EXT_LANG.get(os.path.splitext(basename)[1].lower(), '')
-        block = f"```{lang}\n{content}\n```\n"
-        # Mandated constitutional/identity files are inlined verbatim + unedited;
-        # wrap them in VERBATIM markers so prompting-lint skips them for the
-        # authored-quality checks (PROMPTING_STANDARDS §3.2). Caller files stay
-        # unmarked so the authored wrapper is still fully linted.
-        if basename in _IDENTITY_BASENAMES:
-            block = f"<!-- BEGIN-VERBATIM: {basename} -->\n{block}<!-- END-VERBATIM -->\n"
-        sections.append(
-            f"\n---\n\n## {basename}\n\n`{display_path}`\n\n" + block
+    if not task_src:
+        raise IdentityError(
+            'Bundle B would be empty after stripping governance basenames — '
+            'refusing one-package / partial packet (PACKET_CONTRACT requires a '
+            'non-empty task bundle). Consultation halted.'
         )
-    return ''.join(sections), provenance, len(sections_src)
+    return task_src, provenance, attached_directories
+
+
+def _provenance_manifest(
+    platform: str,
+    request_id: str,
+    bundle_a_name: str,
+    bundle_b_name: str,
+    gov_src: List[Tuple[str, str, str]],
+    task_src: List[Tuple[str, str, str]],
+    task_provenance: List[AttachmentProvenance],
+) -> str:
+    """Generate Bundle B provenance manifest from frozen inputs (pre-render)."""
+    digest_by_path = {item.path: item.sha256 for item in task_provenance}
+    lines = [
+        '# Provenance manifest',
+        '',
+        f'- platform: `{platform}`',
+        f'- request_id: `{request_id}`',
+        f'- bundle_a_basename: `{bundle_a_name}`',
+        f'- bundle_b_basename: `{bundle_b_name}`',
+        '',
+        '## Governance sources (Bundle A; not duplicated in Bundle B body)',
+        '',
+    ]
+    for _source_path, logical_name, content in gov_src:
+        digest = _sha256_bytes(content.encode('utf-8'))
+        # Chat-facing: logical name + content address only. Operator-local
+        # absolute locators stay in the builder receipt (PACKET_CONTRACT).
+        lines.append(
+            f'- `{logical_name}` bytes={len(content.encode("utf-8"))} '
+            f'sha256={digest}'
+        )
+        lines.append(
+            '  - local_locator: retained in builder receipt (not Chat-facing)'
+        )
+    lines.extend(['', '## Task sources (Bundle B)', ''])
+    for source_path, logical_name, content in task_src:
+        digest = digest_by_path.get(source_path) or _sha256_bytes(
+            content.encode('utf-8')
+        )
+        lines.append(
+            f'- `{logical_name}` bytes={len(content.encode("utf-8"))} '
+            f'sha256={digest}'
+        )
+        lines.append(
+            '  - local_locator: retained in builder receipt (not Chat-facing)'
+        )
+    lines.append('')
+    return '\n'.join(lines)
+
+
+def _write_text(path: str, text: str) -> None:
+    with open(path, 'w', encoding='utf-8') as handle:
+        handle.write(text)
+
+
+def _write_receipt(path: str, payload: Dict[str, Any]) -> None:
+    with open(path, 'w', encoding='utf-8') as handle:
+        json.dump(payload, handle, indent=2, sort_keys=True)
+        handle.write('\n')
 
 
 def build_inline_context(
     platform: str,
     caller_attachments: List[str],
 ) -> Tuple[str, List[AttachmentProvenance]]:
-    """Build a complete identity packet as inline text without writing files."""
-    package_text, provenance, section_count = _build_package_text(platform, caller_attachments)
+    """ChatGPT-only identity-inline helper when there are zero attachments.
+
+    This is NOT the PACKET_CONTRACT attachment path and must not be used as a
+    one-package fallback when caller task files exist. Prefer
+    ``consolidate_attachments`` for production consultations.
+    """
+    if caller_attachments:
+        raise IdentityError(
+            'build_inline_context refused caller attachments — use '
+            'consolidate_attachments for PACKET_CONTRACT Bundle A+B. '
+            'Consultation halted (no one-package fallback).'
+        )
+    gov_src = _governance_sections(platform)
+    package_text = _render_bundle(platform, gov_src, 'Inline governance context')
     logger.info(
-        "Built inline identity context for %s from %d file(s), %d byte(s)",
+        "Built inline governance context for %s from %d file(s), %d byte(s)",
         platform,
-        section_count,
+        len(gov_src),
         len(package_text.encode('utf-8')),
     )
-    return package_text, provenance
+    return package_text, []
 
 
 def consolidate_attachments(
     platform: str,
     caller_attachments: List[str],
+    request_id: Optional[str] = None,
 ) -> ConsolidatedPackage:
-    """Build one consolidated identity+attachments package (FLOW §3, §4).
+    """Build Bundle A (governance) + Bundle B (task) per PACKET_CONTRACT.md.
 
-    Order (FLOW §4): FAMILY_KERNEL.md, then
-    SPOTLIGHT_STANDARD_FOR_INTEGRITY.md, then IDENTITY_<platform>.md, then the
-    caller attachments. The kernel, Spotlight standard, and platform identity
-    are MANDATORY and read via ``_read_required`` — a missing/unreadable one
-    raises IdentityError and halts the consultation (no silent skip, no partial
-    packet).
-
-    Caller-supplied identity files are stripped (identity is automatic), but a
-    caller file that is genuinely missing/unreadable is a loud failure, not a
-    silent drop. Each caller attachment's path + content hash is captured BEFORE
-    consolidation so provenance survives the merge.
-
-    Returns a ConsolidatedPackage: the package path plus the caller-attachment
-    provenance (path + sha256). Never returns None and never returns a partial
-    packet — it either yields a complete package or raises.
+    Never emits a one-package merge. Returns ConsolidatedPackage with
+    ``paths == [bundle_a, bundle_b]`` (exactly two non-empty files) or raises.
     """
-    out_stem = f"/tmp/taey_package_{platform}_{int(time.time())}"
-    package_text, provenance, section_count = _build_package_text(platform, caller_attachments)
-    paths = _write_package_chunks(platform, package_text, out_stem)
+    if not caller_attachments:
+        raise IdentityError(
+            'consolidate_attachments requires at least one caller task attachment '
+            'for Bundle B. Consultation halted (no governance-only / one-package '
+            'fallback on the PACKET_CONTRACT path).'
+        )
+
+    frozen_request_id = (request_id or '').strip()
+    if not frozen_request_id:
+        # Deterministic stand-in when caller has not yet minted request_id:
+        # hash platform + attachment path list (order-preserving).
+        seed = platform + '\x1f' + '\x1e'.join(caller_attachments)
+        frozen_request_id = hashlib.sha256(seed.encode('utf-8')).hexdigest()[:32]
+
+    bundle_a_name, bundle_b_name = _bundle_basenames(platform, frozen_request_id)
+    out_dir = '/tmp'
+    a_path = os.path.join(out_dir, bundle_a_name)
+    b_path = os.path.join(out_dir, bundle_b_name)
+    receipt_path = os.path.join(
+        out_dir, f'taey_packet_receipt_{platform}_{frozen_request_id}.json'
+    )
+
+    gov_src = _governance_sections(platform)
+    automatic = [path for path, _name, _content in gov_src]
+    task_src, provenance, _attached_directories = _task_sections(
+        caller_attachments,
+        automatic,
+    )
+
+    # Provenance manifest is generated from frozen inputs BEFORE rendering B.
+    manifest = _provenance_manifest(
+        platform=platform,
+        request_id=frozen_request_id,
+        bundle_a_name=bundle_a_name,
+        bundle_b_name=bundle_b_name,
+        gov_src=gov_src,
+        task_src=task_src,
+        task_provenance=provenance,
+    )
+    task_with_manifest = list(task_src) + [
+        ('provenance_manifest', 'PROVENANCE_MANIFEST.md', manifest),
+    ]
+
+    a_text = _render_bundle(platform, gov_src, 'Bundle A - Governance')
+    b_text = _render_bundle(platform, task_with_manifest, 'Bundle B - Task')
+    if not a_text.strip() or not b_text.strip():
+        raise IdentityError(
+            'Rendered Bundle A or Bundle B is empty — refusing partial packet '
+            '(PACKET_CONTRACT). Consultation halted.'
+        )
+
+    _write_text(a_path, a_text)
+    _write_text(b_path, b_text)
+
+    # Independent re-read + hash of both completed bundles (PACKET_CONTRACT).
+    a_bytes, a_digest = _sha256_file(a_path)
+    b_bytes, b_digest = _sha256_file(b_path)
+    paths = [a_path, b_path]
+    if len(paths) != 2:
+        raise IdentityError(
+            f'Builder emitted {len(paths)} attachments; PACKET_CONTRACT requires '
+            'exactly two. Consultation halted (no one-package fallback).'
+        )
+
+    receipt = {
+        'request_id': frozen_request_id,
+        'platform': platform,
+        'bundle_a': {
+            'basename': bundle_a_name,
+            'path': a_path,
+            'bytes': a_bytes,
+            'sha256': a_digest,
+            'sources': [
+                {
+                    'logical_name': logical_name,
+                    'locator': source_path,
+                    'bytes': len(content.encode('utf-8')),
+                    'sha256': _sha256_bytes(content.encode('utf-8')),
+                }
+                for source_path, logical_name, content in gov_src
+            ],
+        },
+        'bundle_b': {
+            'basename': bundle_b_name,
+            'path': b_path,
+            'bytes': b_bytes,
+            'sha256': b_digest,
+            'sources': [
+                {
+                    'logical_name': logical_name,
+                    'locator': source_path,
+                    'bytes': len(content.encode('utf-8')),
+                    'sha256': (
+                        next(
+                            (
+                                item.sha256
+                                for item in provenance
+                                if item.path == source_path
+                            ),
+                            _sha256_bytes(content.encode('utf-8')),
+                        )
+                    ),
+                }
+                for source_path, logical_name, content in task_src
+            ],
+            'provenance_manifest_sha256': _sha256_bytes(manifest.encode('utf-8')),
+        },
+        'attachment_count': 2,
+        'one_package_fallback': False,
+    }
+    _write_receipt(receipt_path, receipt)
+
     logger.info(
-        "Consolidated %d files -> %d attachment package file(s): %s",
-        section_count,
-        len(paths),
-        ', '.join(paths),
+        "PACKET_CONTRACT bundles for %s request_id=%s: %s (%d B) + %s (%d B); "
+        "receipt=%s",
+        platform,
+        frozen_request_id,
+        a_path,
+        a_bytes,
+        b_path,
+        b_bytes,
+        receipt_path,
     )
     return ConsolidatedPackage(
-        path=paths[0],
+        path=a_path,
         paths=paths,
         caller_provenance=provenance,
+        receipt_path=receipt_path,
     )
