@@ -49,6 +49,13 @@ def expanded_snapshot():
     return with_controls(snapshot)
 
 
+def without_category_controls(snapshot):
+    snapshot.unknown = [
+        item for item in snapshot.unknown if item.role != 'radio button'
+    ]
+    return snapshot
+
+
 def main() -> int:
     before = with_controls(inventory_snapshot())
     augmented = manual.augment_snapshot(before)
@@ -69,6 +76,23 @@ def main() -> int:
         'continuation card does not bind the full mounted stream',
     )
 
+    no_controls = without_category_controls(with_controls(inventory_snapshot()))
+    no_controls_augmented = manual.augment_snapshot(no_controls)
+    require(
+        len([
+            key for key in no_controls_augmented.mapped
+            if key.startswith(manual.NOTIFICATIONS_CONTINUATION_PREFIX)
+        ]) == 1,
+        'continuation disappeared when top-of-page category controls left the viewport',
+    )
+    require(
+        not any(
+            key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
+            for key in no_controls_augmented.mapped
+        ),
+        'candidate keys bypassed live All-category proof',
+    )
+
     obsolete_one_link = with_controls(inventory_snapshot())
     obsolete_article = next(
         item for item in obsolete_one_link.unknown if item.role == 'article'
@@ -87,12 +111,12 @@ def main() -> int:
             'continuation accepted the obsolete one-link notification fixture'
         )
 
-    after = expanded_snapshot()
+    after = without_category_controls(expanded_snapshot())
     receipt = manual.verify_post_action(after, continuation_key, 'activate')
     require(
         receipt['postcondition'] == 'notification_stream_count_growth'
         and receipt['route_exact'] is True
-        and receipt['category_exact'] is True
+        and receipt['category_exact'] is False
         and receipt['prior_raw_notification_count'] == 3
         and receipt['observed_raw_notification_count'] == 4
         and receipt['raw_notification_count_grew'] is True
@@ -164,8 +188,9 @@ def main() -> int:
     require(
         category_measurement['route_exact'] is True
         and category_measurement['category_exact'] is False
-        and category_measurement['postcondition_matched'] is False,
-        'non-exact Notifications category satisfied continuation',
+        and category_measurement['postcondition_matched'] is True
+        and 'category' not in category_measurement['failed_components'],
+        'current viewport category state overrode prior category authority',
     )
 
     original_build_snapshot = manual.build_snapshot
