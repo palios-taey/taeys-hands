@@ -397,14 +397,19 @@ def comment_root(author: str, text: str) -> tuple[Node, Node, list[ElementRef]]:
     return root, control, [ref(control), ref(target, text=text)]
 
 
-def selected_snapshot(*, count: int = 2, visible: bool = True) -> Snapshot:
+def selected_snapshot(
+    *,
+    count: int = 2,
+    visible: bool = True,
+    repost: bool = False,
+) -> Snapshot:
     document = Node('document web', 'LinkedIn post')
     post_root = Node('list item', states=['showing'])
     post_card = Node('generic')
     heading = Node('heading', 'Feed post')
     body = Node('section', text=BODY, states=['showing'])
     body_wrapper = Node('generic').add(body)
-    fillers = [Node('generic') for _index in range(8)]
+    fillers = [Node('generic') for _index in range(11 if repost else 8)]
     count_node = (
         Node(
             'push button',
@@ -1364,6 +1369,18 @@ def main() -> int:
         and source['thread']['typed_rows'][0]['kind'] == 'text'
         and source['thread']['typed_rows'][1]['kind'] == 'media_link_only',
         'selected thread was not captured as exact typed rows',
+    )
+
+    repost_ready = compile_preparation_step(
+        selected_snapshot(repost=True),
+        REVISION,
+        selected_envelope,
+        receipts,
+    )
+    require(
+        repost_ready['state'] == 'ready_for_private_draft'
+        and repost_ready['input']['source']['thread']['exact_comment_count'] == 2,
+        'exact repost structure did not produce private draft input',
     )
 
     zero_snapshot = selected_snapshot(count=0)

@@ -285,10 +285,15 @@ workflow:
           role: heading
           name: Feed post
         body:
-          index_path:
-            - 0
-            - 9
-            - 0
+          index_paths:
+            -
+              - 0
+              - 9
+              - 0
+            -
+              - 0
+              - 12
+              - 0
           role: section
           states_include:
             - showing
@@ -301,9 +306,13 @@ workflow:
         open_element_key_prefix: selected_post_thread_open_activity_
         comment_count:
           role: push button
-          index_path:
-            - 0
-            - 12
+          index_paths:
+            -
+              - 0
+              - 12
+            -
+              - 0
+              - 15
           states_include:
             - enabled
             - focusable
