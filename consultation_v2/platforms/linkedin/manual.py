@@ -1779,6 +1779,7 @@ def stable_scroll_post_action_observation(
             return snapshot, {
                 'result': 'PASS',
                 'next_mutation_authorized': False,
+                'terminal_delivery_verified': False,
                 'observe_required_before_next_mutation': True,
                 'projection': scroll_contract['postcondition'],
                 'refresh_policy': barrier['refresh_policy'],

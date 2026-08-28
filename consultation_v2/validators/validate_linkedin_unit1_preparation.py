@@ -334,9 +334,17 @@ def with_thread_opener(snapshot: Snapshot, count: int = 2) -> Snapshot:
 def barrier(card: dict) -> dict:
     return {
         'result': 'PASS',
-        'next_mutation_authorized': True,
+        'next_mutation_authorized': card['phase'] != 'thread_scroll',
         'terminal_delivery_verified': False,
         'observe_required_before_next_mutation': True,
+        'projection': card['postcondition_kind'],
+        'refresh_policy': 'invalidate_reacquire',
+        'stable_cycles_required': 2,
+        'stable_cycles_observed': 2,
+        'samples': [
+            {'sample': 1, 'route_exact': True},
+            {'sample': 2, 'route_exact': True},
+        ],
         'postcondition_receipt': {
             'element_key': card['element'],
             'operation': card['verification_operation'],

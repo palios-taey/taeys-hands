@@ -104,6 +104,7 @@ def main() -> int:
         "len(matches) == 1",
         "declared.get('method') == 'mapped_pointer_activate'",
         "'live_extent_in_viewport': True",
+        "'terminal_delivery_verified': False",
         "'observe_required_before_next_mutation': True",
     ):
         _require(required in barrier_source, f'scroll barrier missing {required!r}')
