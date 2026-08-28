@@ -106,6 +106,18 @@ def main() -> int:
                 'allowed_now': ['mapped_pointer_activate'],
             },
             'postcondition': 'exact_selected_thread_growth',
+            'scroll_into_view': {
+                'effect_class': 'viewport',
+                'primitives': ['scroll_into_view'],
+                'allowed_now': ['scroll_into_view'],
+                'postcondition': 'exact_selected_thread_expander_in_viewport',
+                'observation_barrier': {
+                    'refresh_policy': 'invalidate_reacquire',
+                    'stable_cycles': 2,
+                    'interval_ms': 200,
+                    'timeout_ms': 10000,
+                },
+            },
         },
         'LinkedIn selected-thread expansion transition drifted',
     )
@@ -125,6 +137,7 @@ def main() -> int:
         "'mapped_pointer_activate'",
         '_SELECTED_THREAD_EXPAND_KEY.fullmatch(',
         "'expand'",
+        "['scroll_into_view']",
         "'zero_open'",
     ):
         _require(
@@ -179,6 +192,7 @@ def main() -> int:
         "'live_extent_in_viewport': True",
         "'terminal_delivery_verified': False",
         "'observe_required_before_next_mutation': True",
+        '_SELECTED_THREAD_EXPAND_KEY.fullmatch(',
     ):
         _require(required in barrier_source, f'scroll barrier missing {required!r}')
 

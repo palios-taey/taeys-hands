@@ -594,7 +594,10 @@ def barrier(card: dict) -> dict:
         })
     return {
         'result': 'PASS',
-        'next_mutation_authorized': card['phase'] != 'thread_scroll',
+        'next_mutation_authorized': card['phase'] not in {
+            'thread_scroll',
+            'thread_expand_scroll',
+        },
         'terminal_delivery_verified': False,
         'observe_required_before_next_mutation': True,
         'projection': card['postcondition_kind'],
@@ -1456,17 +1459,113 @@ def main() -> int:
         selected_snapshot(count=9, visible_count=2),
         6,
     ))
-    first_expand = compile_preparation_step(
-        partial_thread,
-        REVISION,
-        selected_envelope,
-        receipts,
+    original_viewport = manual._selected_thread_viewport_state
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'error': 'live_extent_outside_display',
+    }
+    try:
+        first_expand_scroll = compile_preparation_step(
+            partial_thread,
+            REVISION,
+            selected_envelope,
+            receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        first_expand_scroll['phase'] == 'thread_expand_scroll'
+        and first_expand_scroll['method'] == 'scroll_into_view'
+        and '_total_9_visible_2_more_6' in first_expand_scroll['element'],
+        'off-screen selected thread expansion did not compile one exact scroll',
     )
+    original_build_snapshot = manual.build_snapshot
+    manual.build_snapshot = lambda _platform: (None, None, partial_thread)
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'live_extent_in_viewport': True,
+    }
+    try:
+        _scroll_snapshot, expand_scroll_barrier = (
+            manual.stable_scroll_post_action_observation(
+                first_expand_scroll['element'],
+                manual.time.monotonic() + 5,
+            )
+        )
+    finally:
+        manual.build_snapshot = original_build_snapshot
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        expand_scroll_barrier['result'] == 'PASS'
+        and expand_scroll_barrier['stable_cycles_observed'] == 2
+        and expand_scroll_barrier['postcondition_receipt'][
+            'expansion_identity_exact'
+        ] is True
+        and expand_scroll_barrier['postcondition_receipt']['total_count'] == 9
+        and expand_scroll_barrier['postcondition_receipt']['visible_count'] == 2
+        and expand_scroll_barrier['postcondition_receipt']['more_count'] == 6,
+        'selected thread expansion scroll barrier lost exact key identity',
+    )
+    receipts.append(accept_preparation_step(
+        first_expand_scroll,
+        expand_scroll_barrier,
+        receipts[-1]['receipt_sha256'],
+    ))
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'error': 'live_extent_outside_display',
+    }
+    try:
+        expect_error(
+            lambda: compile_preparation_step(
+                partial_thread,
+                REVISION,
+                selected_envelope,
+                receipts,
+            ),
+            'thread expansion scroll repeated while target stayed off-screen',
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    changed_expand_key = manual.augment_snapshot(with_thread_expander(
+        selected_snapshot(count=9, visible_count=3),
+        6,
+    ))
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'live_extent_in_viewport': True,
+    }
+    try:
+        expect_error(
+            lambda: compile_preparation_step(
+                changed_expand_key,
+                REVISION,
+                selected_envelope,
+                receipts,
+            ),
+            'thread expansion target identity changed after scroll',
+        )
+        expect_error(
+            lambda: compile_preparation_step(
+                manual.augment_snapshot(
+                    selected_snapshot(count=9, visible_count=9)
+                ),
+                REVISION,
+                selected_envelope,
+                receipts,
+            ),
+            'thread expansion scroll receipt bypassed the pointer action',
+        )
+        first_expand = compile_preparation_step(
+            partial_thread,
+            REVISION,
+            selected_envelope,
+            receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
     require(
         first_expand['phase'] == 'thread_expand'
         and first_expand['method'] == 'mapped_pointer_activate'
+        and first_expand['element'] == first_expand_scroll['element']
         and '_total_9_visible_2_more_6' in first_expand['element'],
-        'partial selected thread did not compile one exact expansion',
+        'scrolled selected thread did not compile the same exact expansion',
     )
     invalid_typed_growth = with_thread_expander(
         selected_snapshot(count=9, visible_count=8),
@@ -1507,12 +1606,18 @@ def main() -> int:
         first_expand_barrier,
         receipts[-1]['receipt_sha256'],
     ))
-    second_expand = compile_preparation_step(
-        eight_visible,
-        REVISION,
-        selected_envelope,
-        receipts,
-    )
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'live_extent_in_viewport': True,
+    }
+    try:
+        second_expand = compile_preparation_step(
+            eight_visible,
+            REVISION,
+            selected_envelope,
+            receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
     require(
         second_expand['phase'] == 'thread_expand'
         and '_total_9_visible_8_more_1' in second_expand['element'],
@@ -1551,7 +1656,8 @@ def main() -> int:
         'expanded selected thread was not captured as exact typed rows',
     )
     require(
-        source['thread_open_receipt_sha256'] == receipts[-3]['receipt_sha256']
+        source['thread_open_receipt_sha256']
+        == thread_open_receipts[-1]['receipt_sha256']
         and source['thread_ready_receipt_sha256'] == receipts[-1]['receipt_sha256'],
         'expanded selected source lost open-to-ready receipt provenance',
     )
