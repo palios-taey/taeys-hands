@@ -659,7 +659,7 @@ def _assert_combo_owned_options_surface() -> None:
         document,
         route,
     )
-    selected_option = exact.public['controls'][0]
+    selected_option = exact.public['controls'][1]
     selected_action = {
         'kind': 'select_option',
         'revision': exact.public['revision'],
