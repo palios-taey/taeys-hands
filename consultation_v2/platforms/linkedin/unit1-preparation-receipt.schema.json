@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios.org/schemas/linkedin-unit1-preparation-receipt.schema.json",
+  "title": "LinkedIn Unit 1 autonomous preparation receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "transaction_sha256",
+    "sequence",
+    "phase",
+    "previous_receipt_sha256",
+    "card_sha256",
+    "snapshot_revision",
+    "element_sha256",
+    "method",
+    "effect_class",
+    "postcondition_sha256",
+    "postcondition_passed",
+    "fresh_observation_required",
+    "next_step_authorized",
+    "receipt_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "linkedin_unit1_preparation_receipt_v1"},
+    "transaction_sha256": {"$ref": "#/$defs/sha256"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "phase": {"enum": ["notifications_navigation", "notifications_continuation", "notification_candidate", "thread_scroll", "thread_open"]},
+    "previous_receipt_sha256": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/sha256"}]},
+    "card_sha256": {"$ref": "#/$defs/sha256"},
+    "snapshot_revision": {"$ref": "#/$defs/sha256"},
+    "element_sha256": {"$ref": "#/$defs/sha256"},
+    "method": {"enum": ["activate", "scroll_into_view", "mapped_pointer_activate"]},
+    "effect_class": {"type": "string", "minLength": 1},
+    "postcondition_sha256": {"$ref": "#/$defs/sha256"},
+    "postcondition_passed": {"const": true},
+    "fresh_observation_required": {"const": true},
+    "next_step_authorized": {"const": true},
+    "receipt_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

@@ -80,6 +80,15 @@ item. A later unit may begin only when it is independent and cannot repeat, conc
 
 ### Deterministic Unit 1 step boundary
 
+The autonomous evidence-preparation boundary is defined by
+[`LINKEDIN_UNIT1_PREPARATION_CONTRACT.md`](LINKEDIN_UNIT1_PREPARATION_CONTRACT.md) and implemented in
+[`unit1_prepare.py`](../consultation_v2/platforms/linkedin/unit1_prepare.py). It preserves every mounted raw
+notification before private filtering, carries exact actionable links separately, and emits provider-neutral
+`ready_for_private_selection` and `ready_for_private_draft` inputs. It has no model invocation or human-review
+gate. Missing article/link/age evidence, a selection digest mismatch, or a thread count that does not equal the
+typed visible rows stops preparation without a readiness result. Candidate completion never proves an open or
+zero-comment thread: one exact selected-thread opener must be separately receipted before draft readiness.
+
 [`consultation_v2/platforms/linkedin/unit1.py`](../consultation_v2/platforms/linkedin/unit1.py)
 compiles one Unit 1 transition at a time from the fresh augmented LinkedIn snapshot, the complete preceding
 receipt chain, and one frozen private policy/draft binding. It does not define another locator, walker, or UI
