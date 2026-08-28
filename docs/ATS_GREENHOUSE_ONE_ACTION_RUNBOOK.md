@@ -175,10 +175,36 @@ anchor stabilize.
 
 ## Invocation
 
-```bash
-python3 scripts/run_ats_greenhouse_one_action.py \
-  --transaction /absolute/private/path/action.json
+```python
+import os
+import subprocess
+
+action_fd = os.open(
+    private_action_path,
+    os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+)
+try:
+    subprocess.run(
+        [
+            python,
+            'scripts/run_ats_greenhouse_one_action.py',
+            '--transaction-fd',
+            str(action_fd),
+            '--expected-transaction-sha256',
+            validated_action_sha256,
+        ],
+        pass_fds=(action_fd,),
+        check=True,
+    )
+finally:
+    os.close(action_fd)
 ```
+
+The production Presence adapter opens and validates the private frozen action
+before presenting its opaque card, retains that exact descriptor through the
+single `operate` call, and passes only the descriptor plus its digest to Hands.
+The runner has no pathname input or fallback. Replacing or unlinking the source
+pathname cannot substitute a different action after the card is issued.
 
 Exit status is zero only for a passed action and postcondition receipt. A
 refusal or terminal result exits one.
