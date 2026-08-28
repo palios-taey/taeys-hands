@@ -65,6 +65,9 @@ jobs:
       - name: Prove LinkedIn selected-thread viewport contract
         run: python3 consultation_v2/validators/validate_linkedin_manual_notification_contract.py
 
+      - name: Prove LinkedIn full notification-stream continuation contract
+        run: python3 consultation_v2/validators/validate_linkedin_notification_continuation.py
+
       - name: Prove LinkedIn Unit 1 one-action compiler contract
         run: python3 consultation_v2/validators/validate_linkedin_unit1_one_action.py
 

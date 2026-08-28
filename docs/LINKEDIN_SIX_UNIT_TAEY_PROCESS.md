@@ -132,8 +132,10 @@ has not been completely observed.
 2. Activate it once and require the exact `notifications_all` route in the fresh post-action observation.
 3. Observe all mounted notification cards raw before filtering. Do not narrow the read to one activity type.
 4. If exact `notifications_show_more_after_<count>_<prefix>` is mapped, activate that continuation once and
-   require both candidate-set growth and preservation of the exact ordered activity-ID prefix digest in the
-   fresh postcondition receipt. Each further continuation is a new transition with a new observation.
+   require the exact Notifications-All route and category plus growth of the full mounted-article count and
+   preservation of the ordered prefix digest of every article's exact canonical first-child URI. Candidate
+   count is reported separately and does not prove that the mounted stream expanded. Each further continuation
+   is a new transition with a new observation.
 5. Only after the mounted stream is fully evidenced, apply the runtime-injected freshness, target, dedup, and
    author-cooloff policy. A comment target must be no older than 72 hours.
 6. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.
