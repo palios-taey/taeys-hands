@@ -179,8 +179,14 @@ def _exact_strings(value: Any, label: str) -> tuple[str, ...]:
     return tuple(value)
 
 
-def _native_dialog_contract(platform: str) -> Dict[str, Any]:
-    raw = load_platform_yaml(platform).get('native_dialog')
+def normalize_native_dialog_contract(
+    raw: Any,
+    *,
+    authority: str,
+) -> Dict[str, Any]:
+    if not isinstance(authority, str) or not authority:
+        raise NativeDialogContractError('native dialog authority must be non-empty')
+    platform = authority
     if not isinstance(raw, dict):
         raise NativeDialogContractError(f'{platform}: native_dialog contract is missing')
     if set(raw) != _CONTRACT_KEYS:
@@ -315,6 +321,11 @@ def _native_dialog_contract(platform: str) -> Dict[str, Any]:
         'max_depth': max_depth,
         'elements': normalized,
     }
+
+
+def _native_dialog_contract(platform: str) -> Dict[str, Any]:
+    raw = load_platform_yaml(platform).get('native_dialog')
+    return normalize_native_dialog_contract(raw, authority=platform)
 
 
 def _state_names(obj: Any) -> tuple[str, ...]:
@@ -452,21 +463,15 @@ def _candidate_evidence(nodes: Iterable[_ObservedNode]) -> list[Dict[str, Any]]:
     ]
 
 
-def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
-    contract = _native_dialog_contract(platform)
+def _capture_native_dialog_snapshot(
+    platform: str,
+    contract: Mapping[str, Any],
+    firefox: Any,
+    *,
+    revision_binding_sha256: str | None = None,
+) -> NativeDialogSnapshot:
     root_key = contract['root']
     root_spec = contract['elements'][root_key]
-
-    import gi
-    gi.require_version('Atspi', '2.0')
-    from gi.repository import Atspi
-
-    desktop = Atspi.get_desktop(0)
-    desktop.clear_cache_single()
-    firefox = platform_routing.find_firefox_for_platform(platform)
-    if firefox is None:
-        raise NativeDialogObservationError(f'Firefox not found for {platform}')
-    firefox.clear_cache_single()
 
     direct_children = [
         _observed_node(child, f'FIREFOX/{index}')
@@ -569,6 +574,8 @@ def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
             for key, nodes in selected.items()
         },
     }
+    if revision_binding_sha256 is not None:
+        revision_payload['binding_sha256'] = revision_binding_sha256
     revision = _canonical_digest(revision_payload)
     mapped: Dict[str, tuple[NativeDialogElementRef, ...]] = {}
     for key, nodes in selected.items():
@@ -596,6 +603,74 @@ def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
     )
 
 
+def build_native_dialog_snapshot_from_contract(
+    platform: str,
+    *,
+    contract: Mapping[str, Any],
+    firefox: Any,
+    expected_firefox_pid: int,
+    revision_binding_sha256: str | None = None,
+) -> NativeDialogSnapshot:
+    if not isinstance(platform, str) or not platform:
+        raise NativeDialogContractError('native dialog platform must be non-empty')
+    if (
+        isinstance(expected_firefox_pid, bool)
+        or not isinstance(expected_firefox_pid, int)
+        or expected_firefox_pid <= 0
+    ):
+        raise NativeDialogContractError('expected Firefox PID must be a positive integer')
+    if revision_binding_sha256 is not None and (
+        not isinstance(revision_binding_sha256, str)
+        or len(revision_binding_sha256) != 64
+        or any(character not in '0123456789abcdef' for character in revision_binding_sha256)
+    ):
+        raise NativeDialogContractError(
+            'native dialog revision binding must be one lowercase SHA-256'
+        )
+    normalized = normalize_native_dialog_contract(contract, authority=platform)
+    try:
+        actual_firefox_pid = int(firefox.get_process_id())
+    except Exception as exc:
+        raise NativeDialogObservationError(
+            f'{platform}: exact Firefox process identity is unavailable'
+        ) from exc
+    if actual_firefox_pid != expected_firefox_pid:
+        raise NativeDialogObservationError(
+            f'{platform}: Firefox PID mismatch: expected {expected_firefox_pid}, '
+            f'observed {actual_firefox_pid}'
+        )
+
+    import gi
+    gi.require_version('Atspi', '2.0')
+    from gi.repository import Atspi
+
+    desktop = Atspi.get_desktop(0)
+    desktop.clear_cache_single()
+    firefox.clear_cache_single()
+    return _capture_native_dialog_snapshot(
+        platform,
+        normalized,
+        firefox,
+        revision_binding_sha256=revision_binding_sha256,
+    )
+
+
+def build_native_dialog_snapshot(platform: str) -> NativeDialogSnapshot:
+    contract = _native_dialog_contract(platform)
+
+    import gi
+    gi.require_version('Atspi', '2.0')
+    from gi.repository import Atspi
+
+    desktop = Atspi.get_desktop(0)
+    desktop.clear_cache_single()
+    firefox = platform_routing.find_firefox_for_platform(platform)
+    if firefox is None:
+        raise NativeDialogObservationError(f'Firefox not found for {platform}')
+    firefox.clear_cache_single()
+    return _capture_native_dialog_snapshot(platform, contract, firefox)
+
+
 __all__ = [
     'NativeDialogContractError',
     'NativeDialogElementRef',
@@ -603,4 +678,6 @@ __all__ = [
     'NativeDialogRevisionError',
     'NativeDialogSnapshot',
     'build_native_dialog_snapshot',
+    'build_native_dialog_snapshot_from_contract',
+    'normalize_native_dialog_contract',
 ]

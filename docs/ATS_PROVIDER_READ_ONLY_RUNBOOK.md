@@ -1,11 +1,17 @@
 # ATS provider read-only qualification
 
-Status: public mechanical candidate. It is not a production-qualified application lane.
+Status: public mechanical read-only candidate. It is not a production-qualified application lane.
+
+This document governs only `run_ats_read_only_qualification.py`. The separate
+Greenhouse mutation candidate is governed solely by
+`ATS_GREENHOUSE_ONE_ACTION_RUNBOOK.md`; it does not change this runner's
+terminal read-only authority.
 
 This slice establishes public, de-umbilicalized ATS provider mechanics without importing private application
 facts, bundles, targets, answers, credentials, databases, or operator paths. Greenhouse is the only executable
-provider and its only transition is read-only observation. Lever and Ashby are static mapping-only providers.
-Workday is an inactive static mapping. No provider grants fill, upload, or submit authority.
+provider in this adapter and its only transition here is read-only observation. Lever and Ashby are static
+mapping-only providers. Workday is an inactive static mapping. No provider grants this adapter fill, upload,
+or submit authority.
 
 ## Authority and primitive map
 
@@ -74,11 +80,12 @@ fallback, retry, alternate selector, or mutation recovery.
 
 ## Promotion order
 
-Merge and deploy the exact public commit, run one real Greenhouse read-only canary, and preserve its terminal
-receipt before discussing field fill. Fill requires its own reviewed non-submit effect authority and production
-qualification. Submit requires a further separately frozen outward authority plus exact external-confirmation
-and private database readback. Lever and Ashby repeat the read-only qualification independently. Workday remains
-inactive until its account and route surface has its own current evidence.
+The read-only canary remains independently valid and terminal. Greenhouse fill,
+upload, and Submit now have a separate, unqualified one-action candidate in
+`ATS_GREENHOUSE_ONE_ACTION_RUNBOOK.md`; no read-only receipt grants that lane
+mutation authority. Lever and Ashby repeat read-only qualification
+independently. Workday remains inactive until its account and route surface has
+its own current evidence.
 
 ## Mechanical gate
 

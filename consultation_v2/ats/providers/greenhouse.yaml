@@ -52,6 +52,15 @@ route:
         - key: gh_jid
           capture: job
           type: integer
+    - id: hosted_confirmation
+      path:
+        - capture: tenant
+          type: slug
+        - literal: jobs
+        - capture: job
+          type: integer
+        - literal: confirmation
+      query: []
     - id: embedded_application
       path:
         - literal: embed

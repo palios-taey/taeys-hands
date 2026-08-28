@@ -1,0 +1,186 @@
+schema: ats_greenhouse_one_action_v1
+provider: greenhouse
+execution:
+  lifecycle: autonomous_to_employer_confirmation
+  maximum_ui_mutations_per_call: 1
+  dropdown_options: fresh_observation_required
+  first_mismatch: terminal
+  stop_codes:
+    - exact_postcondition_failure
+    - unmapped_ui_or_question
+    - missing_truthful_applicant_data
+    - policy_or_authority_boundary
+    - side_effect_uncertainty
+surface:
+  actionable_roles:
+    - entry
+    - password text
+    - combo box
+    - check box
+    - radio button
+    - toggle button
+    - push button
+  text_roles:
+    - entry
+    - password text
+  choice_roles:
+    - check box
+    - radio button
+    - toggle button
+  option_roles:
+    - list item
+    - menu item
+    - option
+    - radio menu item
+  upload_slots:
+    resume:
+      ancestor_names_any_of:
+        - Resume/CV
+        - Resume/CV*
+      control_names_any_of:
+        - Resume/CV
+        - Upload Resume
+        - Attach Resume
+        - Attach Browse
+        - Attach
+        - Choose File
+    cover:
+      ancestor_names_any_of:
+        - Cover Letter
+        - Cover Letter*
+      control_names_any_of:
+        - Upload Cover Letter
+        - Attach Cover Letter
+        - Attach
+        - Choose File
+  submit:
+    names_any_of:
+      - Submit Application
+      - Submit application
+    role: push button
+barriers:
+  form:
+    refresh_policy: invalidate_reacquire
+    stable_cycles: 2
+    interval_ms: 200
+    timeout_ms: 10000
+  options:
+    refresh_policy: live_reacquire_no_clear
+    stable_cycles: 2
+    interval_ms: 150
+    timeout_ms: 4000
+  native_dialog:
+    refresh_policy: native_invalidate_reacquire
+    stable_cycles: 2
+    interval_ms: 150
+    timeout_ms: 4000
+  confirmation:
+    refresh_policy: invalidate_reacquire
+    stable_cycles: 2
+    interval_ms: 250
+    timeout_ms: 15000
+attachment_proof:
+  rendered_name_templates:
+    - "{filename}"
+    - "Remove {filename}"
+    - "Delete {filename}"
+    - "Remove attachment {filename}"
+confirmation:
+  route_grammar: hosted_confirmation
+  anchors_any:
+    - name: Application submitted
+      roles_any_of:
+        - heading
+        - section
+    - name: Thanks for applying
+      roles_any_of:
+        - heading
+        - section
+    - name: Thank you for applying
+      roles_any_of:
+        - heading
+        - section
+    - name: Your application has been submitted
+      roles_any_of:
+        - heading
+        - section
+native_dialog:
+  schema: native_dialog_v1
+  root: dialog_root
+  max_depth: 32
+  elements:
+    dialog_root:
+      role: file chooser
+      scope: firefox_application.direct_child
+      capture_name: true
+      structural:
+        relation: direct_child
+        parent_scope: firefox_application
+      required_states:
+        - showing
+        - visible
+        - enabled
+        - active
+    chooser_widget:
+      name: File Chooser Widget
+      role: file chooser
+      scope: native_dialog.chooser
+      structural:
+        relation: descendant
+        anchor: dialog_root
+      required_states:
+        - showing
+        - visible
+        - enabled
+    location_layer:
+      name: Location Layer
+      role: filler
+      scope: native_dialog.location
+      structural:
+        relation: descendant
+        anchor: chooser_widget
+      required: false
+      required_states:
+        - showing
+        - visible
+        - enabled
+    location_entry:
+      name_absent: true
+      role: text
+      scope: native_dialog.location
+      structural:
+        relation: direct_child
+        anchor: location_layer
+      required: false
+      capture_text: true
+      required_states:
+        - showing
+        - visible
+        - enabled
+        - focusable
+        - focused
+        - editable
+    cancel_button:
+      name: Cancel
+      role: push button
+      scope: native_dialog.actions
+      structural:
+        relation: descendant
+        anchor: dialog_root
+      required_states:
+        - showing
+        - visible
+        - enabled
+        - focusable
+    open_button:
+      name: Open
+      role: push button
+      scope: native_dialog.actions
+      structural:
+        relation: descendant
+        anchor: dialog_root
+      required_states:
+        - showing
+        - visible
+        - enabled
+        - focusable

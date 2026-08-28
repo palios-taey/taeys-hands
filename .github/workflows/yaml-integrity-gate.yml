@@ -73,3 +73,6 @@ jobs:
 
       - name: Prove ATS provider read-only boundary
         run: python3 consultation_v2/validators/validate_ats_provider_read_only.py
+
+      - name: Prove Greenhouse one-action boundary
+        run: python3 consultation_v2/validators/validate_ats_greenhouse_one_action.py

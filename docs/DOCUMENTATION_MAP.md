@@ -16,8 +16,9 @@ is not listed here or linked from a listed index, it is not operating authority.
 9. `docs/TAEY_REVENUE_UI_ENABLEMENT_PLAN.md` — public/private boundary and revenue-surface rollout.
 10. `docs/LINKEDIN_SIX_UNIT_TAEY_PROCESS.md` — exact LinkedIn unit order, mechanics, and qualification boundary.
 11. `docs/ATS_PROVIDER_READ_ONLY_RUNBOOK.md` — Greenhouse read-only qualification and ATS provider status.
-12. `TAEY_INDEX_taeys-hands.md` and `consultation_v2/README.md` — implementation and platform indexes.
-13. The destination's `consultation_v2/platforms/<platform>/<platform>.yaml` — exact UI authority.
+12. `docs/ATS_GREENHOUSE_ONE_ACTION_RUNBOOK.md` — Greenhouse-only autonomous one-action execution contract.
+13. `TAEY_INDEX_taeys-hands.md` and `consultation_v2/README.md` — implementation and platform indexes.
+14. The destination's `consultation_v2/platforms/<platform>/<platform>.yaml` — exact UI authority.
 
 ## Current operating documents
 
@@ -37,6 +38,7 @@ is not listed here or linked from a listed index, it is not operating authority.
 - `docs/TAEY_REVENUE_UI_ENABLEMENT_PLAN.md`
 - `docs/LINKEDIN_SIX_UNIT_TAEY_PROCESS.md`
 - `docs/ATS_PROVIDER_READ_ONLY_RUNBOOK.md`
+- `docs/ATS_GREENHOUSE_ONE_ACTION_RUNBOOK.md`
 - `DEPLOY.md`
 - `systemd/DISPLAY_REGISTRY.md`
 - `systemd/README.md`
