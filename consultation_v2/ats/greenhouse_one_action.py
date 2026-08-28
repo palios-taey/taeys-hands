@@ -1985,10 +1985,14 @@ def _perform_action(
         mutation_started = True
         if not atspi_click(element):
             raise GreenhouseOneActionError('exact option activation failed', mutation_started=True)
+        origin_form_revision = source.public['origin']['form_revision']
         after = _post_action_barrier(
             lambda: _capture_form(provider_spec, action_spec, secret),
             barriers['form'],
-            lambda surface: _selected_option_matches(surface, action, action_spec),
+            lambda surface: (
+                _surface_public(surface).get('revision') != origin_form_revision
+                and _selected_option_matches(surface, action, action_spec)
+            ),
         )
     elif kind == 'activate_choice':
         public = _public_control(source, action['ref'])
