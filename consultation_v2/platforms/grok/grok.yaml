@@ -150,6 +150,18 @@ tree:
     new_chat:
       name: New Chat
       role: link
+    grok_bot_dialog:
+      name: Meet Grok Bot
+      role: dialog
+      scope: pre_send.exception
+    grok_bot_dismiss:
+      name: Dismiss
+      role: push button
+      scope: pre_send.exception
+    grok_bot_get:
+      name: Get Grok Bot
+      role: push button
+      scope: pre_send.exception
     # send button (LIVE-CONFIRMED :5 2026-06-03). The composer is MULTI-LINE, so
     # Enter inserts a newline — submit is THIS exact push button, not a keystroke.
     send_button:
@@ -312,6 +324,60 @@ workflow:
   navigate:
     new_chat_key: new_chat
     fresh_input_key: input
+  pre_send:
+    exceptions:
+      meet_grok_bot:
+        exact_url: https://grok.com/
+        detect:
+          - grok_bot_dialog
+          - grok_bot_dismiss
+          - grok_bot_get
+        detect_states:
+          grok_bot_dialog:
+            - showing
+            - focusable
+            - enabled
+          grok_bot_dismiss:
+            - showing
+            - focusable
+            - enabled
+          grok_bot_get:
+            - showing
+            - focusable
+            - enabled
+        blocked_state_absent:
+          - uploaded_file_chip
+          - remove_attachment
+          - send_button
+          - stop_button
+        recovery:
+          action: click
+          element: grok_bot_dismiss
+          max_attempts: 1
+          absent_after_recovery:
+            - grok_bot_dialog
+            - grok_bot_dismiss
+            - grok_bot_get
+          postcondition:
+            scope: base
+            exact_singletons:
+              - input
+              - attach_trigger
+              - model_selector
+              - new_chat
+            absent:
+              - grok_bot_dialog
+              - grok_bot_dismiss
+              - grok_bot_get
+              - uploaded_file_chip
+              - remove_attachment
+              - send_button
+              - stop_button
+          observation:
+            refresh_policy: invalidate_reacquire
+            stable_cycles: 2
+            interval_ms: 250
+            timeout_ms: 12000
   attachment:
     trigger: attach_trigger
     menu_target: upload_files_item
