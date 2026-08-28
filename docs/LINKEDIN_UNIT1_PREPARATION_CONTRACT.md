@@ -53,8 +53,9 @@ continuation requires exclusions covering the exact ordered actionable inventory
 bound to the current transaction, policy, and inventory digests. An accepted continuation invalidates that
 decision; the newly mounted inventory must produce a new readiness result and private decision.
 The augmented snapshot projects exact candidate keys and the exact continuation key together when both are
-present. This preserves the selected candidate as the runtime card target while retaining exclusion-gated
-continuation authority.
+present. A candidate key's ordinal is the contiguous order among actionable candidates; the inventory row and
+private-selection ordinal remain the full mounted-article order. This preserves the selected candidate as the
+runtime card target while retaining the complete raw inventory and exclusion-gated continuation authority.
 
 `ready_for_private_draft` is emitted only after the selected activity exposes one exact mapped post body and a
 separately receipted exact thread-open action exposes a complete typed thread. A missing opener is terminal; it
