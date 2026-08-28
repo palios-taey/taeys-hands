@@ -35,11 +35,14 @@ except ModuleNotFoundError:
 
 from consultation_v2.ats.greenhouse_one_action import (  # noqa: E402
     MUTATION_PRIMITIVE_BY_ACTION,
+    GreenhouseOneActionError,
+    _capture_options,
     _complete_form_sha256,
     _native_public,
     load_action_spec,
     project_form_surface,
 )
+from consultation_v2.ats import greenhouse_one_action as greenhouse  # noqa: E402
 from consultation_v2.ats.provider_contract import load_provider_spec  # noqa: E402
 from consultation_v2.ats.read_only import Rect  # noqa: E402
 from consultation_v2.ats.route_contract import match_provider_route  # noqa: E402
@@ -69,6 +72,13 @@ class _FakeStateSet:
     def get_states(self) -> list[_FakeState]:
         return self._states
 
+    def contains(self, state: object) -> bool:
+        candidate = str(getattr(state, 'value_nick', state)).casefold().replace('_', ' ')
+        return candidate in {
+            item.value_nick.casefold().replace('_', ' ')
+            for item in self._states
+        }
+
 
 class _FakeNode:
     def __init__(
@@ -86,8 +96,11 @@ class _FakeNode:
         self._states = states
         self._children = children or []
         self._pid = pid
+        self._parent: _FakeNode | None = None
         self.text = text
         self.cache_clears = 0
+        for child in self._children:
+            child._parent = self
 
     def get_name(self) -> str:
         return self._name
@@ -106,6 +119,15 @@ class _FakeNode:
 
     def get_process_id(self) -> int:
         return self._pid
+
+    def get_parent(self) -> '_FakeNode | None':
+        return self._parent
+
+    def get_text_iface(self) -> None:
+        return None
+
+    def get_selection_iface(self) -> None:
+        return None
 
     def clear_cache_single(self) -> None:
         self.cache_clears += 1
@@ -278,6 +300,147 @@ def _assert_greenhouse_surface() -> None:
         raise RuntimeError('Greenhouse complete-form digest is not reproducible')
 
 
+def _assert_combo_owned_options_surface() -> None:
+    provider_spec = load_provider_spec('greenhouse')
+    action_spec = load_action_spec()
+    route = match_provider_route(
+        provider_spec,
+        'https://boards.greenhouse.io/example/jobs/123456',
+    )
+    secret = b'z' * 32
+    base_states = ['showing', 'visible', 'enabled', 'focusable']
+    combo_node = _FakeNode('Country', 'combo box', [*base_states, 'expanded'])
+    expanded_form = [{
+        'name': 'Country',
+        'role': 'combo box',
+        'states': [*base_states, 'expanded'],
+        'x': 120,
+        'y': 200,
+        'extent': {'x': 100, 'y': 180, 'width': 300, 'height': 40},
+        'atspi_obj': combo_node,
+    }]
+    expanded_public, _ = project_form_surface(
+        provider_spec,
+        action_spec,
+        route,
+        expanded_form,
+        Rect(0, 100, 1000, 700),
+        secret,
+    )
+    origin_ref = expanded_public['controls'][0]['ref']
+    if expanded_public['controls'][0]['operations']:
+        raise RuntimeError('expanded combo retained mutation authority')
+
+    collapsed_node = _FakeNode('Country', 'combo box', base_states)
+    collapsed_form = [{**expanded_form[0], 'states': base_states, 'atspi_obj': collapsed_node}]
+    option_a = _FakeNode('Canada', 'list item', ['showing', 'visible', 'enabled'])
+    option_b = _FakeNode('United States', 'list item', ['showing', 'visible', 'enabled'])
+    container = _FakeNode(
+        '',
+        'list box',
+        ['showing', 'visible'],
+        children=[option_a, option_b],
+    )
+    option_tree = [
+        {'name': '', 'role': 'list box', 'states': ['showing'], 'atspi_obj': container},
+        {
+            'name': 'Canada',
+            'role': 'list item',
+            'states': ['showing', 'enabled'],
+            'x': 120,
+            'y': 240,
+            'atspi_obj': option_a,
+        },
+        {
+            'name': 'United States',
+            'role': 'list item',
+            'states': ['showing', 'enabled'],
+            'x': 120,
+            'y': 280,
+            'atspi_obj': option_b,
+        },
+    ]
+    firefox = _FakeNode('Firefox', 'application', ['enabled'])
+    document = _FakeNode('Greenhouse', 'document web', ['showing', 'visible'])
+
+    def capture(form_elements: list[dict], option_elements: list[dict]):
+        with (
+            mock.patch.object(greenhouse, '_firefox_pid', return_value=4242),
+            mock.patch.object(greenhouse.atspi, 'find_all_firefox', return_value=[firefox]),
+            mock.patch.object(
+                greenhouse.atspi,
+                'document_web_elements',
+                return_value=[document],
+            ),
+            mock.patch.object(
+                greenhouse.atspi,
+                'get_document_url',
+                return_value='https://boards.greenhouse.io/example/jobs/123456',
+            ),
+            mock.patch.object(
+                greenhouse,
+                'find_elements',
+                side_effect=[form_elements, option_elements],
+            ),
+            mock.patch.object(
+                greenhouse,
+                '_document_rect',
+                return_value=Rect(0, 100, 1000, 700),
+            ),
+        ):
+            return _capture_options(provider_spec, action_spec, secret, origin_ref)
+
+    exact = capture(expanded_form, option_tree)
+    if exact.public['origin']['combo_ref'] != origin_ref:
+        raise RuntimeError('options surface lost its exact origin combo ref')
+    if exact.public['origin']['form_revision'] != expanded_public['revision']:
+        raise RuntimeError('options surface lost its expanded form revision')
+    if exact.public['container']['match_count'] != 1:
+        raise RuntimeError('options surface did not prove one exact container')
+    if [item['name'] for item in exact.public['controls']] != ['Canada', 'United States']:
+        raise RuntimeError('options surface did not expose exact container descendants')
+
+    try:
+        capture(collapsed_form, option_tree)
+    except GreenhouseOneActionError as exc:
+        if 'not owned by the activated combo' not in str(exc):
+            raise
+    else:
+        raise RuntimeError('unrelated nonempty options passed a collapsed combo')
+
+    duplicate_option = _FakeNode('Other', 'list item', ['showing', 'visible', 'enabled'])
+    duplicate_container = _FakeNode(
+        '',
+        'list box',
+        ['showing', 'visible'],
+        children=[duplicate_option],
+    )
+    duplicate_tree = [
+        *option_tree,
+        {
+            'name': '',
+            'role': 'list box',
+            'states': ['showing'],
+            'atspi_obj': duplicate_container,
+        },
+        {
+            'name': 'Other',
+            'role': 'list item',
+            'states': ['showing', 'enabled'],
+            'x': 500,
+            'y': 240,
+            'atspi_obj': duplicate_option,
+        },
+    ]
+    try:
+        capture(expanded_form, duplicate_tree)
+    except GreenhouseOneActionError as exc:
+        if 'cardinality is 2' not in str(exc):
+            raise
+    else:
+        raise RuntimeError('duplicate options containers did not fail loud')
+
+
 def _assert_one_action_static_contract() -> None:
     expected = {
         'observe_form': 0,
@@ -360,6 +523,7 @@ def _assert_one_action_static_contract() -> None:
 
     private_native_imports: list[str] = []
     forbidden_walker_calls: list[int] = []
+    forbidden_menu_fallback_calls: list[int] = []
     for node in ast.walk(tree):
         if isinstance(node, ast.ImportFrom) and node.module == (
             'consultation_v2.native_dialog_snapshot'
@@ -370,10 +534,20 @@ def _assert_one_action_static_contract() -> None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
             if node.func.attr in {'get_child_at_index', 'get_child_count'}:
                 forbidden_walker_calls.append(node.lineno)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == 'find_menu_items'
+        ):
+            forbidden_menu_fallback_calls.append(node.lineno)
     if private_native_imports:
         raise RuntimeError(f'ATS imports private native walker helpers: {private_native_imports}')
     if forbidden_walker_calls:
         raise RuntimeError(f'ATS implements a second native walker at {forbidden_walker_calls}')
+    if forbidden_menu_fallback_calls:
+        raise RuntimeError(
+            f'ATS options use the chat menu fallback at {forbidden_menu_fallback_calls}'
+        )
 
     execute = next(
         node for node in tree.body
@@ -442,6 +616,7 @@ def _assert_native_text_redaction() -> None:
 def main() -> int:
     _assert_one_action_static_contract()
     _assert_greenhouse_surface()
+    _assert_combo_owned_options_surface()
     _assert_native_text_redaction()
     _assert_public_native_walker()
     print('ATS_GREENHOUSE_ONE_ACTION_OK')

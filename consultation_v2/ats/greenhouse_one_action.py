@@ -25,7 +25,7 @@ from consultation_v2.native_dialog_snapshot import (
 from consultation_v2.runtime import ConsultationRuntime
 from consultation_v2.supervised_ui_contract import canonical_json_bytes
 from consultation_v2.supervised_ui_receipts import HandsReceiptStore
-from consultation_v2.tree import find_elements, find_menu_items
+from consultation_v2.tree import find_elements
 from consultation_v2.types import ElementRef
 
 from .provider_contract import ProviderSpec, load_provider_spec
@@ -267,6 +267,7 @@ def load_action_spec() -> ActionSpec:
             'provider',
             'execution',
             'surface',
+            'options_surface',
             'barriers',
             'attachment_proof',
             'confirmation',
@@ -305,10 +306,10 @@ def load_action_spec() -> ActionSpec:
     surface = _mapping(document['surface'], 'surface')
     _exact_keys(
         surface,
-        {'actionable_roles', 'text_roles', 'choice_roles', 'option_roles', 'upload_slots', 'submit'},
+        {'actionable_roles', 'text_roles', 'choice_roles', 'upload_slots', 'submit'},
         'surface',
     )
-    for key in ('actionable_roles', 'text_roles', 'choice_roles', 'option_roles'):
+    for key in ('actionable_roles', 'text_roles', 'choice_roles'):
         _string_list(surface[key], f'surface.{key}')
     slots = _mapping(surface['upload_slots'], 'surface.upload_slots')
     _exact_keys(slots, {'resume', 'cover'}, 'surface.upload_slots')
@@ -332,6 +333,55 @@ def load_action_spec() -> ActionSpec:
     _string_list(submit['names_any_of'], 'surface.submit.names_any_of')
     if submit['role'] != 'push button':
         raise GreenhouseOneActionError('surface.submit.role must be push button')
+    options_surface = _mapping(document['options_surface'], 'options_surface')
+    _exact_keys(
+        options_surface,
+        {
+            'observation_root',
+            'max_depth',
+            'prune_subtree_roles',
+            'origin',
+            'container',
+            'option',
+        },
+        'options_surface',
+    )
+    if options_surface['observation_root'] != 'firefox_application':
+        raise GreenhouseOneActionError(
+            'options_surface.observation_root must be firefox_application'
+        )
+    if (
+        isinstance(options_surface['max_depth'], bool)
+        or not isinstance(options_surface['max_depth'], int)
+        or options_surface['max_depth'] < 1
+    ):
+        raise GreenhouseOneActionError('options_surface.max_depth must be a positive integer')
+    _string_list(
+        options_surface['prune_subtree_roles'],
+        'options_surface.prune_subtree_roles',
+    )
+    origin = _mapping(options_surface['origin'], 'options_surface.origin')
+    _exact_keys(origin, {'role', 'states_all'}, 'options_surface.origin')
+    if origin['role'] != 'combo box' or _string_list(
+        origin['states_all'],
+        'options_surface.origin.states_all',
+    ) != ['expanded']:
+        raise GreenhouseOneActionError('options_surface.origin contract is invalid')
+    for key in ('container', 'option'):
+        option_part = _mapping(options_surface[key], f'options_surface.{key}')
+        _exact_keys(
+            option_part,
+            {'roles_any_of', 'states_all'},
+            f'options_surface.{key}',
+        )
+        _string_list(
+            option_part['roles_any_of'],
+            f'options_surface.{key}.roles_any_of',
+        )
+        _string_list(
+            option_part['states_all'],
+            f'options_surface.{key}.states_all',
+        )
     barriers = _mapping(document['barriers'], 'barriers')
     _exact_keys(barriers, {'form', 'options', 'native_dialog', 'confirmation'}, 'barriers')
     _validate_barrier(barriers['form'], 'barriers.form', 'invalidate_reacquire')
@@ -676,6 +726,22 @@ def _ancestor_names(element: Mapping[str, Any], limit: int = 24) -> tuple[str, .
     return tuple(names)
 
 
+def _ancestor_objects(element: Mapping[str, Any], limit: int = 64) -> tuple[Any, ...]:
+    obj = element.get('atspi_obj')
+    if obj is None:
+        raise GreenhouseOneActionError('ATS option has no structural object')
+    ancestors: list[Any] = []
+    for _ in range(limit):
+        try:
+            obj = obj.get_parent()
+        except Exception as exc:
+            raise GreenhouseOneActionError('ATS option ancestry is unavailable') from exc
+        if obj is None:
+            return tuple(ancestors)
+        ancestors.append(obj)
+    raise GreenhouseOneActionError('ATS option ancestry exceeded the exact depth bound')
+
+
 def _upload_slot(element: Mapping[str, Any], action_spec: ActionSpec) -> str | None:
     name = str(element.get('name') or '')
     ancestors = set(_ancestor_names(element))
@@ -833,7 +899,7 @@ def project_form_surface(
             safety = _combo_safety(element, document_rect)
             item['combo_safety'] = safety
             item['semantic_values'] = list(_control_semantic_values(element))
-            if 'enabled' in states:
+            if 'enabled' in states and 'expanded' not in states:
                 operations.append(
                     'open_combo'
                     if interactive and safety['geometry'] == 'contained_by_active_document'
@@ -898,6 +964,7 @@ def _capture_options(
     provider_spec: ProviderSpec,
     action_spec: ActionSpec,
     secret: bytes,
+    origin_combo_ref: str,
 ) -> BoundSurface:
     matches: list[tuple[Any, Any, str]] = []
     for firefox in atspi.find_all_firefox(pid=_firefox_pid()):
@@ -919,19 +986,77 @@ def _capture_options(
         )
     firefox, document, url = matches[0]
     route = match_provider_route(provider_spec, url)
-    allowed_roles = set(action_spec.document['surface']['option_roles'])
-    elements = find_menu_items(firefox, document, allowed_roles=allowed_roles)
-    candidates = [
+    form_public, _form_bindings = project_form_surface(
+        provider_spec,
+        action_spec,
+        route,
+        find_elements(
+            document,
+            max_depth=provider_spec.document['form_projection']['max_depth'],
+        ),
+        _document_rect(document),
+        secret,
+    )
+    origin_contract = action_spec.document['options_surface']['origin']
+    expanded = [
+        control
+        for control in form_public['controls']
+        if control.get('role') == origin_contract['role']
+        and set(origin_contract['states_all']) <= set(control.get('states') or [])
+    ]
+    if len(expanded) != 1 or expanded[0].get('ref') != origin_combo_ref:
+        raise GreenhouseOneActionError(
+            'exact options surface is not owned by the activated combo'
+        )
+    options_contract = action_spec.document['options_surface']
+    elements = find_elements(
+        firefox,
+        max_depth=options_contract['max_depth'],
+        prune_subtree_roles=options_contract['prune_subtree_roles'],
+    )
+    container_contract = options_contract['container']
+    container_roles = set(container_contract['roles_any_of'])
+    container_states = set(container_contract['states_all'])
+    containers = [
         dict(element)
         for element in elements
-        if str(element.get('role') or '').strip().lower() in allowed_roles
-        and str(element.get('name') or '')
+        if str(element.get('role') or '').strip().lower() in container_roles
+        and container_states <= _live_states(element)
+        and element.get('atspi_obj') is not None
     ]
+    option_contract = options_contract['option']
+    option_roles = set(option_contract['roles_any_of'])
+    option_states = set(option_contract['states_all'])
+    candidates_by_container: list[tuple[Mapping[str, Any], list[dict[str, Any]]]] = []
+    for container in containers:
+        container_obj = container['atspi_obj']
+        members: list[dict[str, Any]] = []
+        for element in elements:
+            if (
+                str(element.get('role') or '').strip().lower() not in option_roles
+                or not str(element.get('name') or '')
+                or not option_states <= _live_states(element)
+            ):
+                continue
+            if container_obj in _ancestor_objects(element):
+                members.append(dict(element))
+        if members:
+            candidates_by_container.append((container, members))
+    if len(candidates_by_container) != 1:
+        raise GreenhouseOneActionError(
+            'exact activated combo options container cardinality is '
+            f'{len(candidates_by_container)}; expected 1'
+        )
+    container, candidates = candidates_by_container[0]
     candidates.sort(key=lambda item: (
         int(item.get('y') or 0),
+        int(item.get('x') or 0),
         str(item.get('role') or ''),
         str(item.get('name') or ''),
     ))
+    option_names = [str(item.get('name') or '') for item in candidates]
+    if len(option_names) != len(set(option_names)):
+        raise GreenhouseOneActionError('exact activated combo options contain duplicate names')
     bindings: dict[str, Mapping[str, Any]] = {}
     options: list[dict[str, Any]] = []
     for ordinal, element in enumerate(candidates):
@@ -940,7 +1065,7 @@ def _capture_options(
         ref = _opaque_ref(
             secret,
             route.application_identity_sha256,
-            'options',
+            f'options:{origin_combo_ref}:{form_public["revision"]}',
             name,
             role,
             ordinal,
@@ -961,6 +1086,20 @@ def _capture_options(
         'action_spec_sha256': action_spec.sha256,
         'application_identity_sha256': route.application_identity_sha256,
         'route_grammar': route.grammar_id,
+        'origin': {
+            'combo_ref': origin_combo_ref,
+            'name': expanded[0]['name'],
+            'role': expanded[0]['role'],
+            'states': expanded[0]['states'],
+            'form_revision': form_public['revision'],
+            'match_count': 1,
+        },
+        'container': {
+            'name': str(container.get('name') or ''),
+            'role': str(container.get('role') or '').strip().lower(),
+            'states': sorted(_live_states(container)),
+            'match_count': 1,
+        },
         'controls': options,
     }
     public['revision'] = _revision(secret, public)
@@ -1090,11 +1229,17 @@ def _resolve_option_source(
 ) -> tuple[BoundSurface, Mapping[str, Any], tuple[Mapping[str, Any], ...]]:
     barrier = action_spec.document['barriers']['options']
     result = _wait_barrier(
-        lambda: _capture_options(provider_spec, action_spec, secret),
+        lambda: _capture_options(
+            provider_spec,
+            action_spec,
+            secret,
+            action['combo_ref'],
+        ),
         barrier,
         lambda surface: (
             isinstance(surface, BoundSurface)
             and surface.public['revision'] == action['revision']
+            and surface.public['origin']['combo_ref'] == action['combo_ref']
             and action['ref'] in surface.bindings
         ),
     )
@@ -1412,9 +1557,20 @@ def _perform_action(
         if actuation.get('ok') is not True:
             raise GreenhouseOneActionError('exact combo activation failed', mutation_started=True)
         after = _post_action_barrier(
-            lambda: _capture_options(provider_spec, action_spec, secret),
+            lambda: _capture_options(
+                provider_spec,
+                action_spec,
+                secret,
+                action['ref'],
+            ),
             barriers['options'],
-            lambda surface: isinstance(surface, BoundSurface) and bool(surface.public['controls']),
+            lambda surface: (
+                isinstance(surface, BoundSurface)
+                and surface.public['origin']['combo_ref'] == action['ref']
+                and surface.public['origin']['form_revision'] != action['revision']
+                and surface.public['container']['match_count'] == 1
+                and bool(surface.public['controls'])
+            ),
         )
     elif kind == 'select_option':
         public = _public_control(source, action['ref'])
@@ -1433,6 +1589,9 @@ def _perform_action(
             lambda surface: (
                 action['expected_option_name']
                 in (_public_control(surface, action['combo_ref']) or {}).get('semantic_values', [])
+                and 'expanded' not in (
+                    (_public_control(surface, action['combo_ref']) or {}).get('states') or []
+                )
             ),
         )
     elif kind == 'activate_choice':

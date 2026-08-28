@@ -27,11 +27,6 @@ surface:
     - check box
     - radio button
     - toggle button
-  option_roles:
-    - list item
-    - menu item
-    - option
-    - radio menu item
   upload_slots:
     resume:
       ancestor_names_any_of:
@@ -58,6 +53,31 @@ surface:
       - Submit Application
       - Submit application
     role: push button
+options_surface:
+  observation_root: firefox_application
+  max_depth: 45
+  prune_subtree_roles:
+    - tool bar
+    - menu bar
+    - page tab list
+    - status bar
+  origin:
+    role: combo box
+    states_all:
+      - expanded
+  container:
+    roles_any_of:
+      - list box
+      - listbox
+    states_all:
+      - showing
+      - visible
+  option:
+    roles_any_of:
+      - list item
+    states_all:
+      - showing
+      - visible
 barriers:
   form:
     refresh_policy: invalidate_reacquire
