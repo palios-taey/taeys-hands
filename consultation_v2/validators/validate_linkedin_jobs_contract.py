@@ -193,6 +193,10 @@ def _validate_yaml() -> list[str]:
         errors.append(f'{YAML_PATH}: manual Notifications route barrier drifted')
     expected_barriers = (
         (
+            navigation.get('initial_observation_barrier'),
+            'exact_notifications_navigation',
+        ),
+        (
             navigation.get('observation_barrier'),
             'exact_route_and_my_posts_state',
         ),
