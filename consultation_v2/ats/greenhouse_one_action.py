@@ -1101,62 +1101,13 @@ def _option_semantic_token(rendered_name: str, contract_kind: str) -> str:
 def _selected_option_matches(
     surface: Any,
     action: Mapping[str, Any],
-    action_spec: ActionSpec,
 ) -> bool:
     if not isinstance(surface, BoundSurface):
         return False
     combo = _public_control(surface, action['combo_ref'])
     if combo is None or 'expanded' in (combo.get('states') or []):
         return False
-    if action['expected_option_name'] in combo.get('semantic_values', []):
-        return True
-    semantic_projection = action_spec.document['options_surface']['semantic_projection']
-    if {
-        'name': combo.get('name'),
-        'role': combo.get('role'),
-    } != semantic_projection['origin']:
-        return False
-    semantic_token = _option_semantic_token(
-        action['expected_option_name'],
-        semantic_projection['kind'],
-    )
-    calling_code = action['expected_option_name'][len(semantic_token) + 1:]
-    element = surface.bindings.get(action['combo_ref'])
-    obj = element.get('atspi_obj') if element is not None else None
-    if obj is None:
-        return False
-    try:
-        parent = obj.get_parent()
-        parent_role = str(parent.get_role_name() or '').strip().lower() if parent else ''
-    except Exception as exc:
-        raise GreenhouseOneActionError(
-            'ATS Country selected-value relation is unavailable'
-        ) from exc
-    if parent is None or parent_role != 'section':
-        return False
-    try:
-        children = _direct_child_elements(parent)
-        country_children = [
-            child for child in children
-            if {
-                'name': child.get('name'),
-                'role': child.get('role'),
-            } == semantic_projection['origin']
-        ]
-        selected_value_children = [
-            child for child in children
-            if child.get('role') == 'section'
-            and _control_text(child) == calling_code
-        ]
-    except Exception as exc:
-        raise GreenhouseOneActionError(
-            'ATS Country selected-value relation is unavailable'
-        ) from exc
-    return (
-        len(children) == 2
-        and len(country_children) == 1
-        and len(selected_value_children) == 1
-    )
+    return action['expected_option_name'] in combo.get('semantic_values', [])
 
 
 def _capture_options(
@@ -1988,7 +1939,7 @@ def _perform_action(
         after = _post_action_barrier(
             lambda: _capture_form(provider_spec, action_spec, secret),
             barriers['form'],
-            lambda surface: _selected_option_matches(surface, action, action_spec),
+            lambda surface: _selected_option_matches(surface, action),
         )
     elif kind == 'activate_choice':
         public = _public_control(source, action['ref'])

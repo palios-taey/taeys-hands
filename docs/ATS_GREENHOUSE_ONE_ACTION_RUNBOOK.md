@@ -101,13 +101,11 @@ contract. The capsule preserves that rendered name for exact selection and
 separately exposes its public country-name `semantic_token`; every other combo
 continues to expose no semantic token.
 
-After exact Country-option activation, Greenhouse may expose no selected value
-on the collapsed combo itself. In that exact surface only, the postcondition
-also accepts the parsed calling-code suffix when the combo's immediate parent
-is a `section` with exactly two direct children: the exact bound Country combo
-and one `section` whose complete text is that suffix. This is an exact
-structural equality check, not a document scan, substring match, alternate
-locator, or value emitted in the public surface or receipt.
+After exact Country-option activation, the postcondition passes only when the
+collapsed exact bound combo exposes the exact rendered option name in its
+canonical `semantic_values`. An empty canonical value fails closed even if a
+nearby node exposes the option's calling-code suffix. A calling code is not a
+unique country proof and never authorizes the next mutation.
 
 The native chooser is also one action per call. The ATS lane supplies its
 validated YAML contract, one exact Firefox object, and the exact configured
