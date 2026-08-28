@@ -371,6 +371,7 @@ workflow:
           - stop_button
         recovery:
           action: click
+          expected_primitive: click
           element: grok_bot_dismiss
           max_attempts: 1
           selected_model: false
@@ -434,7 +435,8 @@ workflow:
           - stop_button
           - copy_button
         recovery:
-          action: click
+          action: operate
+          expected_primitive: mapped_pointer_activate
           element: model_heavy
           max_attempts: 1
           selected_model: true

@@ -14,6 +14,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
 from consultation_v2.yaml_contract import load_platform_yaml  # noqa: E402
+from consultation_v2.platforms.grok.manual import element_operation  # noqa: E402
 from scripts import run_manual_chat_worker as worker  # noqa: E402
 
 
@@ -105,8 +106,9 @@ def _receipt(*, bad_pre_count: bool = False) -> str:
         f"pre_recovery_counts_2: {json.dumps(PRE_COUNTS, separators=(',', ':'))}",
         f"pre_recovery_states_1: {json.dumps(PRE_STATES, separators=(',', ':'))}",
         f"pre_recovery_states_2: {json.dumps(PRE_STATES, separators=(',', ':'))}",
-        "clicked_element: grok_bot_dismiss",
-        "click_count: 1",
+        "action: click",
+        "mutation_element: grok_bot_dismiss",
+        "mutation_count: 1",
         "performed_primitive: click",
         "postcondition_scope: base",
         "postcondition_elements: input, attach_trigger, model_selector, new_chat",
@@ -127,7 +129,12 @@ def _receipt(*, bad_pre_count: bool = False) -> str:
     ))
 
 
-def _model_menu_receipt(*, bad_state: bool = False, selected_model: bool = True) -> str:
+def _model_menu_receipt(
+    *,
+    bad_state: bool = False,
+    selected_model: bool = True,
+    performed_primitive: str = "mapped_pointer_activate",
+) -> str:
     pre_states = dict(MODEL_PRE_STATES)
     if bad_state:
         pre_states["model_heavy"] = ["showing", "enabled"]
@@ -147,9 +154,10 @@ def _model_menu_receipt(*, bad_state: bool = False, selected_model: bool = True)
         f"pre_recovery_counts_2: {compact_pre}",
         f"pre_recovery_states_1: {compact_states}",
         f"pre_recovery_states_2: {json.dumps(MODEL_PRE_STATES, separators=(',', ':'))}",
-        "clicked_element: model_heavy",
-        "click_count: 1",
-        "performed_primitive: click",
+        "action: operate",
+        "mutation_element: model_heavy",
+        "mutation_count: 1",
+        f"performed_primitive: {performed_primitive}",
         "postcondition_scope: base",
         "postcondition_elements: input, attach_trigger, model_selector, new_chat",
         "stable_cycles: 2",
@@ -246,6 +254,8 @@ def main() -> int:
         "grok_bot_get",
     )
     assert spec["element"] == "grok_bot_dismiss"
+    assert spec["action"] == "click"
+    assert spec["expected_primitive"] == "click"
     assert spec["exact_singletons"] == (
         "input",
         "attach_trigger",
@@ -259,7 +269,7 @@ def main() -> int:
         "meet_grok_bot",
         SOURCE_IDENTITY,
     )
-    assert content.count("click element=grok_bot_dismiss exactly once") == 1
+    assert content.count("3. click element=grok_bot_dismiss exactly once") == 1
     assert "Do not navigate, attach, paste, send" in content
     assert "current_url exactly https://grok.com/" in content
     assert "Require 2 consecutive matching samples" in content
@@ -284,6 +294,8 @@ def main() -> int:
         "copy_button",
     )
     assert model_spec["element"] == "model_heavy"
+    assert model_spec["action"] == "operate"
+    assert model_spec["expected_primitive"] == "mapped_pointer_activate"
     assert model_spec["selected_model"] is True
     assert model_spec["absence_receipt_field"] == "model_menu_absent"
     assert model_spec["exact_singletons"] == (
@@ -297,7 +309,8 @@ def main() -> int:
         "model_menu_open",
         MODEL_SOURCE_IDENTITY,
     )
-    assert model_content.count("click element=model_heavy exactly once") == 1
+    assert model_content.count("3. operate element=model_heavy exactly once") == 1
+    assert "performed_primitive=mapped_pointer_activate" in model_content
     assert "observe scope=base exactly once" in model_content
     assert "select any model except model_heavy" in model_content
     assert "Do not navigate, attach, paste, send" in model_content
@@ -307,6 +320,48 @@ def main() -> int:
     assert "send_count=0" in model_content
     assert "selected_model=true" in model_content
     assert MODEL_SOURCE_IDENTITY in model_content
+    send_content = worker._send_content(
+        "grok",
+        ":23",
+        Path("/private/bundle-a.md"),
+        Path("/private/bundle-b.md"),
+        Path("/private/prompt.md"),
+    )
+    assert send_content.count(
+        "otherwise operate element=model_heavy using that fresh observation and require "
+        "performed_primitive=mapped_pointer_activate"
+    ) == 1
+    assert "otherwise click element=model_heavy" not in send_content
+
+    expected_pointer_operation = {
+        "method": "mapped_pointer_activate",
+        "primitives": ["mapped_pointer_activate"],
+        "allowed_now": ["mapped_pointer_activate"],
+        "forbidden": ["activate", "click", "focus", "hover"],
+    }
+    assert element_operation(
+        "model_heavy",
+        ["showing", "focusable", "enabled"],
+    ) == expected_pointer_operation
+    model_not_ready = element_operation("model_heavy", ["showing", "enabled"])
+    assert model_not_ready is not None
+    assert model_not_ready["allowed_now"] == []
+    for non_target in (
+        "model_auto",
+        "model_fast",
+        "model_expert",
+        "grok_bot_dialog",
+        "grok_bot_dismiss",
+        "grok_bot_get",
+    ):
+        assert element_operation(
+            non_target,
+            ["showing", "focusable", "enabled"],
+        ) is None
+    assert element_operation(
+        "attach_trigger",
+        ["showing", "enabled"],
+    ) == expected_pointer_operation
 
     parser = worker.build_parser()
     parsed = parser.parse_args(_arguments(Path("/private/new-artifact-root")))
@@ -391,6 +446,17 @@ def main() -> int:
         else:
             raise AssertionError("false model-selection receipt was not refused")
 
+    with tempfile.TemporaryDirectory() as temporary:
+        try:
+            _run_main(
+                _model_arguments(Path(temporary) / "wrong-model-primitive"),
+                receipt=_model_menu_receipt(performed_primitive="click"),
+            )
+        except RuntimeError as exc:
+            assert "performed_primitive" in str(exc)
+        else:
+            raise AssertionError("wrong model-menu primitive was not refused")
+
     print(json.dumps({
         "exception": "meet_grok_bot",
         "recovery_element": "grok_bot_dismiss",
@@ -399,6 +465,7 @@ def main() -> int:
         "model_menu_open": "model_heavy",
         "model_state_mismatch_refused": True,
         "selected_model_mismatch_refused": True,
+        "wrong_primitive_refused": True,
         "stable_cycles": 2,
         "status": "PASS",
     }, sort_keys=True, separators=(",", ":")))

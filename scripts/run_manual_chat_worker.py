@@ -563,6 +563,8 @@ def _grok_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
         raise RuntimeError("grok pre-send blocked-state absences are invalid")
     if not isinstance(recovery, dict):
         raise RuntimeError("grok pre-send exception has no recovery mapping")
+    action = recovery.get("action")
+    expected_primitive = recovery.get("expected_primitive")
     element = recovery.get("element")
     selected_model = recovery.get("selected_model")
     absence_receipt_field = recovery.get("absence_receipt_field")
@@ -570,11 +572,15 @@ def _grok_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
     postcondition = recovery.get("postcondition")
     observation = recovery.get("observation")
     if (
-        recovery.get("action") != "click"
+        action not in {"click", "operate"}
+        or expected_primitive
+        != {"click": "click", "operate": "mapped_pointer_activate"}.get(action)
         or recovery.get("max_attempts") != 1
         or element not in detect
     ):
-        raise RuntimeError("grok pre-send recovery must click one exact detected control once")
+        raise RuntimeError(
+            "grok pre-send recovery action or expected primitive is invalid"
+        )
     if not isinstance(selected_model, bool):
         raise RuntimeError("grok pre-send recovery selected-model contract is invalid")
     if (
@@ -634,6 +640,8 @@ def _grok_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
             key: tuple(states) for key, states in detect_states.items()
         },
         "blocked_state_absent": tuple(blocked_state_absent),
+        "action": action,
+        "expected_primitive": expected_primitive,
         "element": element,
         "selected_model": selected_model,
         "absence_receipt_field": absence_receipt_field,
@@ -1257,6 +1265,8 @@ def _grok_pre_send_recovery_content(
     absent_after_recovery = tuple(
         str(value) for value in spec["absent_after_recovery"]
     )
+    action = str(spec["action"])
+    expected_primitive = str(spec["expected_primitive"])
     element = str(spec["element"])
     exact_url = str(spec["exact_url"])
     detect_scope = str(spec["detect_scope"])
@@ -1266,7 +1276,7 @@ def _grok_pre_send_recovery_content(
     stable_cycles = int(spec["stable_cycles"])
     max_samples = int(spec["max_samples"])
     selection_guard = (
-        f"Do not select any model except {element} through the one authorized click. "
+        f"Do not select any model except {element} through the one authorized {action} mutation. "
         if selected_model
         else "Do not select a model. "
     )
@@ -1279,8 +1289,8 @@ def _grok_pre_send_recovery_content(
         f"The terminal source identity is {source_terminal_identity}; never invoke or retry "
         "that identity. This turn has a distinct new seat identity. Use drive_chat only and "
         "pass element keys only, never opaque refs. Do not navigate, attach, paste, send, "
-        f"extract, open a menu, focus, press a key, scroll, or retry. {selection_guard}Do not click any "
-        f"control except {element} exactly once.\n"
+        f"extract, open a menu, focus, press a key, scroll, or retry. {selection_guard}Do not mutate "
+        f"any control except through action={action} element={element} exactly once.\n"
         f"1. observe scope={detect_scope} exactly once. Require current_url exactly {exact_url}, one "
         f"populated Grok tree, exactly one each of {', '.join(detect)}, and {state_contract}. "
         f"Require zero each of {', '.join(blocked_state_absent)}. Record "
@@ -1291,8 +1301,8 @@ def _grok_pre_send_recovery_content(
         "singleton exception controls, states, and absent controls. Record "
         "classification_revision_2 and exact pre-recovery match counts. Any difference ends the "
         "turn without mutation.\n"
-        f"3. click element={element} exactly once. Require performed=true and "
-        "performed_primitive=click. This is the only mutation authorized. Never click any "
+        f"3. {action} element={element} exactly once. Require performed=true and "
+        f"performed_primitive={expected_primitive}. This is the only mutation authorized. Never mutate any "
         "other control.\n"
         f"4. Take at most {max_samples} fresh base observations. A sample matches only when "
         f"current_url is exactly {exact_url}, the Grok tree is populated, exactly one each of "
@@ -1300,7 +1310,7 @@ def _grok_pre_send_recovery_content(
         f"{', '.join(absent_after_recovery)} is absent. Require {stable_cycles} consecutive "
         "matching samples. A nonmatching settling sample authorizes only the next read-only base "
         "observation; it never authorizes another mutation. If the detected exception remains after the "
-        "click, an attachment, Send, or Stop control appears, a required fresh control is missing "
+        "mutation, an attachment, Send, or Stop control appears, a required fresh control is missing "
         "or duplicated, the URL changes, or the sample bound ends without the stable "
         "postcondition, return a FIRST-MISMATCH STOP REPORT with every observation revision and "
         "exact match count, then stop.\n"
@@ -1308,18 +1318,18 @@ def _grok_pre_send_recovery_content(
         "RECOVERY RECEIPT containing platform, display, source_terminal_identity, exception_key, "
         "classification_scope, classification_revision_1, classification_revision_2, "
         "pre_recovery_counts_1, pre_recovery_counts_2, pre_recovery_states_1, "
-        "pre_recovery_states_2, clicked_element, click_count, performed_primitive, "
+        "pre_recovery_states_2, action, mutation_element, mutation_count, performed_primitive, "
         "postcondition_scope, postcondition_elements, stable_cycles, post_recovery_revision_1, "
         "post_recovery_revision_2, post_recovery_counts_1, post_recovery_counts_2, "
         f"{absence_receipt_field}, observe_count, navigation_count, attachment_count, paste_count, "
         "send_count, selected_model, sent, and recovered. Use exact values platform=grok, "
         f"display={display}, source_terminal_identity={source_terminal_identity}, "
-        f"exception_key={exception_key}, clicked_element={element}, click_count=1, "
+        f"exception_key={exception_key}, action={action}, mutation_element={element}, mutation_count=1, "
         f"classification_scope={detect_scope}, postcondition_scope={postcondition_scope}, "
-        f"performed_primitive=click, stable_cycles={stable_cycles}, {absence_receipt_field}=true, "
+        f"performed_primitive={expected_primitive}, stable_cycles={stable_cycles}, {absence_receipt_field}=true, "
         "navigation_count=0, attachment_count=0, paste_count=0, send_count=0, "
         f"selected_model={str(selected_model).lower()}, sent=false, and recovered=true. observe_count must equal two plus "
-        "the exact number of post-click barrier samples. The two post-recovery revisions and "
+        "the exact number of post-mutation barrier samples. The two post-recovery revisions and "
         "count maps must be the final two matching barrier samples. Write each count or state "
         "map as one unquoted compact JSON object on its own field-name line. Each pre-recovery "
         "state map must contain every detected element mapped to exactly its required-state list. "
@@ -1655,8 +1665,9 @@ def _send_content(
             "2. operate element=model_selector and require performed_primitive="
             "mapped_pointer_activate; observe scope=app_root_snapshot; require model_heavy match_count "
             "1 with name exactly Heavy Team of Experts · Grok 4.5. If model_heavy states include "
-            "checked, key Escape using that fresh app_root_snapshot revision; otherwise click "
-            "element=model_heavy using that fresh observation; "
+            "checked, key Escape using that fresh app_root_snapshot revision; otherwise operate "
+            "element=model_heavy using that fresh observation and require performed_primitive="
+            "mapped_pointer_activate; "
             "observe scope=base; require exactly one each of input named Ask Grok anything, "
             "model_selector named Model select, and attach_trigger named Attach.\n"
             f"3. Attach Bundle A from {bundle_a}: operate element=attach_trigger and require "
@@ -4401,8 +4412,9 @@ def main() -> int:
                 "pre_recovery_counts_2",
                 "pre_recovery_states_1",
                 "pre_recovery_states_2",
-                "clicked_element",
-                "click_count",
+                "action",
+                "mutation_element",
+                "mutation_count",
                 "performed_primitive",
                 "postcondition_scope",
                 "postcondition_elements",
@@ -4437,9 +4449,10 @@ def main() -> int:
                 "source_terminal_identity": source_terminal_identity,
                 "exception_key": exception_key,
                 "classification_scope": str(spec["detect_scope"]),
-                "clicked_element": str(spec["element"]),
-                "click_count": "1",
-                "performed_primitive": "click",
+                "action": str(spec["action"]),
+                "mutation_element": str(spec["element"]),
+                "mutation_count": "1",
+                "performed_primitive": str(spec["expected_primitive"]),
                 "postcondition_scope": str(spec["postcondition_scope"]),
                 "stable_cycles": str(spec["stable_cycles"]),
                 absence_receipt_field: "true",

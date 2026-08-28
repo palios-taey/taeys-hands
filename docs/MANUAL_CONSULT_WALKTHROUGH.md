@@ -190,7 +190,8 @@ The recovery worker clicks only the YAML-mapped `Dismiss` control once. It never
 navigates, selects a model, attaches, pastes, or sends. The post-click barrier requires exactly one `input`,
 `attach_trigger`, `model_selector`, and `new_chat` for two consecutive fresh base observations at the exact fresh
 URL. Every interstitial, attachment, Send, and Stop control must be absent. The receipt binds both pre-click
-revisions and exact count and state maps, the single click primitive, the final two stable revisions and count maps,
+revisions and exact count and state maps, the single YAML-compiled click primitive, the final two stable revisions
+and count maps,
 and zero navigation/attachment/paste/send counts. A real mismatch or exhausted barrier stops without another
 mutation. A passed recovery authorizes only a new send identity; it never resumes the spent one.
 
@@ -212,11 +213,12 @@ python3 scripts/run_manual_chat_worker.py recover-grok-pre-send \
 
 The worker takes two read-only base observations at exact `https://grok.com/`. Both must map the four current
 model options exactly once with `showing`, `focusable`, and `enabled`, while every Grok Bot, attachment, Send,
-Stop, and response-Copy control is absent. It then clicks only YAML-selected `model_heavy` once. Two consecutive
-fresh base observations must map exactly one `input`, `attach_trigger`, `model_selector`, and `new_chat`; all four
+Stop, and response-Copy control is absent. It then operates only YAML-selected `model_heavy` once through the
+YAML-required `mapped_pointer_activate` primitive. Two consecutive fresh base observations must map exactly one
+`input`, `attach_trigger`, `model_selector`, and `new_chat`; all four
 model options and every blocked control must be absent. The receipt binds both classification revisions, exact
-count and state maps, the single click, both stable postcondition revisions and count maps, and zero navigation,
-attachment, paste, and send counts. Success authorizes a new send identity only. No normalization identity may
+count and state maps, the single mapped-pointer operation, both stable postcondition revisions and count maps, and
+zero navigation, attachment, paste, and send counts. Success authorizes a new send identity only. No normalization identity may
 navigate, attach, paste, send, or resume the spent source identity.
 
 ## Platform card
@@ -235,6 +237,9 @@ it does not clear the transient portal or repeat the selector action. All four d
 exactly once with their declared states for two consecutive samples, while all three mapped Grok Bot interstitial
 controls remain absent, before the operation can return success. Current Firefox AT-SPI exposes those options as
 `menu item`. The undeclared Build option may remain unknown and cannot authorize a selection.
+The exact `model_heavy` operation is also compiled from the YAML-owned `model_menu_open` recovery authority, so
+both normalization and an ordinary full-send Heavy selection use `mapped_pointer_activate`; direct AT-SPI click
+is forbidden for that option. Grok Bot Dismiss remains the separate YAML-owned direct-click recovery.
 
 At the start of the leg, inspect only the executable parts of that one YAML:
 
