@@ -706,23 +706,24 @@ def extract_selected_source(
     except ValueError as exc:
         raise LinkedInUnit1PreparationError(str(exc)) from exc
     count_contract = notification_contract['selected_thread']['comment_count']
-    count_node = _node_at_index_path(
-        root.atspi_obj,
-        count_contract['index_path'],
-    )
     count_elements = {
         id(element.atspi_obj): element
         for element in _all_elements(snapshot)
         if element.atspi_obj is not None
     }
-    count_element = count_elements.get(id(count_node))
+    declared_count_elements = []
+    for index_path in count_contract['index_paths']:
+        count_node = _node_at_index_path(root.atspi_obj, index_path)
+        count_element = count_elements.get(id(count_node))
+        if count_element is not None:
+            declared_count_elements.append(count_element)
     expected_count = _comment_count(count_controls[0].name) if count_controls else 0
     if (
         not count_controls
-        and count_element is not None
-        and (
+        and any(
             count_element.role == count_contract['role']
             or 'comment' in count_element.name.lower()
+            for count_element in declared_count_elements
         )
     ):
         raise LinkedInUnit1PreparationError(

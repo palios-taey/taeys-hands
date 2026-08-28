@@ -194,7 +194,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'name': 'Feed post',
             },
             'body': {
-                'index_path': [0, 9, 0],
+                'index_paths': [[0, 9, 0], [0, 12, 0]],
                 'role': 'section',
                 'states_include': ['showing'],
                 'content_digest': 'sha256_utf8',
@@ -209,7 +209,7 @@ def _manual_notification_contract() -> dict[str, Any]:
             'open_element_key_prefix': SELECTED_THREAD_OPEN_PREFIX,
             'comment_count': {
                 'role': 'push button',
-                'index_path': [0, 12],
+                'index_paths': [[0, 12], [0, 15]],
                 'states_include': ['enabled', 'focusable'],
             },
             'visible_comment': {
@@ -639,27 +639,32 @@ def _selected_post_root_and_body(
             element.atspi_obj,
             heading_contract['index_path'],
         )
-        body = _node_at_index_path(
-            element.atspi_obj,
-            body_contract['index_path'],
-        )
         if (
             heading is None
             or _node_role(heading) != heading_contract['role']
             or _node_name(heading) != heading_contract['name']
-            or body is None
-            or _node_role(body) != body_contract['role']
         ):
             continue
-        body_element = elements_by_identity.get(id(body))
-        if (
-            body_element is None
-            or not set(body_contract['states_include']).issubset(body_element.states)
-        ):
+        bodies: list[tuple[Any, Any, str]] = []
+        for index_path in body_contract['index_paths']:
+            body = _node_at_index_path(element.atspi_obj, index_path)
+            if body is None or _node_role(body) != body_contract['role']:
+                continue
+            body_element = elements_by_identity.get(id(body))
+            if (
+                body_element is None
+                or not set(body_contract['states_include']).issubset(
+                    body_element.states
+                )
+            ):
+                continue
+            text = _node_text(body) or body_element.text
+            if text:
+                bodies.append((body, body_element, text))
+        if len(bodies) != 1:
             continue
-        text = _node_text(body) or body_element.text
-        if text:
-            roots.append((element, body_element, text))
+        _body, body_element, text = bodies[0]
+        roots.append((element, body_element, text))
     if len(roots) != root_contract['exact_match_count']:
         return None, None, None
     return roots[0]
@@ -853,12 +858,14 @@ def _selected_thread_controls(
     required_states = set(count_contract['states_include'])
     comment_counts: list[Any] = []
     visible_comments: list[Any] = []
-    count_node = _node_at_index_path(root.atspi_obj, count_contract['index_path'])
     elements_by_identity = {
         id(element.atspi_obj): element for element in _all_elements(snapshot)
     }
-    count_element = elements_by_identity.get(id(count_node))
-    if count_element is not None:
+    for index_path in count_contract['index_paths']:
+        count_node = _node_at_index_path(root.atspi_obj, index_path)
+        count_element = elements_by_identity.get(id(count_node))
+        if count_element is None:
+            continue
         count_name = count_element.name
         count_token = (
             count_name.removesuffix(' comments').replace(',', '')
@@ -1480,7 +1487,11 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             root,
             contract,
         )
-        if comment_counts and not visible_comments:
+        if len(comment_counts) > 1:
+            raise ValueError(
+                'LinkedIn selected-thread comment count is ambiguous'
+            )
+        if len(comment_counts) == 1 and not visible_comments:
             thread_open_key = (
                 f'{SELECTED_THREAD_OPEN_PREFIX}{selected_activity}_body_{body_digest}'
             )
