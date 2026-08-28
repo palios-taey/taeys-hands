@@ -89,6 +89,14 @@ Each invocation performs zero or one UI mutation. Multiple read-only samples
 inside the postcondition barrier do not add mutation authority. Dynamic
 dropdown options are never reused from an earlier menu observation.
 
+Every successful non-submit action also emits one bounded
+`ats_greenhouse_next_action_surface_v1` capsule. It contains only the exact
+current refs, public control labels, declared operations, completion booleans,
+surface revision, and source-surface digest needed to derive one next action.
+Applicant values, value digests, selected semantic values, native paths, and
+native text are absent. Options are included only from the freshly observed
+options surface.
+
 The native chooser is also one action per call. The ATS lane supplies its
 validated YAML contract, one exact Firefox object, and the exact configured
 Firefox PID to the shared native-dialog walker. It does not implement another
@@ -172,6 +180,14 @@ artifact under its exact YAML-owned upload slot. After the single Submit click,
 the transaction becomes successful only when the exact
 `hosted_confirmation` route and one exact visible YAML-owned confirmation
 anchor stabilize.
+
+Submit success additionally emits one
+`ats_greenhouse_employer_confirmation_v1` capsule. It binds the provider and
+application identity, exact hosted-confirmation route match, exact single
+YAML-owned visible anchor, one stable surface revision, and the count and digest
+of its consecutive matched barrier samples. The durable event is written from
+that evidence first. Only then is its event hash added as `receipt_sha256` to
+the returned capsule, so the receipt binding is exact and non-self-referential.
 
 ## Invocation
 
