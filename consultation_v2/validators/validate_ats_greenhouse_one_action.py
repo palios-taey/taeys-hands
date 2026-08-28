@@ -672,20 +672,9 @@ def _assert_combo_owned_options_surface() -> None:
         'action': selected_action,
     }
 
-    def selected_control_text(element: dict) -> str:
-        return str(element['atspi_obj'].text)
-
-    def selected_direct_child_elements(parent: _FakeNode) -> list[dict]:
-        if parent is not selected_section:
-            raise RuntimeError('unexpected selected-value parent')
-        return [
-            {
-                'name': child.get_name(),
-                'role': child.get_role_name(),
-                'atspi_obj': child,
-            }
-            for child in parent._children
-        ]
+    if greenhouse._selected_option_matches(selected_surface, selected_action):
+        raise RuntimeError('r17 unchanged Country plus ambiguous +1 sibling passed')
+    selected_public['controls'][0]['semantic_values'] = [selected_option['name']]
 
     with (
         mock.patch.object(
@@ -699,12 +688,6 @@ def _assert_combo_owned_options_surface() -> None:
         ),
         mock.patch.object(greenhouse, 'atspi_click', return_value=True),
         mock.patch.object(greenhouse, '_capture_form', return_value=selected_surface),
-        mock.patch.object(greenhouse, '_control_text', side_effect=selected_control_text),
-        mock.patch.object(
-            greenhouse,
-            '_direct_child_elements',
-            side_effect=selected_direct_child_elements,
-        ),
         mock.patch.object(greenhouse.time, 'sleep', return_value=None),
     ):
         selected_result, selected_mutation_started = greenhouse._perform_action(
@@ -724,66 +707,11 @@ def _assert_combo_owned_options_surface() -> None:
                 for sample in selected_result['postcondition_samples']
             )
         ):
-            raise RuntimeError('exact Country parent-section postcondition did not pass')
+            raise RuntimeError('exact Country semantic-value postcondition did not pass')
 
-        selected_value.text = '+44'
-        if greenhouse._selected_option_matches(
-            selected_surface,
-            selected_action,
-            action_spec,
-        ):
-            raise RuntimeError('wrong Country calling-code suffix passed')
-        selected_value.text = '+1'
-        selected_section._children.append(
-            _FakeNode('', 'section', ['showing', 'visible'], text='+44')
-        )
-        if greenhouse._selected_option_matches(
-            selected_surface,
-            selected_action,
-            action_spec,
-        ):
-            raise RuntimeError('extra Country relation child passed')
-        selected_section._children.pop()
-        selected_value._name = 'Country'
-        selected_value._role = 'combo box'
-        if greenhouse._selected_option_matches(
-            selected_surface,
-            selected_action,
-            action_spec,
-        ):
-            raise RuntimeError('two Country-named children passed')
-        selected_value._name = ''
-        selected_value._role = 'section'
-        selected_section._role = 'group'
-        if greenhouse._selected_option_matches(
-            selected_surface,
-            selected_action,
-            action_spec,
-        ):
-            raise RuntimeError('non-section Country selected-value relation passed')
-        selected_section._role = 'section'
-        with mock.patch.object(
-            greenhouse,
-            '_direct_child_elements',
-            side_effect=RuntimeError('unavailable'),
-        ):
-            try:
-                greenhouse._selected_option_matches(
-                    selected_surface,
-                    selected_action,
-                    action_spec,
-                )
-            except GreenhouseOneActionError as exc:
-                if str(exc) != 'ATS Country selected-value relation is unavailable':
-                    raise
-            else:
-                raise RuntimeError('unavailable Country child relation did not fail loud')
-        selected_public['controls'][0]['semantic_values'] = [selected_option['name']]
-        selected_value.text = '+44'
         if not greenhouse._selected_option_matches(
             selected_surface,
             selected_action,
-            action_spec,
         ):
             raise RuntimeError('existing exact combo semantic-value proof regressed')
 
@@ -842,7 +770,6 @@ def _assert_combo_owned_options_surface() -> None:
             'combo_ref': referral_ref,
             'expected_option_name': 'Employee referral',
         },
-        action_spec,
     ):
         raise RuntimeError('Country parent-section proof leaked to another combo')
 
