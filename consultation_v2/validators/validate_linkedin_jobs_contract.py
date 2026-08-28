@@ -174,7 +174,8 @@ def _validate_yaml() -> list[str]:
             'exact_query': {'_bprMode': 'vanilla'},
         },
         'role': 'link',
-        'states_exact': ['enabled', 'focusable', 'showing'],
+        'states_required': ['enabled', 'focusable', 'showing'],
+        'allowed_optional_states': ['focused'],
         'uri': {
             'scheme': 'https',
             'host': 'www.linkedin.com',
@@ -1208,6 +1209,26 @@ def _validate_restore_projection() -> list[str]:
         digests.append(digest)
     if len(digests) != 3 or len(set(digests)) != 1:
         errors.append('three read-only Notifications samples did not stabilize')
+
+    focused = snapshot(
+        notifications(
+            current_name,
+            notifications_uri,
+            preload_url,
+            states=('enabled', 'focusable', 'focused', 'showing'),
+        ),
+        notifications(current_name, notifications_uri, return_url),
+    )
+    focused_target, focused_count = _notifications_target(focused)
+    focused_start = observe_engagement_start(focused, return_url)
+    focused_restore = observe_engagement_restore(focused, return_url)
+    if (
+        focused_target is None
+        or focused_count != 1
+        or focused_restore != focused_start
+        or focused_start['notifications_target_state_digest'] in digests
+    ):
+        errors.append('focused Notifications authority was not exact and distinct')
 
     changed_name = snapshot(
         notifications('933 new notifications Notifications', notifications_uri, preload_url),

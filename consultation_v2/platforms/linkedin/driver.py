@@ -536,16 +536,24 @@ def _notifications_target(snapshot: Snapshot) -> tuple[ElementRef | None, int]:
     action = navigation.get('action') or {}
     action_name = action.get('name')
     action_names_exact = target.get('action_names_exact')
-    states_exact = target.get('states_exact')
+    states_required = target.get('states_required')
+    allowed_optional_states = target.get('allowed_optional_states')
     ancestor_document = target.get('ancestor_document')
     if (
         snapshot.platform != 'linkedin'
         or target.get('scope') != 'exact_linkedin_navigation_preload_document'
         or not isinstance(ancestor_document, dict)
-        or not isinstance(states_exact, list)
-        or not states_exact
-        or len(states_exact) != len(set(states_exact))
-        or not all(isinstance(state, str) and state for state in states_exact)
+        or not isinstance(states_required, list)
+        or not states_required
+        or len(states_required) != len(set(states_required))
+        or not all(isinstance(state, str) and state for state in states_required)
+        or not isinstance(allowed_optional_states, list)
+        or len(allowed_optional_states) != len(set(allowed_optional_states))
+        or not all(
+            isinstance(state, str) and state
+            for state in allowed_optional_states
+        )
+        or set(states_required).intersection(allowed_optional_states)
         or not isinstance(action_names_exact, list)
         or action_names_exact != [action_name]
         or not isinstance(action_name, str)
@@ -572,7 +580,10 @@ def _notifications_target(snapshot: Snapshot) -> tuple[ElementRef | None, int]:
         for element in _all_elements(snapshot)
         if (
             element.role == target.get('role')
-            and set(element.states) == set(states_exact)
+            and set(states_required).issubset(element.states)
+            and set(element.states).issubset(
+                set(states_required).union(allowed_optional_states)
+            )
             and _uri_matches(_element_uri(element), target.get('uri') or {})
             and _uri_matches(_nearest_document_url(element), ancestor_document)
             and action_names(element) == action_names_exact
@@ -593,7 +604,7 @@ def _notifications_target_state_digest(
         'ancestor_document_url': _nearest_document_url(target),
         'target_uri': _element_uri(target),
         'role': target.role,
-        'states_exact': sorted(target.states),
+        'states_observed': sorted(target.states),
         'action_names_exact': authority.get('action_names_exact'),
         'authority': authority,
         'match_count': match_count,
