@@ -122,6 +122,12 @@ def _manual_notification_contract() -> dict[str, Any]:
             'name': 'Show more results',
             'role': 'push button',
             'states_include': ['enabled', 'focusable'],
+            'postcondition': {
+                'kind': 'notification_stream_count_growth',
+                'identity': 'exact_first_child_link_uri',
+                'ordered_prefix_digest': 'sha256_uri_digests_truncated_16',
+                'candidate_projection': 'separate',
+            },
         },
         'selected_activity_postcondition': {
             'identity_sources': ['document_url', 'showing_link_uri'],
@@ -836,12 +842,164 @@ def _notification_candidates(
     return candidates
 
 
-def _activity_prefix_digest(
-    candidates: list[tuple[Any, str, str]],
+def _notification_stream_uri_digests(
+    snapshot: Snapshot,
+    contract: dict[str, Any],
+) -> list[str]:
+    elements = _all_elements(snapshot)
+    elements_by_identity = {
+        id(element.atspi_obj): element
+        for element in elements
+        if element.atspi_obj is not None
+    }
+    articles = [
+        element
+        for element in elements
+        if element.role == 'article' and element.name in contract['article_names']
+    ]
+    if not articles:
+        raise ValueError('LinkedIn Notifications-All exposes no mounted articles')
+    articles.sort(key=lambda element: _structural_index_path(element.atspi_obj))
+    seen_paths: set[tuple[int, ...]] = set()
+    uri_digests: list[str] = []
+    for article in articles:
+        structural_path = _structural_index_path(article.atspi_obj)
+        if structural_path in seen_paths:
+            raise ValueError(
+                'LinkedIn mounted notification structural paths are duplicated'
+            )
+        seen_paths.add(structural_path)
+        children = _direct_children(article.atspi_obj)
+        direct_links = [
+            elements_by_identity.get(id(child))
+            for child in children
+            if _node_role(child) == 'link'
+        ]
+        if (
+            len(direct_links) != 1
+            or direct_links[0] is None
+            or not children
+            or id(children[0]) != id(direct_links[0].atspi_obj)
+        ):
+            raise ValueError(
+                'LinkedIn mounted notification lacks one canonical first-child link'
+            )
+        uri = _element_uri(direct_links[0])
+        if (
+            not isinstance(uri, str)
+            or not uri
+            or uri != uri.strip()
+            or any(character.isspace() for character in uri)
+            or urlsplit(uri).scheme not in {'http', 'https'}
+            or not urlsplit(uri).hostname
+        ):
+            raise ValueError(
+                'LinkedIn mounted notification lacks one exact absolute link URI'
+            )
+        uri_digests.append(hashlib.sha256(uri.encode('utf-8')).hexdigest())
+    return uri_digests
+
+
+def _notification_stream_prefix_digest(
+    uri_digests: list[str],
     count: int | None = None,
 ) -> str:
-    activities = [activity for _element, activity, _age in candidates[:count]]
-    return hashlib.sha256('\n'.join(activities).encode('ascii')).hexdigest()[:16]
+    return hashlib.sha256(
+        '\n'.join(uri_digests[:count]).encode('ascii')
+    ).hexdigest()[:16]
+
+
+def _notification_continuation_measurement(
+    snapshot: Snapshot,
+    continuation_match: re.Match[str],
+) -> dict[str, Any]:
+    contract = _manual_notification_contract()
+    prior_raw_count = int(continuation_match.group('count'))
+    prior_raw_prefix = continuation_match.group('prefix')
+    observed_raw_count: int | None = None
+    observed_raw_prefix: str | None = None
+    stream_projection_error: str | None = None
+    try:
+        uri_digests = _notification_stream_uri_digests(snapshot, contract)
+        observed_raw_count = len(uri_digests)
+        observed_raw_prefix = _notification_stream_prefix_digest(
+            uri_digests,
+            prior_raw_count,
+        )
+    except ValueError as exc:
+        stream_projection_error = str(exc)
+
+    observed_candidate_count: int | None = None
+    candidate_projection_error: str | None = None
+    try:
+        observed_candidate_count = len(_notification_candidates(snapshot, contract))
+    except ValueError as exc:
+        candidate_projection_error = str(exc)
+
+    route_exact = _exact_engagement_route(snapshot.url, 'notifications_all')
+    category_exact = _notification_categories_exact(snapshot, contract)
+    raw_count_grew = (
+        observed_raw_count is not None and observed_raw_count > prior_raw_count
+    )
+    raw_prefix_exact = observed_raw_prefix == prior_raw_prefix
+    failures = [
+        name
+        for name, passed in (
+            ('route', route_exact),
+            ('category', category_exact),
+            ('raw_stream_projection', stream_projection_error is None),
+            ('raw_count_growth', raw_count_grew),
+            ('raw_prefix', raw_prefix_exact),
+        )
+        if not passed
+    ]
+    return {
+        'route_exact': route_exact,
+        'category_exact': category_exact,
+        'raw_stream_projection_exact': stream_projection_error is None,
+        'prior_raw_notification_count': prior_raw_count,
+        'observed_raw_notification_count': observed_raw_count,
+        'raw_notification_count_grew': raw_count_grew,
+        'prior_raw_notification_prefix': prior_raw_prefix,
+        'observed_raw_notification_prefix': observed_raw_prefix,
+        'raw_notification_prefix_exact': raw_prefix_exact,
+        'candidate_projection_exact': candidate_projection_error is None,
+        'observed_candidate_count': observed_candidate_count,
+        'postcondition_matched': not failures,
+        'failed_components': failures,
+        **(
+            {'raw_stream_projection_error': stream_projection_error}
+            if stream_projection_error is not None
+            else {}
+        ),
+        **(
+            {'candidate_projection_error': candidate_projection_error}
+            if candidate_projection_error is not None
+            else {}
+        ),
+        'observed_url': snapshot.url,
+    }
+
+
+def _notification_continuation_receipt(
+    element_key: str,
+    operation: str,
+    measurement: dict[str, Any],
+) -> dict[str, Any]:
+    if not measurement['postcondition_matched']:
+        raise ValueError(
+            'LinkedIn notification continuation postcondition failed: '
+            + ','.join(measurement['failed_components'])
+        )
+    return {
+        'element_key': element_key,
+        'operation': operation,
+        'effect_class': 'page',
+        'postcondition': _manual_notification_contract()['continuation'][
+            'postcondition'
+        ]['kind'],
+        **measurement,
+    }
 
 
 def _notification_categories_exact(snapshot: Snapshot, contract: dict[str, Any]) -> bool:
@@ -896,6 +1054,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
         contract = _manual_notification_contract()
         if not _notification_categories_exact(snapshot, contract):
             raise ValueError('LinkedIn Notifications-All category state is not exact')
+        uri_digests = _notification_stream_uri_digests(snapshot, contract)
         candidates = _notification_candidates(snapshot, contract)
         for ordinal, (candidate, activity, age) in enumerate(candidates, 1):
             key = (
@@ -929,16 +1088,25 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             raise ValueError('LinkedIn Show more results target is ambiguous')
         if continuations:
             key = (
-                f'{NOTIFICATIONS_CONTINUATION_PREFIX}{len(candidates):03d}_'
-                f'{_activity_prefix_digest(candidates)}'
+                f'{NOTIFICATIONS_CONTINUATION_PREFIX}{len(uri_digests):03d}_'
+                f'{_notification_stream_prefix_digest(uri_digests)}'
             )
             mapped[key] = [replace(
                 continuations[0],
                 key=key,
                 description=(
-                    f'continue only after all {len(candidates)} newer candidates '
-                    'have evidenced exclusions'
+                    f'mounted_articles={len(uri_digests)}; '
+                    f'candidates={len(candidates)}; continue only after all '
+                    'mounted candidates have evidenced exclusions'
                 ),
+                raw={
+                    **dict(continuations[0].raw),
+                    'notification_stream_count': len(uri_digests),
+                    'notification_stream_prefix': (
+                        _notification_stream_prefix_digest(uri_digests)
+                    ),
+                    'notification_candidate_count': len(candidates),
+                },
             )]
     contract = _manual_notification_contract()
     selected_activity, activity_sources = _selected_activity_identity(
@@ -1097,6 +1265,11 @@ def element_operation(
 ) -> dict[str, Any] | None:
     candidate_match = _CANDIDATE_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
+    continuation_postcondition = (
+        _manual_notification_contract()['continuation']['postcondition']
+        if continuation_match is not None
+        else None
+    )
     selected_post_match = _SELECTED_POST_KEY.fullmatch(element_key)
     selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
     selected_reaction_match = _SELECTED_POST_REACTION_KEY.fullmatch(element_key)
@@ -1370,7 +1543,7 @@ def element_operation(
                     'exact_notification_activity'
                     if candidate_match is not None
                     else (
-                        'notification_candidate_count_growth'
+                        continuation_postcondition['kind']
                         if continuation_match is not None
                         else 'exact_document_route'
                     )
@@ -1382,12 +1555,20 @@ def element_operation(
                 else {}
             ),
             **(
-                {'prior_candidate_count': int(continuation_match.group('count'))}
+                {
+                    'prior_raw_notification_count': int(
+                        continuation_match.group('count')
+                    )
+                }
                 if continuation_match is not None
                 else {}
             ),
             **(
-                {'prior_activity_prefix': continuation_match.group('prefix')}
+                {
+                    'prior_raw_notification_prefix': continuation_match.group(
+                        'prefix'
+                    )
+                }
                 if continuation_match is not None
                 else {}
             ),
@@ -1651,34 +1832,11 @@ def verify_post_action(
             'observed_url': snapshot.url,
         }
     if continuation_match is not None:
-        contract = _manual_notification_contract()
-        candidates = _notification_candidates(snapshot, contract)
-        prior_count = int(continuation_match.group('count'))
-        expected_prefix = continuation_match.group('prefix')
-        observed_prefix = _activity_prefix_digest(candidates, prior_count)
-        if (
-            not _exact_engagement_route(snapshot.url, 'notifications_all')
-            or not _notification_categories_exact(snapshot, contract)
-            or len(candidates) <= prior_count
-            or observed_prefix != expected_prefix
-        ):
-            raise ValueError(
-                'LinkedIn notification continuation postcondition failed: '
-                'fresh candidate set did not preserve its exact ordered prefix and grow'
-            )
-        return {
-            'element_key': element_key,
-            'operation': operation,
-            'effect_class': 'page',
-            'postcondition': 'notification_candidate_count_growth',
-            'route_exact': True,
-            'prior_candidate_count': prior_count,
-            'prior_activity_prefix': expected_prefix,
-            'observed_activity_prefix': observed_prefix,
-            'observed_candidate_count': len(candidates),
-            'candidate_count_grew': True,
-            'observed_url': snapshot.url,
-        }
+        return _notification_continuation_receipt(
+            element_key,
+            operation,
+            _notification_continuation_measurement(snapshot, continuation_match),
+        )
     if element_key != NOTIFICATIONS_NAVIGATION:
         raise ValueError('LinkedIn post-action element is not declared')
     if not _exact_engagement_route(snapshot.url, 'notifications_all'):
@@ -1818,10 +1976,11 @@ def stable_post_action_observation(
     selected_reaction_match = _SELECTED_POST_REACTION_KEY.fullmatch(element_key)
     selected_editor_match = _SELECTED_POST_EDITOR_KEY.fullmatch(element_key)
     selected_submit_match = _SELECTED_POST_SUBMIT_KEY.fullmatch(element_key)
+    continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
     existing_activate = operation == 'activate' and (
         element_key == navigation_contract['element_key']
         or _CANDIDATE_KEY.fullmatch(element_key) is not None
-        or _CONTINUATION_KEY.fullmatch(element_key) is not None
+        or continuation_match is not None
         or _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key) is not None
     )
     reaction_activate = (
@@ -1907,16 +2066,31 @@ def stable_post_action_observation(
     while time.monotonic() < barrier_deadline:
         _firefox, _document, snapshot = build_snapshot('linkedin')
         last_snapshot = snapshot
+        continuation_measurement = (
+            _notification_continuation_measurement(snapshot, continuation_match)
+            if continuation_match is not None
+            else None
+        )
+        verification_error: str | None = None
         try:
-            exact_receipt = verify_post_action(
-                snapshot,
-                element_key,
-                operation,
-                expected_text=expected_text,
-                expected_author_name=expected_author_name,
+            exact_receipt = (
+                _notification_continuation_receipt(
+                    element_key,
+                    operation,
+                    continuation_measurement,
+                )
+                if continuation_measurement is not None
+                else verify_post_action(
+                    snapshot,
+                    element_key,
+                    operation,
+                    expected_text=expected_text,
+                    expected_author_name=expected_author_name,
+                )
             )
-        except ValueError:
+        except ValueError as exc:
             exact_receipt = None
+            verification_error = str(exc)
         exact = exact_receipt is not None
         stable_cycles_observed = stable_cycles_observed + 1 if exact else 0
         sample = {
@@ -1931,6 +2105,10 @@ def stable_post_action_observation(
             ),
             'observed_url': snapshot.url,
         }
+        if continuation_measurement is not None:
+            sample.update(continuation_measurement)
+        if verification_error is not None:
+            sample['verification_error'] = verification_error
         if exact_receipt is not None:
             sample['postcondition'] = exact_receipt['postcondition']
             if 'activity_sources' in exact_receipt:

@@ -225,6 +225,11 @@ workflow:
         states_include:
           - enabled
           - focusable
+        postcondition:
+          kind: notification_stream_count_growth
+          identity: exact_first_child_link_uri
+          ordered_prefix_digest: sha256_uri_digests_truncated_16
+          candidate_projection: separate
       selected_activity_postcondition:
         identity_sources:
           - document_url
