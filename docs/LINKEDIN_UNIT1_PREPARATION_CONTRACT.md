@@ -56,6 +56,10 @@ The augmented snapshot projects exact candidate keys and the exact continuation 
 present. A candidate key's ordinal is the contiguous order among actionable candidates; the inventory row and
 private-selection ordinal remain the full mounted-article order. This preserves the selected candidate as the
 runtime card target while retaining the complete raw inventory and exclusion-gated continuation authority.
+After Notifications activation has produced the transaction-bound exact-route and All-category receipt,
+candidate projection continues on the exact `notifications_all` route even if LinkedIn virtualizes the category
+radio controls. Navigation verification still requires the live All-category controls; their later unmount does
+not erase the established receipt or hide exact URI-, state-, activity-, and age-qualified candidates.
 
 `ready_for_private_draft` is emitted only after the selected activity exposes one exact mapped post body and a
 separately receipted exact thread-open action exposes a complete typed thread. A missing opener is terminal; it

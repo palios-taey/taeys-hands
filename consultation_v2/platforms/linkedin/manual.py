@@ -1340,23 +1340,22 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     'notification_candidate_count': len(candidates),
                 },
             )]
-        if _notification_categories_exact(snapshot, contract):
-            for ordinal, (candidate, activity, age) in enumerate(candidates, 1):
-                key = (
-                    f'{NOTIFICATION_CANDIDATE_PREFIX}{ordinal:03d}_activity_{activity}'
-                )
-                raw = {
-                    **dict(candidate.raw),
-                    'notification_activity': activity,
-                    'notification_age': age,
-                    'notification_ordinal': ordinal,
-                }
-                mapped[key] = [replace(
-                    candidate,
-                    key=key,
-                    description=f'newest_order={ordinal}; relative_age={age}',
-                    raw=raw,
-                )]
+        for ordinal, (candidate, activity, age) in enumerate(candidates, 1):
+            key = (
+                f'{NOTIFICATION_CANDIDATE_PREFIX}{ordinal:03d}_activity_{activity}'
+            )
+            raw = {
+                **dict(candidate.raw),
+                'notification_activity': activity,
+                'notification_age': age,
+                'notification_ordinal': ordinal,
+            }
+            mapped[key] = [replace(
+                candidate,
+                key=key,
+                description=f'newest_order={ordinal}; relative_age={age}',
+                raw=raw,
+            )]
     selected_activity, activity_sources = _selected_activity_identity(
         snapshot,
         contract,

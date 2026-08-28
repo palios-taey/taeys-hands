@@ -154,7 +154,9 @@ has not been completely observed.
    continuation can compile.
    Mounted article counts may shrink when LinkedIn virtualizes the refreshed tree, so monotonic DOM growth is not
    an action postcondition. Pure unmount or reorder is not novelty. Candidate projection remains independently
-   exact. Each further continuation is a new transition with a new observation.
+   exact on the exact `notifications_all` route when LinkedIn virtualizes the category radio controls. The live
+   All-category controls remain mandatory for the navigation postcondition; subsequent mutation authority stays
+   bound to that transaction receipt. Each further continuation is a new transition with a new observation.
 6. Apply the runtime-injected freshness, target, dedup, and author-cooloff policy to each newly mounted exact
    inventory. A comment target must be no older than 72 hours.
 7. Activate one exact `notification_candidate_<actionable_ordinal>_activity_<id>` and require that same activity

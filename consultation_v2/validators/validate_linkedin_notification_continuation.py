@@ -132,11 +132,11 @@ def main() -> int:
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
             for key in before_augmented.mapped
         )
-        and not any(
+        and any(
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
             for key in after_augmented.mapped
         ),
-        'candidate/continuation coexistence bypassed exact category authority',
+        'exact-route candidate projection depended on mounted category controls',
     )
     before_declared = manual.element_operation(
         manual.NOTIFICATIONS_CONTINUATION,
@@ -241,11 +241,11 @@ def main() -> int:
     no_controls = without_category_controls(with_controls(inventory_snapshot()))
     no_controls_augmented, _no_controls_target = continuation_projection(no_controls)
     require(
-        not any(
+        any(
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
             for key in no_controls_augmented.mapped
         ),
-        'candidate keys bypassed receipt-bound All-category authority',
+        'virtualized category controls hid exact-route candidate keys',
     )
 
     obsolete_one_link = with_controls(inventory_snapshot())
