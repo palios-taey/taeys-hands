@@ -610,11 +610,16 @@ def _comment_count(name: str) -> int:
 
 def _comment_author(name: str, contract: Mapping[str, Any]) -> str:
     prefix = contract['control_name_prefix']
-    suffix = contract['control_name_suffix']
-    if not name.startswith(prefix) or not name.endswith(suffix):
+    suffixes = [
+        suffix
+        for suffix in contract['control_name_suffixes']
+        if name.endswith(suffix)
+    ]
+    if not name.startswith(prefix) or len(suffixes) != 1:
         raise LinkedInUnit1PreparationError(
             'selected thread comment control name is not exact'
         )
+    suffix = suffixes[0]
     author = name[len(prefix):-len(suffix)]
     if (
         not author
