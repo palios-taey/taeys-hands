@@ -120,6 +120,9 @@ Notifications
 ```
 
 Every accepted nonterminal step still requires a new observation before the compiler can issue another card.
+When an exact Notifications-All snapshot contains both actionable candidates and Show more, the LinkedIn
+projection carries both target sets. Candidate selection outranks continuation; Show more remains authorized
+only by complete inventory-bound exclusions.
 The submit card is last, and only the exact rendered-comment postcondition produces a terminal delivery receipt
 under [`unit1-step-receipt.schema.json`](../consultation_v2/platforms/linkedin/unit1-step-receipt.schema.json).
 This code boundary is not itself production qualification; the live chain must still earn the qualification

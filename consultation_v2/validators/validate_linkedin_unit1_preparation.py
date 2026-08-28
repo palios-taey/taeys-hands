@@ -1103,6 +1103,23 @@ def main() -> int:
         'selection_sha256': canonical_sha256(selection_unsigned),
     }
     selected_envelope = {**envelope, 'selection': selection}
+    candidate_key = next(
+        key
+        for key in first_continuation_surface.mapped
+        if (
+            key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
+            and key.endswith(ACTIVITY_A)
+        )
+    )
+    require(
+        len(
+            first_continuation_surface.mapped.get(
+                manual.NOTIFICATIONS_CONTINUATION,
+            ) or []
+        ) == 1
+        and len(first_continuation_surface.mapped.get(candidate_key) or []) == 1,
+        'candidate and continuation did not coexist as exact runtime targets',
+    )
     candidate_before_continuation = compile_preparation_step(
         first_continuation_surface,
         REVISION,
@@ -1111,7 +1128,12 @@ def main() -> int:
     )
     require(
         candidate_before_continuation['phase'] == 'notification_candidate'
-        and candidate_before_continuation['element'].endswith(ACTIVITY_A),
+        and candidate_before_continuation['element'].endswith(ACTIVITY_A)
+        and len(
+            first_continuation_surface.mapped.get(
+                candidate_before_continuation['element'],
+            ) or []
+        ) == 1,
         'exact qualifying selection did not outrank continuation availability',
     )
     candidate = compile_preparation_step(

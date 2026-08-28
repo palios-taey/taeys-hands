@@ -1340,7 +1340,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     'notification_candidate_count': len(candidates),
                 },
             )]
-        elif _notification_categories_exact(snapshot, contract):
+        if _notification_categories_exact(snapshot, contract):
             for ordinal, (candidate, activity, age) in enumerate(candidates, 1):
                 key = (
                     f'{NOTIFICATION_CANDIDATE_PREFIX}{ordinal:03d}_activity_{activity}'
