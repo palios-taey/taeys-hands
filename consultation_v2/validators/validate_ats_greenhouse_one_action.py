@@ -159,7 +159,7 @@ def _assert_public_native_walker() -> None:
     firefox, _entry = _native_tree()
     binding = 'a' * 64
     with (
-        mock.patch.object(Atspi, 'get_desktop', return_value=desktop),
+        mock.patch.object(Atspi, 'get_desktop', return_value=desktop, create=True),
         mock.patch.object(native_snapshot, '_read_text', lambda obj: obj.text),
     ):
         bound = build_native_dialog_snapshot_from_contract(
