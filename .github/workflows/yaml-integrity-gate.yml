@@ -71,6 +71,9 @@ jobs:
       - name: Prove LinkedIn private comment materialization contract
         run: python3 consultation_v2/validators/validate_linkedin_comment_materialization.py
 
+      - name: Prove terminal monitor registration ownership cleanup
+        run: python3 consultation_v2/validators/validate_terminal_monitor_cleanup.py
+
       - name: Run supervised UI design-rule public contract gate
         run: python3 consultation_v2/validators/validate_supervised_ui_design_rules.py --self-check
 

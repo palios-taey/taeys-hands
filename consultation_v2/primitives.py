@@ -85,7 +85,9 @@ __all__ = [
     "read_run_states_with_prefix",
     "clear_run_state",
     # monitor registration
+    "MonitorRegistrationOwnershipError",
     "register_monitor_session",
+    "deregister_owned_monitor_session",
     "deregister_monitor_session",
     # storage
     "store_consultation",
@@ -115,6 +117,8 @@ _PROCESS_DISPLAY_LOCKS: Dict[str, Dict[str, Any]] = {}
 _DISPLAY_LOCK_BYPASSES: Dict[str, int] = {}
 _DISPLAY_LOCK_STATE_GUARD = threading.RLock()
 _DISPLAY_LOCK_BYPASS_PREFIX = "display-lock-bypass:"
+_PROCESS_MONITOR_REGISTRATIONS: Dict[str, str] = {}
+_MONITOR_REGISTRATION_STATE_GUARD = threading.RLock()
 
 
 def _process_starttime(pid: int) -> str | None:
@@ -426,8 +430,12 @@ def clear_run_state(request_id: str, *, force: bool = False) -> bool:
 # Keys: per-session ``taey:{node}:active_session:{monitor_id}`` + the
 # deterministic SET ``taey:{node}:active_session_ids`` that the central monitor
 # reads without a SCAN (monitor/central.py::_get_sessions, SET-based path). The
-# shape MUST match the legacy registrar exactly so a V2-registered session and a
-# legacy-registered session are indistinguishable to the one central monitor.
+# Legacy fields remain unchanged so the central monitor reads the same record;
+# opaque registrar-owner fields only fence terminal cleanup to its creating process.
+
+
+class MonitorRegistrationOwnershipError(RuntimeError):
+    """Raised when terminal cleanup encounters another registration owner."""
 
 def register_monitor_session(
     monitor_id: str,
@@ -450,9 +458,95 @@ def register_monitor_session(
     record.setdefault("tmux_session", NODE_ID)
     record.setdefault("started_ts", time.time())
     record.setdefault("started", datetime.now(timezone.utc).isoformat())
-    client.set(session_key, json.dumps(record, default=str))
+    registration_owner_token = uuid.uuid4().hex
+    registrar_pid = os.getpid()
+    registrar_starttime = _process_starttime(registrar_pid)
+    if not registrar_starttime:
+        raise RuntimeError(
+            f"unable to read monitor registrar starttime for pid {registrar_pid}"
+        )
+    record["registration_owner_token"] = registration_owner_token
+    record["registrar_pid"] = registrar_pid
+    record["registrar_starttime"] = registrar_starttime
+    if not client.set(session_key, json.dumps(record, default=str)):
+        raise RuntimeError(f"monitor registration write failed for {monitor_id!r}")
+    with _MONITOR_REGISTRATION_STATE_GUARD:
+        _PROCESS_MONITOR_REGISTRATIONS[monitor_id] = registration_owner_token
     client.sadd(node_key("active_session_ids"), session_key)
     return True
+
+
+def deregister_owned_monitor_session(monitor_id: str) -> bool:
+    """Atomically remove only this process's exact monitor registration."""
+    with _MONITOR_REGISTRATION_STATE_GUARD:
+        registration_owner_token = _PROCESS_MONITOR_REGISTRATIONS.get(monitor_id)
+    if not registration_owner_token:
+        return False
+
+    client = get_client()
+    session_key = node_key(f"active_session:{monitor_id}")
+    set_key = node_key("active_session_ids")
+    registrar_pid = os.getpid()
+    registrar_starttime = _process_starttime(registrar_pid)
+    if not registrar_starttime:
+        raise RuntimeError(
+            f"unable to read monitor registrar starttime for pid {registrar_pid}"
+        )
+
+    while True:
+        with client.pipeline() as pipe:
+            try:
+                pipe.watch(session_key)
+                raw = pipe.get(session_key)
+                if not raw:
+                    pipe.unwatch()
+                    with _MONITOR_REGISTRATION_STATE_GUARD:
+                        if (
+                            _PROCESS_MONITOR_REGISTRATIONS.get(monitor_id)
+                            == registration_owner_token
+                        ):
+                            _PROCESS_MONITOR_REGISTRATIONS.pop(monitor_id, None)
+                    return False
+                try:
+                    record = json.loads(raw)
+                except (TypeError, json.JSONDecodeError) as exc:
+                    pipe.unwatch()
+                    raise MonitorRegistrationOwnershipError(
+                        f"monitor registration {monitor_id!r} is not valid JSON; refusing cleanup"
+                    ) from exc
+                expected = {
+                    "monitor_id": monitor_id,
+                    "registration_owner_token": registration_owner_token,
+                    "registrar_pid": registrar_pid,
+                    "registrar_starttime": registrar_starttime,
+                }
+                if not isinstance(record, dict) or any(
+                    record.get(field) != value for field, value in expected.items()
+                ):
+                    pipe.unwatch()
+                    with _MONITOR_REGISTRATION_STATE_GUARD:
+                        if (
+                            _PROCESS_MONITOR_REGISTRATIONS.get(monitor_id)
+                            == registration_owner_token
+                        ):
+                            _PROCESS_MONITOR_REGISTRATIONS.pop(monitor_id, None)
+                    raise MonitorRegistrationOwnershipError(
+                        f"monitor registration {monitor_id!r} is owned by another lifecycle; "
+                        "refusing cleanup"
+                    )
+                pipe.multi()
+                pipe.delete(session_key)
+                pipe.srem(set_key, session_key)
+                removed = pipe.execute()[0]
+                with _MONITOR_REGISTRATION_STATE_GUARD:
+                    if (
+                        _PROCESS_MONITOR_REGISTRATIONS.get(monitor_id)
+                        == registration_owner_token
+                    ):
+                        _PROCESS_MONITOR_REGISTRATIONS.pop(monitor_id, None)
+                return bool(removed)
+            except WatchError:
+                continue
 
 
 def deregister_monitor_session(monitor_id: str) -> bool:

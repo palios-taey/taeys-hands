@@ -25,7 +25,7 @@ BASELINE_SHA256 = {
     'consultation_v2/snapshot.py': 'd3780f73e5528576df4941fbc6268a754ba8abd6b6d08299f35ccee54cba5f9a',
     'consultation_v2/yaml_contract.py': '580c07a2dd016596f63c34d96caaed92b799b4acfe369380ae80d755b79e3721',
     'consultation_v2/platforms/routing.py': '9fcfbcf70c50c41cd8ca17e826f80fcdb38df8277a09afdfba170ed8d8988b68',
-    'consultation_v2/primitives.py': 'e0a0bcc21456f3a3d6d94b4bccbbe485020485c43bd187b3f36682443fed0d71',
+    'consultation_v2/primitives.py': 'e9ec308996c5c5921459d06405235683c26678653993bbd92c9b409d8c2f569a',
     'consultation_v2/interact.py': '1f4c1e871248e98c8d5a4d6234d7ebcef4847aa49c19c3e27691cb2edca43abd',
     'consultation_v2/supervised_ui_contract.py': 'f3be0eeb6c4535529a5e0acf6778335cde9f446b368dadd998b0e75ede7dfcc3',
     'consultation_v2/supervised_ui_seat.py': '5b8517541a4d6ead65b411e8bd18b9d153d873c95dacea10dd1162d46d032efd',
