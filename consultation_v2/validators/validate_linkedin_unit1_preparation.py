@@ -1383,6 +1383,30 @@ def main() -> int:
         'exact repost structure did not produce private draft input',
     )
 
+    ambiguous_count = selected_snapshot(visible=False)
+    ambiguous_root = next(
+        item.atspi_obj
+        for item in ambiguous_count.unknown
+        if item.role == 'list item'
+    )
+    ambiguous_card = ambiguous_root.get_child_at_index(0)
+    ambiguous_card.add(Node('generic'), Node('generic'))
+    second_count = Node(
+        'push button',
+        '2 comments',
+        states=['enabled', 'focusable'],
+    )
+    ambiguous_card.add(second_count)
+    ambiguous_count.unknown.append(ref(second_count))
+    try:
+        manual.augment_snapshot(ambiguous_count)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            'two declared comment-count paths authorized a thread opener'
+        )
+
     zero_snapshot = selected_snapshot(count=0)
     zero_ready = compile_preparation_step(
         zero_snapshot,

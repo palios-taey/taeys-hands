@@ -1487,7 +1487,11 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             root,
             contract,
         )
-        if comment_counts and not visible_comments:
+        if len(comment_counts) > 1:
+            raise ValueError(
+                'LinkedIn selected-thread comment count is ambiguous'
+            )
+        if len(comment_counts) == 1 and not visible_comments:
             thread_open_key = (
                 f'{SELECTED_THREAD_OPEN_PREFIX}{selected_activity}_body_{body_digest}'
             )
