@@ -161,9 +161,10 @@ workflow:
           scheme: https
           host: www.linkedin.com
           normalized_path: /notifications
-          exact_query:
-            filter: all
-            refresh: "true"
+          exact_query_variants:
+            - {}
+            - filter: all
+              refresh: "true"
         action_names_exact:
           - jump
       action:

@@ -180,7 +180,10 @@ def _validate_yaml() -> list[str]:
             'scheme': 'https',
             'host': 'www.linkedin.com',
             'normalized_path': '/notifications',
-            'exact_query': {'filter': 'all', 'refresh': 'true'},
+            'exact_query_variants': [
+                {},
+                {'filter': 'all', 'refresh': 'true'},
+            ],
         },
         'action_names_exact': ['jump'],
     } or navigation.get('action') != {'name': 'jump', 'index': 0}:
@@ -1210,6 +1213,24 @@ def _validate_restore_projection() -> list[str]:
     if len(digests) != 3 or len(set(digests)) != 1:
         errors.append('three read-only Notifications samples did not stabilize')
 
+    queryless_uri = 'https://www.linkedin.com/notifications/?'
+    queryless = snapshot(
+        notifications(current_name, queryless_uri, preload_url),
+        notifications(current_name, queryless_uri, return_url),
+    )
+    queryless_target, queryless_count = _notifications_target(queryless)
+    queryless_start = observe_engagement_start(queryless, return_url)
+    queryless_restore = observe_engagement_restore(queryless, return_url)
+    if (
+        queryless_target is None
+        or queryless_count != 1
+        or queryless_restore != queryless_start
+        or not isinstance(
+            queryless_start['notifications_target_state_digest'], str
+        )
+    ):
+        errors.append('queryless preload Notifications authority was not exact')
+
     focused = snapshot(
         notifications(
             current_name,
@@ -1272,6 +1293,34 @@ def _validate_restore_projection() -> list[str]:
             notifications(
                 current_name,
                 notifications_uri + '&extra=true',
+                preload_url,
+            ),
+        ),
+        'target_filter_only': snapshot(
+            notifications(
+                current_name,
+                'https://www.linkedin.com/notifications/?filter=all',
+                preload_url,
+            ),
+        ),
+        'target_refresh_only': snapshot(
+            notifications(
+                current_name,
+                'https://www.linkedin.com/notifications/?refresh=true',
+                preload_url,
+            ),
+        ),
+        'target_wrong_filter': snapshot(
+            notifications(
+                current_name,
+                'https://www.linkedin.com/notifications/?filter=my_posts_all&refresh=true',
+                preload_url,
+            ),
+        ),
+        'target_wrong_refresh': snapshot(
+            notifications(
+                current_name,
+                'https://www.linkedin.com/notifications/?filter=all&refresh=false',
                 preload_url,
             ),
         ),
