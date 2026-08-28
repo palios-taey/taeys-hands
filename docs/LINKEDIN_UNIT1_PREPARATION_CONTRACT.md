@@ -36,6 +36,7 @@ bootstrap envelope
 -> zero or more separately receipted Show more cards after complete exclusions
 -> exact candidate card
 -> mandatory selected-thread scroll/open card and receipt
+-> zero or more exact one-action thread-expansion cards and receipts
 -> selected post and complete typed thread evidence
 -> ready_for_private_draft
 ```
@@ -62,13 +63,17 @@ radio controls. Navigation verification still requires the live All-category con
 not erase the established receipt or hide exact URI-, state-, activity-, and age-qualified candidates.
 
 `ready_for_private_draft` is emitted only after the selected activity exposes one exact mapped post body and a
-separately receipted exact thread-open action exposes a complete typed thread. A missing opener is terminal; it
-cannot be interpreted as an already-open or zero-comment thread. Every visible comment row has an exact author,
+separately receipted exact thread-open action exposes the selected thread. When the displayed count is greater
+than the typed visible-row count, exactly one mapped `See N more comment(s)` control compiles to one
+`thread_expand` card. Its fresh receipt must preserve the selected activity, body digest, and displayed total,
+and must add exactly N typed rows. Expansion repeats one action at a time until the counts are equal. A missing
+or ambiguous opener/expander is terminal; it cannot be interpreted as an already-open, complete, or zero-comment
+thread. Every visible comment row has an exact author,
 `text` or `media_link_only` kind, exact text, and text digest. The displayed comment count must equal the
 typed-row count. Absence is accepted only as exact zero after the thread-open receipt: no count control and no
 visible comment row.
-The current LinkedIn feed-card contract maps the complete body at structural path `[0,9,0]` and the exact
-comment-count control at `[0,12]`. Body bytes come from the complete AT-SPI node text before any shallow mapped
+The current LinkedIn feed-card contract maps original/repost bodies at structural paths `[0,9,0]` and
+`[0,12,0]`, with their exact comment-count controls at `[0,12]` and `[0,15]`. Body bytes come from the complete AT-SPI node text before any shallow mapped
 text projection; a changed role, state, path, or empty body stops preparation before drafting.
 
 The private selection repeats the public preparation `transaction_sha256` inside its own signed bytes. A
@@ -91,6 +96,8 @@ Preparation stops without a readiness result when any of these is true:
 - private exclusions do not cover every current actionable activity exactly once with closed reason codes;
 - the selected activity/body identity is absent or ambiguous;
 - the exact selected-thread opener or its receipt is absent;
+- an incomplete thread lacks exactly one grammatical, enabled, focusable `See N more comment(s)` control;
+- an expansion changes the activity, body, displayed total, or visible-row count by anything other than N;
 - the thread count differs from the number of typed visible rows; or
 - an action receipt does not prove the exact preceding card and a fresh post-action observation.
 

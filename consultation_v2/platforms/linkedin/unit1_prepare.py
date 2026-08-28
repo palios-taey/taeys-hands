@@ -15,8 +15,8 @@ from consultation_v2.platforms.linkedin.manual import (
     NOTIFICATIONS_CONTINUATION,
     NOTIFICATIONS_NAVIGATION,
     SELECTED_POST_PREFIX,
+    SELECTED_THREAD_EXPAND_PREFIX,
     SELECTED_THREAD_OPEN_PREFIX,
-    _comment_relative_text,
     _manual_comment_contract,
     _manual_notification_contract,
     _notification_article_content_link,
@@ -25,6 +25,7 @@ from consultation_v2.platforms.linkedin.manual import (
     _notification_relative_age,
     _selected_post_root_and_body,
     _selected_thread_controls,
+    _selected_thread_typed_rows,
     _structural_index_path,
     element_operation,
 )
@@ -47,6 +48,12 @@ _ACTIVITY = re.compile(r'^[0-9]+$')
 _AGE = re.compile(r'^(?P<count>[1-9][0-9]*)(?P<unit>[smhdw])$')
 _CONTINUATION = re.compile(
     rf'^{re.escape(NOTIFICATIONS_CONTINUATION)}$'
+)
+_THREAD_EXPAND = re.compile(
+    rf'^{re.escape(SELECTED_THREAD_EXPAND_PREFIX)}'
+    r'(?P<activity>[0-9]+)_body_(?P<body>[0-9a-f]{64})_'
+    r'total_(?P<total>[1-9][0-9]*)_'
+    r'visible_(?P<visible>[1-9][0-9]*)_more_(?P<more>[1-9][0-9]*)$'
 )
 
 _ENVELOPE_KEYS = frozenset({
@@ -134,7 +141,8 @@ _PHASE_TRANSITIONS = {
     }),
     'notification_candidate': frozenset({'thread_scroll', 'thread_open'}),
     'thread_scroll': frozenset({'thread_open'}),
-    'thread_open': frozenset(),
+    'thread_open': frozenset({'thread_expand'}),
+    'thread_expand': frozenset({'thread_expand'}),
 }
 _PHASE_METHODS = {
     'notifications_navigation': 'activate',
@@ -142,6 +150,7 @@ _PHASE_METHODS = {
     'notification_candidate': 'activate',
     'thread_scroll': 'scroll_into_view',
     'thread_open': 'mapped_pointer_activate',
+    'thread_expand': 'mapped_pointer_activate',
 }
 
 
@@ -608,31 +617,6 @@ def _comment_count(name: str) -> int:
     )
 
 
-def _comment_author(name: str, contract: Mapping[str, Any]) -> str:
-    prefix = contract['control_name_prefix']
-    suffixes = [
-        suffix
-        for suffix in contract['control_name_suffixes']
-        if name.endswith(suffix)
-    ]
-    if not name.startswith(prefix) or len(suffixes) != 1:
-        raise LinkedInUnit1PreparationError(
-            'selected thread comment control name is not exact'
-        )
-    suffix = suffixes[0]
-    author = name[len(prefix):-len(suffix)]
-    if (
-        not author
-        or author != author.strip()
-        or len(author) > 200
-        or any(ord(character) < 32 or ord(character) == 127 for character in author)
-    ):
-        raise LinkedInUnit1PreparationError(
-            'selected thread comment author is invalid'
-        )
-    return author
-
-
 def extract_selected_source(
     snapshot: Snapshot,
     snapshot_revision: str,
@@ -641,6 +625,7 @@ def extract_selected_source(
     notification_inventory_sha256: str,
     selection_sha256: str,
     thread_open_receipt: Mapping[str, Any],
+    thread_ready_receipt: Mapping[str, Any],
     transaction_sha256: str,
 ) -> dict[str, Any]:
     _require_linkedin_snapshot(snapshot)
@@ -665,6 +650,18 @@ def extract_selected_source(
             'selected source requires an exact thread-open receipt'
         )
     thread_open_receipt_sha256 = str(thread_open_receipt['receipt_sha256'])
+    thread_ready_payload = _receipt_payload(thread_ready_receipt)
+    if (
+        thread_ready_payload.get('transaction_sha256') != transaction_sha256
+        or thread_ready_payload.get('phase') not in {'thread_open', 'thread_expand'}
+        or thread_ready_payload.get('postcondition_passed') is not True
+        or thread_ready_payload.get('fresh_observation_required') is not True
+        or thread_ready_payload.get('next_step_authorized') is not True
+    ):
+        raise LinkedInUnit1PreparationError(
+            'selected source requires an exact thread-ready receipt'
+        )
+    thread_ready_receipt_sha256 = str(thread_ready_receipt['receipt_sha256'])
     if not isinstance(selected_activity, str) or _ACTIVITY.fullmatch(
         selected_activity
     ) is None:
@@ -704,12 +701,6 @@ def extract_selected_source(
         raise LinkedInUnit1PreparationError(
             'selected thread comment count is ambiguous'
         )
-    try:
-        visible_controls.sort(
-            key=lambda item: _structural_index_path(item.atspi_obj)
-        )
-    except ValueError as exc:
-        raise LinkedInUnit1PreparationError(str(exc)) from exc
     count_contract = notification_contract['selected_thread']['comment_count']
     count_elements = {
         id(element.atspi_obj): element
@@ -738,28 +729,13 @@ def extract_selected_source(
         raise LinkedInUnit1PreparationError(
             'selected thread count does not equal the typed visible row count'
         )
-    comment_contract = _manual_comment_contract()['own_comment']
-    rows: list[dict[str, Any]] = []
-    for ordinal, control in enumerate(visible_controls, 1):
-        author = _comment_author(control.name, comment_contract)
-        try:
-            text = _comment_relative_text(
-                control.atspi_obj,
-                comment_contract['relative_text'],
-            )
-        except ValueError as exc:
-            raise LinkedInUnit1PreparationError(str(exc)) from exc
-        if '\x00' in text:
-            raise LinkedInUnit1PreparationError(
-                'selected thread comment text contains NUL'
-            )
-        rows.append({
-            'author_name': author,
-            'kind': 'text' if text else 'media_link_only',
-            'ordinal': ordinal,
-            'text': text,
-            'text_sha256': _text_sha256(text),
-        })
+    try:
+        rows = _selected_thread_typed_rows(
+            visible_controls,
+            _manual_comment_contract()['own_comment'],
+        )
+    except ValueError as exc:
+        raise LinkedInUnit1PreparationError(str(exc)) from exc
     source = {
         'schema': SELECTED_SOURCE_SCHEMA,
         'platform': 'linkedin',
@@ -768,6 +744,7 @@ def extract_selected_source(
         'notification_inventory_sha256': notification_inventory_sha256,
         'selection_sha256': selection_sha256,
         'thread_open_receipt_sha256': thread_open_receipt_sha256,
+        'thread_ready_receipt_sha256': thread_ready_receipt_sha256,
         'transaction_sha256': transaction_sha256,
         'post': {
             'body': body_text,
@@ -1151,9 +1128,41 @@ def compile_preparation_step(
             element_key=thread_key,
         )
 
-    if previous_phase != 'thread_open':
+    if previous_phase not in {'thread_open', 'thread_expand'}:
         raise LinkedInUnit1PreparationError(
             'preparation receipt history cannot produce draft input'
+        )
+    expand_keys = [
+        key
+        for key, matches in snapshot.mapped.items()
+        if (
+            (match := _THREAD_EXPAND.fullmatch(key)) is not None
+            and match.group('activity') == activity
+            and match.group('body') == body_sha256
+            and matches
+        )
+    ]
+    if len(expand_keys) > 1:
+        raise LinkedInUnit1PreparationError(
+            'selected thread expansion is ambiguous'
+        )
+    if expand_keys:
+        return _preparation_card(
+            snapshot=snapshot,
+            snapshot_revision=snapshot_revision,
+            transaction_sha256=transaction_sha256,
+            sequence=sequence,
+            phase='thread_expand',
+            element_key=expand_keys[0],
+        )
+    thread_open_receipts = [
+        receipt
+        for receipt in receipts
+        if receipt.get('phase') == 'thread_open'
+    ]
+    if len(thread_open_receipts) != 1:
+        raise LinkedInUnit1PreparationError(
+            'selected source requires one exact thread-open receipt'
         )
     source = extract_selected_source(
         snapshot,
@@ -1163,7 +1172,8 @@ def compile_preparation_step(
             'notification_inventory_sha256'
         ],
         selection_sha256=selection['selection_sha256'],
-        thread_open_receipt=receipts[-1],
+        thread_open_receipt=thread_open_receipts[0],
+        thread_ready_receipt=receipts[-1],
         transaction_sha256=transaction_sha256,
     )
     selected_notification = {

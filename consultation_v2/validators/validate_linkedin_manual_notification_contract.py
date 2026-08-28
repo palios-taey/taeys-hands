@@ -75,6 +75,22 @@ def main() -> int:
         },
         'LinkedIn selected-thread viewport transition drifted',
     )
+    _require(
+        selected_thread.get('expand') == {
+            'role': 'push button',
+            'relative_depth': 2,
+            'name_prefix': 'See ',
+            'name_suffixes': [' more comment', ' more comments'],
+            'states_include': ['enabled', 'focusable'],
+            'action': {
+                'effect_class': 'page',
+                'primitives': ['mapped_pointer_activate'],
+                'allowed_now': ['mapped_pointer_activate'],
+            },
+            'postcondition': 'exact_selected_thread_growth',
+        },
+        'LinkedIn selected-thread expansion transition drifted',
+    )
 
     operation_source = _function_source(MANUAL_PATH, 'element_operation')
     for required in (
@@ -88,10 +104,26 @@ def main() -> int:
         "'exact_selected_thread_opener_in_viewport'",
         "'scroll_into_view'",
         "'mapped_pointer_activate'",
+        '_SELECTED_THREAD_EXPAND_KEY.fullmatch(',
+        "'expand'",
     ):
         _require(
             required in operation_source,
             f'LinkedIn selected-thread operation missing {required!r}',
+        )
+
+    verification_source = _function_source(MANUAL_PATH, 'verify_post_action')
+    for required in (
+        '_SELECTED_THREAD_EXPAND_KEY.fullmatch(',
+        "'exact_selected_thread_growth'",
+        'observed_visible_count != prior_visible_count + declared_more_count',
+        'expected_count != declared_total_count',
+        '_selected_thread_typed_rows(',
+        "'typed_rows_sha256'",
+    ):
+        _require(
+            required in verification_source,
+            f'LinkedIn selected-thread expansion verification missing {required!r}',
         )
 
     pointer_source = _function_source(

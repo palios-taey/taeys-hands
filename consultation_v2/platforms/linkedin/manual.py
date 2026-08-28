@@ -27,6 +27,7 @@ NOTIFICATIONS_CONTINUATION_PREFIX = 'notifications_show_more_'
 NOTIFICATIONS_CONTINUATION = 'notifications_show_more_results'
 SELECTED_POST_PREFIX = 'selected_post_activity_'
 SELECTED_THREAD_OPEN_PREFIX = 'selected_post_thread_open_activity_'
+SELECTED_THREAD_EXPAND_PREFIX = 'selected_post_thread_expand_activity_'
 SELECTED_POST_REACTION_PREFIX = 'selected_post_reaction_activity_'
 SELECTED_POST_EDITOR_PREFIX = 'selected_post_editor_activity_'
 SELECTED_POST_SUBMIT_PREFIX = 'selected_post_submit_activity_'
@@ -43,6 +44,12 @@ _SELECTED_POST_KEY = re.compile(
 _SELECTED_THREAD_OPEN_KEY = re.compile(
     rf'^{SELECTED_THREAD_OPEN_PREFIX}(?P<activity>[0-9]+)_body_'
     r'(?P<body>[0-9a-f]{64})$'
+)
+_SELECTED_THREAD_EXPAND_KEY = re.compile(
+    rf'^{SELECTED_THREAD_EXPAND_PREFIX}(?P<activity>[0-9]+)_body_'
+    r'(?P<body>[0-9a-f]{64})_total_(?P<total>[1-9][0-9]*)_'
+    r'visible_(?P<visible>[1-9][0-9]*)_more_'
+    r'(?P<more>[1-9][0-9]*)$'
 )
 _SELECTED_POST_REACTION_KEY = re.compile(
     rf'^{SELECTED_POST_REACTION_PREFIX}(?P<activity>[0-9]+)_body_'
@@ -207,6 +214,7 @@ def _manual_notification_contract() -> dict[str, Any]:
         },
         'selected_thread': {
             'open_element_key_prefix': SELECTED_THREAD_OPEN_PREFIX,
+            'expand_element_key_prefix': SELECTED_THREAD_EXPAND_PREFIX,
             'comment_count': {
                 'role': 'push button',
                 'index_paths': [[0, 12], [0, 15]],
@@ -216,6 +224,19 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'role': 'push button',
                 'name_prefix': 'View more options for',
                 'name_suffix': 'comment.',
+            },
+            'expand': {
+                'role': 'push button',
+                'relative_depth': 2,
+                'name_prefix': 'See ',
+                'name_suffixes': [' more comment', ' more comments'],
+                'states_include': ['enabled', 'focusable'],
+                'action': {
+                    'effect_class': 'page',
+                    'primitives': ['mapped_pointer_activate'],
+                    'allowed_now': ['mapped_pointer_activate'],
+                },
+                'postcondition': 'exact_selected_thread_growth',
             },
             'action': {
                 'effect_class': 'page',
@@ -893,6 +914,82 @@ def _selected_thread_controls(
     return comment_counts, visible_comments
 
 
+def _selected_thread_expander(
+    snapshot: Snapshot,
+    root: Any,
+    contract: dict[str, Any],
+) -> tuple[Any | None, int | None]:
+    expand_contract = contract['selected_thread']['expand']
+    prefix = expand_contract['name_prefix']
+    suffixes = expand_contract['name_suffixes']
+    required_states = set(expand_contract['states_include'])
+    matches: list[tuple[Any, int]] = []
+    for element, relative_depth in _selected_post_descendants(snapshot, root):
+        if (
+            relative_depth != expand_contract['relative_depth']
+            or element.role != expand_contract['role']
+            or not required_states.issubset(element.states)
+            or not element.name.startswith(prefix)
+        ):
+            continue
+        matched_suffixes = [
+            suffix for suffix in suffixes if element.name.endswith(suffix)
+        ]
+        if len(matched_suffixes) != 1:
+            continue
+        suffix = matched_suffixes[0]
+        token = element.name[len(prefix):-len(suffix)].replace(',', '')
+        if not token.isdigit() or int(token) <= 0:
+            continue
+        count = int(token)
+        if (
+            (count == 1 and suffix != ' more comment')
+            or (count != 1 and suffix != ' more comments')
+        ):
+            continue
+        matches.append((element, count))
+    if len(matches) > 1:
+        raise ValueError('LinkedIn selected-thread expansion target is ambiguous')
+    return matches[0] if matches else (None, None)
+
+
+def _selected_thread_typed_rows(
+    visible_comments: list[Any],
+    comment_contract: dict[str, Any],
+) -> list[dict[str, Any]]:
+    ordered = list(visible_comments)
+    ordered.sort(key=lambda item: _structural_index_path(item.atspi_obj))
+    prefix = comment_contract['control_name_prefix']
+    suffixes = comment_contract['control_name_suffixes']
+    rows: list[dict[str, Any]] = []
+    for ordinal, control in enumerate(ordered, 1):
+        matched_suffixes = [
+            suffix for suffix in suffixes if control.name.endswith(suffix)
+        ]
+        if not control.name.startswith(prefix) or len(matched_suffixes) != 1:
+            raise ValueError(
+                'LinkedIn selected thread comment control name is not exact'
+            )
+        suffix = matched_suffixes[0]
+        author = _validate_private_author_name(
+            control.name[len(prefix):-len(suffix)]
+        )
+        text = _comment_relative_text(
+            control.atspi_obj,
+            comment_contract['relative_text'],
+        )
+        if '\x00' in text:
+            raise ValueError('LinkedIn selected thread comment text contains NUL')
+        rows.append({
+            'author_name': author,
+            'kind': 'text' if text else 'media_link_only',
+            'ordinal': ordinal,
+            'text': text,
+            'text_sha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
+        })
+    return rows
+
+
 def _notification_relative_age(element: Any, contract: dict[str, Any]) -> str | None:
     try:
         parent = element.atspi_obj.get_parent()
@@ -1302,6 +1399,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
             and not key.startswith(NOTIFICATIONS_CONTINUATION_PREFIX)
             and not key.startswith(SELECTED_POST_PREFIX)
             and not key.startswith(SELECTED_THREAD_OPEN_PREFIX)
+            and not key.startswith(SELECTED_THREAD_EXPAND_PREFIX)
             and not key.startswith(SELECTED_POST_REACTION_PREFIX)
             and not key.startswith(SELECTED_POST_EDITOR_PREFIX)
             and not key.startswith(SELECTED_POST_SUBMIT_PREFIX)
@@ -1510,6 +1608,51 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     'selected_post_body_sha256': body_digest,
                 },
             )]
+        if len(comment_counts) == 1 and visible_comments:
+            count_name = comment_counts[0].name
+            count_token = (
+                count_name.removesuffix(' comments').replace(',', '')
+                if count_name.endswith(' comments')
+                else '1' if count_name == '1 comment' else ''
+            )
+            expected_count = int(count_token) if count_token.isdigit() else 0
+            expand_target, more_count = _selected_thread_expander(
+                snapshot,
+                root,
+                contract,
+            )
+            if expand_target is not None and expected_count <= len(visible_comments):
+                raise ValueError(
+                    'LinkedIn selected-thread expansion exceeds the exact count'
+                )
+            if (
+                expand_target is not None
+                and more_count is not None
+                and expected_count > len(visible_comments)
+                and more_count <= expected_count - len(visible_comments)
+            ):
+                thread_expand_key = (
+                    f'{SELECTED_THREAD_EXPAND_PREFIX}{selected_activity}_body_'
+                    f'{body_digest}_total_{expected_count}_'
+                    f'visible_{len(visible_comments)}_more_'
+                    f'{more_count}'
+                )
+                mapped[thread_expand_key] = [replace(
+                    expand_target,
+                    key=thread_expand_key,
+                    description=(
+                        f'activity={selected_activity}; expand exact selected '
+                        f'thread from {len(visible_comments)} visible comments'
+                    ),
+                    raw={
+                        **dict(expand_target.raw),
+                        'selected_activity': selected_activity,
+                        'selected_post_body_sha256': body_digest,
+                        'selected_thread_total_count': expected_count,
+                        'selected_thread_visible_count': len(visible_comments),
+                        'selected_thread_more_count': more_count,
+                    },
+                )]
     return replace(snapshot, mapped=mapped)
 
 
@@ -1533,6 +1676,9 @@ def element_operation(
     )
     selected_post_match = _SELECTED_POST_KEY.fullmatch(element_key)
     selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
+    selected_thread_expand_match = _SELECTED_THREAD_EXPAND_KEY.fullmatch(
+        element_key
+    )
     selected_reaction_match = _SELECTED_POST_REACTION_KEY.fullmatch(element_key)
     selected_editor_match = _SELECTED_POST_EDITOR_KEY.fullmatch(element_key)
     selected_submit_match = _SELECTED_POST_SUBMIT_KEY.fullmatch(element_key)
@@ -1542,6 +1688,7 @@ def element_operation(
         and continuation_match is None
         and selected_post_match is None
         and selected_thread_open_match is None
+        and selected_thread_expand_match is None
         and selected_reaction_match is None
         and selected_editor_match is None
         and selected_submit_match is None
@@ -1581,6 +1728,21 @@ def element_operation(
             },
         }
     selected_context = dict(context or {})
+    if selected_thread_expand_match is not None:
+        activity = selected_thread_expand_match.group('activity')
+        body_sha256 = selected_thread_expand_match.group('body')
+        total_count = int(selected_thread_expand_match.group('total'))
+        visible_count = int(selected_thread_expand_match.group('visible'))
+        more_count = int(selected_thread_expand_match.group('more'))
+        if (
+            selected_context.get('selected_activity') != activity
+            or selected_context.get('selected_post_body_sha256') != body_sha256
+            or selected_context.get('selected_thread_total_count') != total_count
+            or selected_context.get('selected_thread_visible_count')
+            != visible_count
+            or selected_context.get('selected_thread_more_count') != more_count
+        ):
+            raise ValueError('LinkedIn selected-thread expansion identity is not exact')
     if selected_reaction_match is not None:
         activity = selected_reaction_match.group('activity')
         body_sha256 = selected_reaction_match.group('body')
@@ -1763,6 +1925,10 @@ def element_operation(
                 'LinkedIn selected-thread opener viewport state is unavailable: '
                 f"{viewport.get('error') or 'unknown'}"
             )
+    elif selected_thread_expand_match is not None:
+        declared_action = _manual_notification_contract()['selected_thread'][
+            'expand'
+        ]['action']
     else:
         declared_action = {
             'effect_class': 'page',
@@ -1810,12 +1976,18 @@ def element_operation(
                 )
                 if selected_thread_open_match is not None
                 else (
-                    'exact_notification_activity'
-                    if candidate_match is not None
+                    _manual_notification_contract()['selected_thread'][
+                        'expand'
+                    ]['postcondition']
+                    if selected_thread_expand_match is not None
                     else (
-                        continuation_postcondition['kind']
-                        if continuation_match is not None
-                        else 'exact_document_route'
+                        'exact_notification_activity'
+                        if candidate_match is not None
+                        else (
+                            continuation_postcondition['kind']
+                            if continuation_match is not None
+                            else 'exact_document_route'
+                        )
                     )
                 )
             ),
@@ -2034,6 +2206,102 @@ def verify_post_action(
     candidate_match = _CANDIDATE_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
     selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
+    selected_thread_expand_match = _SELECTED_THREAD_EXPAND_KEY.fullmatch(
+        element_key
+    )
+    if selected_thread_expand_match is not None:
+        contract = _manual_notification_contract()
+        activity, activity_sources = _selected_activity_identity(snapshot, contract)
+        expected_activity = selected_thread_expand_match.group('activity')
+        expected_body_digest = selected_thread_expand_match.group('body')
+        declared_total_count = int(
+            selected_thread_expand_match.group('total')
+        )
+        prior_visible_count = int(
+            selected_thread_expand_match.group('visible')
+        )
+        declared_more_count = int(
+            selected_thread_expand_match.group('more')
+        )
+        root, _body, body_text = _selected_post_root_and_body(snapshot, contract)
+        if root is None or body_text is None:
+            raise ValueError(
+                'LinkedIn selected-thread expansion lost the exact selected post'
+            )
+        observed_body_digest = hashlib.sha256(
+            body_text.encode('utf-8')
+        ).hexdigest()
+        comment_counts, visible_comments = _selected_thread_controls(
+            snapshot,
+            root,
+            contract,
+        )
+        count_name = comment_counts[0].name if len(comment_counts) == 1 else ''
+        count_token = (
+            count_name.removesuffix(' comments').replace(',', '')
+            if count_name.endswith(' comments')
+            else '1' if count_name == '1 comment' else ''
+        )
+        expected_count = int(count_token) if count_token.isdigit() else 0
+        expand_target, next_more_count = _selected_thread_expander(
+            snapshot,
+            root,
+            contract,
+        )
+        observed_visible_count = len(visible_comments)
+        remaining_count = expected_count - observed_visible_count
+        typed_rows = _selected_thread_typed_rows(
+            visible_comments,
+            _manual_comment_contract()['own_comment'],
+        )
+        typed_rows_sha256 = hashlib.sha256(json.dumps(
+            typed_rows,
+            ensure_ascii=False,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(',', ':'),
+        ).encode('utf-8')).hexdigest()
+        if (
+            activity != expected_activity
+            or observed_body_digest != expected_body_digest
+            or len(comment_counts) != 1
+            or expected_count != declared_total_count
+            or observed_visible_count != prior_visible_count + declared_more_count
+            or observed_visible_count > expected_count
+            or (
+                remaining_count > 0
+                and (
+                    expand_target is None
+                    or next_more_count is None
+                    or next_more_count > remaining_count
+                )
+            )
+            or (remaining_count == 0 and expand_target is not None)
+        ):
+            raise ValueError(
+                'LinkedIn selected-thread expansion postcondition failed: '
+                'the exact selected activity/body did not grow within its '
+                'declared comment count'
+            )
+        return {
+            'element_key': element_key,
+            'operation': operation,
+            'effect_class': 'page',
+            'postcondition': 'exact_selected_thread_growth',
+            'route_exact': True,
+            'activity_exact': True,
+            'activity_sources': list(activity_sources),
+            'selected_post_body_sha256': observed_body_digest,
+            'exact_comment_count': expected_count,
+            'prior_visible_comment_count': prior_visible_count,
+            'declared_more_comment_count': declared_more_count,
+            'visible_comment_count': observed_visible_count,
+            'typed_row_count': len(typed_rows),
+            'typed_rows_sha256': typed_rows_sha256,
+            'remaining_comment_count': remaining_count,
+            'next_expander_count': 1 if expand_target is not None else 0,
+            'observed_url': snapshot.url,
+        }
     if selected_thread_open_match is not None:
         contract = _manual_notification_contract()
         activity, activity_sources = _selected_activity_identity(snapshot, contract)
@@ -2264,6 +2532,7 @@ def stable_post_action_observation(
         or _CANDIDATE_KEY.fullmatch(element_key) is not None
         or continuation_match is not None
         or _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key) is not None
+        or _SELECTED_THREAD_EXPAND_KEY.fullmatch(element_key) is not None
     )
     reaction_activate = (
         operation == 'activate_optional_like'
@@ -2286,6 +2555,9 @@ def stable_post_action_observation(
         raise ValueError('LinkedIn post-action deadline must be monotonic seconds')
 
     selected_thread_open_match = _SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)
+    selected_thread_expand_match = _SELECTED_THREAD_EXPAND_KEY.fullmatch(
+        element_key
+    )
     if element_key == navigation_contract['element_key']:
         postcondition = navigation_contract['postcondition']
     elif selected_thread_open_match is not None:
@@ -2293,6 +2565,15 @@ def stable_post_action_observation(
             'kind': 'exact_selected_activity_visible_comment_controls',
             'activity': selected_thread_open_match.group('activity'),
             'body_sha256': selected_thread_open_match.group('body'),
+        }
+    elif selected_thread_expand_match is not None:
+        postcondition = {
+            'kind': 'exact_selected_thread_growth',
+            'activity': selected_thread_expand_match.group('activity'),
+            'body_sha256': selected_thread_expand_match.group('body'),
+            'total_count': int(selected_thread_expand_match.group('total')),
+            'visible_before': int(selected_thread_expand_match.group('visible')),
+            'declared_more': int(selected_thread_expand_match.group('more')),
         }
     elif selected_reaction_match is not None:
         postcondition = {
@@ -2412,6 +2693,14 @@ def stable_post_action_observation(
                 'exact_own_comment_count',
                 'comment_text_sha256',
                 'comment_text_chars',
+                'exact_comment_count',
+                'prior_visible_comment_count',
+                'declared_more_comment_count',
+                'visible_comment_count',
+                'typed_row_count',
+                'typed_rows_sha256',
+                'remaining_comment_count',
+                'next_expander_count',
             ):
                 if field in exact_receipt:
                     sample[field] = exact_receipt[field]

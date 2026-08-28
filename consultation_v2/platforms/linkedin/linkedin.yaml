@@ -304,6 +304,7 @@ workflow:
           allowed_now: []
       selected_thread:
         open_element_key_prefix: selected_post_thread_open_activity_
+        expand_element_key_prefix: selected_post_thread_expand_activity_
         comment_count:
           role: push button
           index_paths:
@@ -320,6 +321,23 @@ workflow:
           role: push button
           name_prefix: View more options for
           name_suffix: comment.
+        expand:
+          role: push button
+          relative_depth: 2
+          name_prefix: "See "
+          name_suffixes:
+            - " more comment"
+            - " more comments"
+          states_include:
+            - enabled
+            - focusable
+          action:
+            effect_class: page
+            primitives:
+              - mapped_pointer_activate
+            allowed_now:
+              - mapped_pointer_activate
+          postcondition: exact_selected_thread_growth
         action:
           effect_class: page
           primitives:
