@@ -171,8 +171,11 @@ has not been completely observed.
    complete visible thread, including every visible author reply, before any draft exists. If the displayed
    comment count exceeds the typed visible-row count, activate exactly one mapped
    `selected_post_thread_expand_activity_<id>_body_<digest>_total_<total>_visible_<before>_more_<n>` control
-   with its declared pointer primitive. Require a fresh receipt proving the same activity/body/total and exactly
-   N additional typed rows. Repeat one receipted action at a time until displayed count equals typed rows.
+   with its declared pointer primitive. If that exact expansion key is outside the display, first scroll that
+   same key once, require two fresh observations proving the identical key in viewport, and only then issue the
+   separate pointer action. The scroll receipt is not growth authority. Require a fresh pointer-action receipt
+   proving the same activity/body/total and exactly N additional typed rows. Repeat one receipted action at a
+   time until displayed count equals typed rows.
    When the card instead proves exact zero—no positive count, visible comment row, or expander—require the
    distinct `selected_post_zero_thread_open_activity_<id>_body_<digest>` key at the YAML-owned `Comment`
    control. Activate it once and require the same activity/body, exact zero state, and one empty ready same-card

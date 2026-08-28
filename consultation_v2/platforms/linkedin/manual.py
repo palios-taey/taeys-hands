@@ -256,6 +256,20 @@ def _manual_notification_contract() -> dict[str, Any]:
                     'allowed_now': ['mapped_pointer_activate'],
                 },
                 'postcondition': 'exact_selected_thread_growth',
+                'scroll_into_view': {
+                    'effect_class': 'viewport',
+                    'primitives': ['scroll_into_view'],
+                    'allowed_now': ['scroll_into_view'],
+                    'postcondition': (
+                        'exact_selected_thread_expander_in_viewport'
+                    ),
+                    'observation_barrier': {
+                        'refresh_policy': 'invalidate_reacquire',
+                        'stable_cycles': 2,
+                        'interval_ms': 200,
+                        'timeout_ms': 10000,
+                    },
+                },
             },
             'action': {
                 'effect_class': 'page',
@@ -2104,9 +2118,20 @@ def element_operation(
                 f"{viewport.get('error') or 'unknown'}"
             )
     elif selected_thread_expand_match is not None:
-        declared_action = _manual_notification_contract()['selected_thread'][
-            'expand'
-        ]['action']
+        viewport = _selected_thread_viewport_state(dict(context or {}))
+        if viewport.get('live_extent_in_viewport') is True:
+            declared_action = _manual_notification_contract()[
+                'selected_thread'
+            ]['expand']['action']
+        elif viewport.get('error') == 'live_extent_outside_display':
+            declared_action = _manual_notification_contract()[
+                'selected_thread'
+            ]['expand']['scroll_into_view']
+        else:
+            raise ValueError(
+                'LinkedIn selected-thread expander viewport state is unavailable: '
+                f"{viewport.get('error') or 'unknown'}"
+            )
     else:
         declared_action = {
             'effect_class': 'page',
@@ -2160,9 +2185,17 @@ def element_operation(
                 )
                 if selected_open_match is not None
                 else (
-                    _manual_notification_contract()['selected_thread'][
-                        'expand'
-                    ]['postcondition']
+                    (
+                        _manual_notification_contract()['selected_thread'][
+                            'expand'
+                        ][
+                            'scroll_into_view'
+                        ]['postcondition']
+                        if declared_primitive == 'scroll_into_view'
+                        else _manual_notification_contract()['selected_thread'][
+                            'expand'
+                        ]['postcondition']
+                    )
                     if selected_thread_expand_match is not None
                     else (
                         'exact_notification_activity'
@@ -2649,9 +2682,13 @@ def stable_scroll_post_action_observation(
     selected_zero_thread_open_match = _SELECTED_THREAD_ZERO_OPEN_KEY.fullmatch(
         element_key
     )
+    selected_thread_expand_match = _SELECTED_THREAD_EXPAND_KEY.fullmatch(
+        element_key
+    )
     if (
         selected_thread_open_match is None
         and selected_zero_thread_open_match is None
+        and selected_thread_expand_match is None
     ):
         raise ValueError(
             'LinkedIn scroll post-action observation requires an exact '
@@ -2660,9 +2697,12 @@ def stable_scroll_post_action_observation(
     if isinstance(deadline_at, bool) or not isinstance(deadline_at, (int, float)):
         raise ValueError('LinkedIn scroll post-action deadline must be monotonic seconds')
 
-    scroll_contract = _manual_notification_contract()[
-        'selected_thread'
-    ]['scroll_into_view']
+    selected_thread_contract = _manual_notification_contract()['selected_thread']
+    scroll_contract = (
+        selected_thread_contract['expand']['scroll_into_view']
+        if selected_thread_expand_match is not None
+        else selected_thread_contract['scroll_into_view']
+    )
     barrier = scroll_contract['observation_barrier']
     stable_cycles_required = barrier['stable_cycles']
     interval = barrier['interval_ms'] / 1000.0
@@ -2726,6 +2766,22 @@ def stable_scroll_post_action_observation(
                 'activity_exact': True,
                 'body_sha256_exact': True,
                 'live_extent_in_viewport': True,
+                **(
+                    {
+                        'expansion_identity_exact': True,
+                        'total_count': int(
+                            selected_thread_expand_match.group('total')
+                        ),
+                        'visible_count': int(
+                            selected_thread_expand_match.group('visible')
+                        ),
+                        'more_count': int(
+                            selected_thread_expand_match.group('more')
+                        ),
+                    }
+                    if selected_thread_expand_match is not None
+                    else {}
+                ),
             }
             return snapshot, {
                 'result': 'PASS',

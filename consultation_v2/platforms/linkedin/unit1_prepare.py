@@ -144,8 +144,9 @@ _PHASE_TRANSITIONS = {
     }),
     'notification_candidate': frozenset({'thread_scroll', 'thread_open'}),
     'thread_scroll': frozenset({'thread_open'}),
-    'thread_open': frozenset({'thread_expand'}),
-    'thread_expand': frozenset({'thread_expand'}),
+    'thread_open': frozenset({'thread_expand_scroll', 'thread_expand'}),
+    'thread_expand_scroll': frozenset({'thread_expand'}),
+    'thread_expand': frozenset({'thread_expand_scroll', 'thread_expand'}),
 }
 _PHASE_METHODS = {
     'notifications_navigation': 'activate',
@@ -153,6 +154,7 @@ _PHASE_METHODS = {
     'notification_candidate': 'activate',
     'thread_scroll': 'scroll_into_view',
     'thread_open': 'mapped_pointer_activate',
+    'thread_expand_scroll': 'scroll_into_view',
     'thread_expand': 'mapped_pointer_activate',
 }
 
@@ -1150,7 +1152,11 @@ def compile_preparation_step(
             element_key=thread_key,
         )
 
-    if previous_phase not in {'thread_open', 'thread_expand'}:
+    if previous_phase not in {
+        'thread_open',
+        'thread_expand_scroll',
+        'thread_expand',
+    }:
         raise LinkedInUnit1PreparationError(
             'preparation receipt history cannot produce draft input'
         )
@@ -1169,13 +1175,50 @@ def compile_preparation_step(
             'selected thread expansion is ambiguous'
         )
     if expand_keys:
+        expand_key = expand_keys[0]
+        target = _mapped_singleton(snapshot, expand_key)
+        try:
+            declared = element_operation(
+                expand_key,
+                list(target.states),
+                dict(target.raw or {}),
+            )
+        except ValueError as exc:
+            raise LinkedInUnit1PreparationError(str(exc)) from exc
+        if not isinstance(declared, Mapping):
+            raise LinkedInUnit1PreparationError(
+                'selected thread expander has no declared operation'
+            )
+        phase = (
+            'thread_expand_scroll'
+            if declared.get('method') == 'scroll_into_view'
+            else 'thread_expand'
+        )
+        if (
+            previous_phase == 'thread_expand_scroll'
+            and phase != 'thread_expand'
+        ):
+            raise LinkedInUnit1PreparationError(
+                'thread expander is still outside the verified viewport'
+            )
+        if (
+            previous_phase == 'thread_expand_scroll'
+            and receipts[-1]['element_sha256'] != _text_sha256(expand_key)
+        ):
+            raise LinkedInUnit1PreparationError(
+                'thread expander identity changed after the verified scroll'
+            )
         return _preparation_card(
             snapshot=snapshot,
             snapshot_revision=snapshot_revision,
             transaction_sha256=transaction_sha256,
             sequence=sequence,
-            phase='thread_expand',
-            element_key=expand_keys[0],
+            phase=phase,
+            element_key=expand_key,
+        )
+    if previous_phase == 'thread_expand_scroll':
+        raise LinkedInUnit1PreparationError(
+            'thread expander disappeared after the verified scroll'
         )
     thread_open_receipts = [
         receipt

@@ -70,7 +70,11 @@ mutation authority.
 separately receipted exact thread-open action exposes the selected thread. When the displayed count is greater
 than the typed visible-row count, exactly one mapped `See N more comment(s)` control compiles to one
 `thread_expand` card. Its fresh receipt must preserve the selected activity, body digest, and displayed total,
-and must add exactly N typed rows. Expansion repeats one action at a time until the counts are equal. A missing
+and must add exactly N typed rows. An off-display expansion first compiles one `thread_expand_scroll` card for
+that full expansion key. Two fresh reads must prove the identical activity/body/total/visible/more key in the
+viewport before a separate `thread_expand` pointer card can compile. The scroll receipt never counts as growth
+or thread readiness, and a changed, absent, duplicated, unresolved, or still-off-display key halts. Expansion
+repeats one action at a time until the counts are equal. A missing
 or ambiguous opener/expander is terminal; it cannot be interpreted as an already-open, complete, or zero-comment
 thread. Every visible comment row has an exact author,
 `text` or `media_link_only` kind, exact text, and text digest. The displayed comment count must equal the

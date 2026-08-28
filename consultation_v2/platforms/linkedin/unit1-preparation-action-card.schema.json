@@ -22,7 +22,7 @@
     "schema": {"const": "linkedin_unit1_preparation_action_card_v1"},
     "transaction_sha256": {"$ref": "#/$defs/sha256"},
     "sequence": {"type": "integer", "minimum": 1},
-    "phase": {"enum": ["notifications_navigation", "notifications_continuation", "notification_candidate", "thread_scroll", "thread_open", "thread_expand"]},
+    "phase": {"enum": ["notifications_navigation", "notifications_continuation", "notification_candidate", "thread_scroll", "thread_open", "thread_expand_scroll", "thread_expand"]},
     "snapshot_revision": {"$ref": "#/$defs/sha256"},
     "element": {"type": "string", "minLength": 1},
     "element_sha256": {"$ref": "#/$defs/sha256"},
