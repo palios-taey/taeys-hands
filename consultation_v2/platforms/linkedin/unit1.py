@@ -33,7 +33,8 @@ _CANDIDATE = re.compile(
 )
 _CONTINUATION = re.compile(
     rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_'
-    r'(?P<prefix>[0-9a-f]{16})$'
+    r'(?P<prefix>[0-9a-f]{16})_members_'
+    r'(?P<members>[0-9a-f]{64}(?:\.[0-9a-f]{64})*)$'
 )
 _SUBMIT = re.compile(
     rf'^{SELECTED_POST_SUBMIT_PREFIX}(?P<activity>[0-9]+)_body_'

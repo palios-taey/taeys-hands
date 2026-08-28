@@ -131,11 +131,14 @@ has not been completely observed.
 1. Observe the current LinkedIn document and require exactly one YAML-mapped `notifications_navigation`.
 2. Activate it once and require the exact `notifications_all` route in the fresh post-action observation.
 3. Observe all mounted notification cards raw before filtering. Do not narrow the read to one activity type.
-4. If exact `notifications_show_more_after_<count>_<prefix>` is mapped, activate that continuation once and
-   require the exact Notifications-All route and category plus growth of the full mounted-article count and
-   preservation of the ordered prefix digest of every article's exact YAML-declared content-link URI. Candidate
-   count is reported separately and does not prove that the mounted stream expanded. Each further continuation
-   is a new transition with a new observation.
+4. If exact `notifications_show_more_after_<count>_<digest>_members_<identities>` is mapped, activate that
+   continuation once and require the transaction-bound All-category authority, the exact Notifications-All route,
+   and a stable fresh
+   inventory containing at least one exact YAML-declared content-link URI identity absent from the frozen
+   pre-action inventory.
+   Mounted article counts may shrink when LinkedIn virtualizes the refreshed tree, so monotonic DOM growth is not
+   an action postcondition. Pure unmount or reorder is not novelty. Candidate projection remains independently
+   exact. Each further continuation is a new transition with a new observation.
 5. Only after the mounted stream is fully evidenced, apply the runtime-injected freshness, target, dedup, and
    author-cooloff policy. A comment target must be no older than 72 hours.
 6. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.

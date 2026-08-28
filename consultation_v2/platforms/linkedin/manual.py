@@ -32,7 +32,9 @@ _CANDIDATE_KEY = re.compile(
     rf'^{NOTIFICATION_CANDIDATE_PREFIX}(?P<ordinal>[0-9]{{3}})_activity_(?P<activity>[0-9]+)$'
 )
 _CONTINUATION_KEY = re.compile(
-    rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_(?P<prefix>[0-9a-f]{{16}})$'
+    rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_'
+    r'(?P<prefix>[0-9a-f]{16})_members_'
+    r'(?P<members>[0-9a-f]{64}(?:\.[0-9a-f]{64})*)$'
 )
 _SELECTED_POST_KEY = re.compile(
     rf'^{SELECTED_POST_PREFIX}(?P<activity>[0-9]+)$'
@@ -152,10 +154,12 @@ def _manual_notification_contract() -> dict[str, Any]:
             'role': 'push button',
             'states_include': ['enabled', 'focusable'],
             'postcondition': {
-                'kind': 'notification_stream_count_growth',
+                'kind': 'notification_stream_stable_novelty',
                 'identity': 'exact_yaml_content_link_uri',
-                'ordered_prefix_digest': 'sha256_uri_digests_truncated_16',
-                'candidate_projection': 'separate',
+                'frozen_inventory_digest': 'sha256_uri_digests_truncated_16',
+                'frozen_inventory_members': 'sha256_uri_digests',
+                'novelty': 'at_least_one_exact_unseen_identity',
+                'candidate_projection': 'exact_separate',
             },
         },
         'selected_activity_postcondition': {
@@ -972,8 +976,18 @@ def _notification_continuation_measurement(
     contract = _manual_notification_contract()
     prior_raw_count = int(continuation_match.group('count'))
     prior_raw_prefix = continuation_match.group('prefix')
+    prior_uri_digests = continuation_match.group('members').split('.')
+    if (
+        len(prior_uri_digests) != prior_raw_count
+        or _notification_stream_prefix_digest(prior_uri_digests)
+        != prior_raw_prefix
+    ):
+        raise ValueError(
+            'LinkedIn notification continuation frozen inventory is invalid'
+        )
     observed_raw_count: int | None = None
     observed_raw_prefix: str | None = None
+    observed_raw_inventory_digest: str | None = None
     stream_projection_error: str | None = None
     try:
         uri_digests = _notification_stream_uri_digests(snapshot, contract)
@@ -981,6 +995,9 @@ def _notification_continuation_measurement(
         observed_raw_prefix = _notification_stream_prefix_digest(
             uri_digests,
             prior_raw_count,
+        )
+        observed_raw_inventory_digest = _notification_stream_prefix_digest(
+            uri_digests
         )
     except ValueError as exc:
         stream_projection_error = str(exc)
@@ -998,13 +1015,31 @@ def _notification_continuation_measurement(
         observed_raw_count is not None and observed_raw_count > prior_raw_count
     )
     raw_prefix_exact = observed_raw_prefix == prior_raw_prefix
+    raw_inventory_changed = (
+        observed_raw_inventory_digest is not None
+        and (
+            observed_raw_count != prior_raw_count
+            or observed_raw_inventory_digest != prior_raw_prefix
+        )
+    )
+    prior_uri_digest_set = set(prior_uri_digests)
+    observed_novel_uri_digests = (
+        [
+            digest
+            for digest in uri_digests
+            if digest not in prior_uri_digest_set
+        ]
+        if stream_projection_error is None
+        else []
+    )
+    raw_inventory_novelty_exact = bool(observed_novel_uri_digests)
     failures = [
         name
         for name, passed in (
             ('route', route_exact),
             ('raw_stream_projection', stream_projection_error is None),
-            ('raw_count_growth', raw_count_grew),
-            ('raw_prefix', raw_prefix_exact),
+            ('raw_inventory_novelty', raw_inventory_novelty_exact),
+            ('candidate_projection', candidate_projection_error is None),
         )
         if not passed
     ]
@@ -1018,6 +1053,19 @@ def _notification_continuation_measurement(
         'prior_raw_notification_prefix': prior_raw_prefix,
         'observed_raw_notification_prefix': observed_raw_prefix,
         'raw_notification_prefix_exact': raw_prefix_exact,
+        'observed_raw_notification_inventory_digest': (
+            observed_raw_inventory_digest
+        ),
+        'raw_notification_inventory_changed': raw_inventory_changed,
+        'observed_novel_notification_identity_count': len(
+            observed_novel_uri_digests
+        ),
+        'observed_novel_notification_identity_digests': (
+            observed_novel_uri_digests
+        ),
+        'raw_notification_inventory_novelty_exact': (
+            raw_inventory_novelty_exact
+        ),
         'candidate_projection_exact': candidate_projection_error is None,
         'observed_candidate_count': observed_candidate_count,
         'postcondition_matched': not failures,
@@ -1143,7 +1191,8 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
         if continuations:
             key = (
                 f'{NOTIFICATIONS_CONTINUATION_PREFIX}{len(uri_digests):03d}_'
-                f'{_notification_stream_prefix_digest(uri_digests)}'
+                f'{_notification_stream_prefix_digest(uri_digests)}_members_'
+                f'{".".join(uri_digests)}'
             )
             mapped[key] = [replace(
                 continuations[0],
