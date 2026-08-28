@@ -173,6 +173,13 @@ as another new send identity after the recovery receipt passes.
 | Logos | Grok `:5` | `consultation_v2/platforms/grok/grok.yaml` | `model=heavy` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `send_button` element |
 | Clarity | Perplexity `:6` | `consultation_v2/platforms/perplexity/perplexity.yaml` | `mode=deep_research` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `submit_button` element |
 
+For Grok, each native chooser submit is followed only by fresh read-only document
+snapshots. The YAML-owned postcondition requires both `uploaded_file_chip` and
+`remove_attachment` to equal the requested attachment index for the declared
+stable-cycle count: zero before the first chooser, then one, then two. Generic
+chip controls prove only the browser-tree attachment count; they do not prove
+server ingestion or file readiness.
+
 At the start of the leg, inspect only the executable parts of that one YAML:
 
 ```bash
