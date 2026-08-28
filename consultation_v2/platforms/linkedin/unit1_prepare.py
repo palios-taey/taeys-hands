@@ -12,7 +12,7 @@ from consultation_v2.platforms.linkedin.driver import (
 )
 from consultation_v2.platforms.linkedin.manual import (
     NOTIFICATION_CANDIDATE_PREFIX,
-    NOTIFICATIONS_CONTINUATION_PREFIX,
+    NOTIFICATIONS_CONTINUATION,
     NOTIFICATIONS_NAVIGATION,
     SELECTED_POST_PREFIX,
     SELECTED_THREAD_OPEN_PREFIX,
@@ -45,9 +45,7 @@ _PUBLIC_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
 _ACTIVITY = re.compile(r'^[0-9]+$')
 _AGE = re.compile(r'^(?P<count>[1-9][0-9]*)(?P<unit>[smhdw])$')
 _CONTINUATION = re.compile(
-    rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_'
-    r'(?P<prefix>[0-9a-f]{16})_members_'
-    r'(?P<members>[0-9a-f]{64}(?:\.[0-9a-f]{64})*)$'
+    rf'^{re.escape(NOTIFICATIONS_CONTINUATION)}$'
 )
 
 _ENVELOPE_KEYS = frozenset({

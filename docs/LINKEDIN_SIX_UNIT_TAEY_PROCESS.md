@@ -131,11 +131,13 @@ has not been completely observed.
 1. Observe the current LinkedIn document and require exactly one YAML-mapped `notifications_navigation`.
 2. Activate it once and require the exact `notifications_all` route in the fresh post-action observation.
 3. Observe all mounted notification cards raw before filtering. Do not narrow the read to one activity type.
-4. If exact `notifications_show_more_after_<count>_<digest>_members_<identities>` is mapped, activate that
-   continuation once and require the transaction-bound All-category authority, the exact Notifications-All route,
-   and a stable fresh
-   inventory containing at least one exact YAML-declared content-link URI identity absent from the frozen
-   pre-action inventory.
+4. If exact `notifications_show_more_results` is mapped, activate that continuation once. Its public key,
+   description, and action card are stable semantic authority; mounted candidates and inventory identities are
+   not encoded in the Taey-facing card while continuation is mandatory. After the exact live target/ref is
+   re-resolved inside the one-action child, Hands freezes that immediate inventory in one process-local context,
+   consumes and clears it exactly once, then requires the transaction-bound All-category authority, the exact
+   Notifications-All route, and a stable fresh inventory containing at least one exact YAML-declared content-link
+   URI identity absent from that immediate pre-action inventory.
    Mounted article counts may shrink when LinkedIn virtualizes the refreshed tree, so monotonic DOM growth is not
    an action postcondition. Pure unmount or reorder is not novelty. Candidate projection remains independently
    exact. Each further continuation is a new transition with a new observation.
