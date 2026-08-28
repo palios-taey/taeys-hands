@@ -811,12 +811,43 @@ class ConsultationRuntime:
             )
         )
 
-    def _address_bar_text_equals(self, expected: str) -> bool:
+    def _address_bar_exact_paste_values(self, expected: str) -> tuple[str, ...]:
+        urls = self.cfg.get('urls') or {}
+        if expected != urls.get('fresh'):
+            return (expected,)
+        configured = urls.get('address_bar_exact_paste_values')
+        if configured is None:
+            return (expected,)
+        if (
+            not isinstance(configured, list)
+            or not configured
+            or any(not isinstance(value, str) or not value for value in configured)
+            or len(set(configured)) != len(configured)
+            or expected not in configured
+        ):
+            raise ValueError(
+                'urls.address_bar_exact_paste_values must be a non-empty unique '
+                'string list containing the exact navigation target'
+            )
+        return tuple(configured)
+
+    def _address_bar_exact_paste_proof(
+        self,
+        allowed_values: tuple[str, ...],
+    ) -> dict[str, str | None]:
         entry = self._address_bar_entry()
         if entry is None:
-            return False
+            return {
+                'address_bar_observed_text': None,
+                'address_bar_matched_value': None,
+            }
         states = {str(state).lower() for state in (entry.states or [])}
-        return 'focused' in states and str(entry.text or '') == expected
+        observed = str(entry.text or '')
+        matched = observed if 'focused' in states and observed in allowed_values else None
+        return {
+            'address_bar_observed_text': observed,
+            'address_bar_matched_value': matched,
+        }
 
     def paste(self, text: str) -> bool:
         self._sync_platform_io_display()
@@ -929,6 +960,7 @@ class ConsultationRuntime:
 
     def navigate(self, url: str, verify_change: bool = False) -> bool:
         started = time.monotonic()
+        address_bar_proof: dict[str, Any] = {}
         self.last_navigation_evidence = {
             'target_url': url,
             'verify_change': bool(verify_change),
@@ -944,8 +976,19 @@ class ConsultationRuntime:
                 'failed_substep': failed_substep,
                 'result': result,
                 'elapsed_ms': round((time.monotonic() - started) * 1000.0, 1),
+                **address_bar_proof,
                 **details,
             }
+
+        try:
+            address_bar_exact_paste_values = self._address_bar_exact_paste_values(url)
+        except ValueError as exc:
+            record('HALT', 'address_bar_paste_contract', contract_error=str(exc))
+            logger.error('navigate: invalid address-bar paste contract: %s', exc)
+            return False
+        address_bar_proof['address_bar_allowed_values'] = list(
+            address_bar_exact_paste_values
+        )
 
         # Close stale GTK file dialogs FIRST — they intercept the address-bar
         # focus key (ctrl+l) and leave the composer focused, so the URL gets
@@ -996,11 +1039,14 @@ class ConsultationRuntime:
             logger.error('navigate: URL paste failed in focused address bar')
             self._dismiss_address_bar()
             return False
-        if not self.wait_until(
-            lambda: self._address_bar_text_equals(url),
-            timeout=3.0,
-            interval=0.2,
-        ):
+        def exact_pasted_url_proven() -> bool:
+            proof = self._address_bar_exact_paste_proof(
+                address_bar_exact_paste_values
+            )
+            address_bar_proof.update(proof)
+            return proof['address_bar_matched_value'] is not None
+
+        if not self.wait_until(exact_pasted_url_proven, timeout=3.0, interval=0.2):
             record('HALT', 'exact_pasted_url', navigation_key=nav_key)
             logger.error('navigate: exact pasted URL was not proven in address bar')
             self._dismiss_address_bar()

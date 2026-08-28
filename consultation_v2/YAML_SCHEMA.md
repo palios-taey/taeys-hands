@@ -113,3 +113,9 @@ only to `build_snapshot`; menu and app-root projections continue pruning all Fir
 `exact_elements` remains an exclusion list for known browser-chrome leaks. It is never interpreted
 as an allowlist. Platform YAMLs must not duplicate the address bar, and Python must not rediscover it
 with a substring or another locator grammar.
+
+`urls.address_bar_exact_paste_values` is an optional platform-owned list of exact Firefox
+renderings for the pre-Return `urls.fresh` proof. It must be non-empty, unique, and contain the
+literal `urls.fresh` value. When absent, the only allowed rendering is the literal `urls.fresh`
+value. This field does not relax post-Return navigation: the runtime still requires the absolute
+document URL to match the target and a populated canonical platform tree.
