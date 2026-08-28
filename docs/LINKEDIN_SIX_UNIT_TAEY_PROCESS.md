@@ -114,6 +114,7 @@ Notifications
    or exact closed-reason exclusions for every mounted actionable candidate
 -> zero or more separately receipted Show more transitions only after exclusions
 -> selected thread (separate scroll when required, then open)
+-> zero or more separately receipted exact one-action thread expansions
 -> optional Like when privately authorized
 -> frozen paste
 -> final comment submit
@@ -167,7 +168,11 @@ has not been completely observed.
    `scroll_into_view` primitive once, require that same exact activity/body key fully inside the actual display,
    and observe again. Only when the fresh observation declares `mapped_pointer_activate`, invoke that exact key
    once and require the same activity, same body digest, and visible target-scoped comment controls. Read the
-   complete visible thread, including every visible author reply, before any draft exists.
+   complete visible thread, including every visible author reply, before any draft exists. If the displayed
+   comment count exceeds the typed visible-row count, activate exactly one mapped
+   `selected_post_thread_expand_activity_<id>_body_<digest>_total_<total>_visible_<before>_more_<n>` control
+   with its declared pointer primitive. Require a fresh receipt proving the same activity/body/total and exactly
+   N additional typed rows. Repeat one receipted action at a time until displayed count equals typed rows.
 10. Like, compose, gate, send, rendered-comment verification, and durable touch persistence are separate effects.
    They may execute only after each effect has its own current public YAML mapping and production qualification.
 

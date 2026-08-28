@@ -402,6 +402,7 @@ def selected_snapshot(
     *,
     count: int = 2,
     visible: bool = True,
+    visible_count: int | None = None,
     repost: bool = False,
 ) -> Snapshot:
     document = Node('document web', 'LinkedIn post')
@@ -431,20 +432,32 @@ def selected_snapshot(
     refs = [ref(post_root), ref(body, text=BODY)]
     if count > 0:
         refs.append(ref(count_node))
-    if visible and count >= 1:
-        comment_a, control_a, comment_refs_a = comment_root(
-            'Alice Jones',
-            'First exact comment.',
+    mounted_count = (
+        min(count, 2) if visible_count is None and visible else
+        0 if visible_count is None else visible_count
+    )
+    if mounted_count < 0 or mounted_count > count:
+        raise ValueError('visible_count must be within the declared count')
+    authors = [
+        'Alice Jones',
+        'Bob Example',
+        'Carol North',
+        'Diego West',
+        'Eve Stone',
+        'Frank Ocean',
+        'Grace Hopper',
+        'Heidi Fields',
+        'Ivan Brooks',
+    ]
+    for index in range(mounted_count):
+        comment, _control, comment_refs = comment_root(
+            authors[index],
+            'First exact comment.' if index == 0 else '' if index == 1 else (
+                f'Exact comment {index + 1}.'
+            ),
         )
-        post_card.add(comment_a)
-        refs.extend([ref(comment_a), *comment_refs_a])
-    if visible and count >= 2:
-        comment_b, control_b, comment_refs_b = comment_root(
-            'Bob Example',
-            '',
-        )
-        post_card.add(comment_b)
-        refs.extend([ref(comment_b), *comment_refs_b])
+        post_card.add(comment)
+        refs.extend([ref(comment), *comment_refs])
     post_root.add(post_card)
     document.add(post_root)
     selected_key = f'{manual.SELECTED_POST_PREFIX}{ACTIVITY_A}'
@@ -463,6 +476,24 @@ def selected_snapshot(
         mapped={selected_key: [selected]},
         unknown=refs,
     )
+
+
+def with_thread_expander(snapshot: Snapshot, more_count: int) -> Snapshot:
+    post_root = next(
+        item.atspi_obj
+        for item in snapshot.unknown
+        if item.role == 'list item'
+    )
+    post_card = post_root.get_child_at_index(0)
+    suffix = 'comment' if more_count == 1 else 'comments'
+    expander = Node(
+        'push button',
+        f'See {more_count} more {suffix}',
+        states=['enabled', 'focusable'],
+    )
+    post_card.add(expander)
+    snapshot.unknown.append(ref(expander))
+    return snapshot
 
 
 def with_thread_opener(snapshot: Snapshot, count: int = 2) -> Snapshot:
@@ -1351,8 +1382,64 @@ def main() -> int:
         barrier(thread_card),
         receipts[-1]['receipt_sha256'],
     ))
+    thread_open_receipts = list(receipts)
 
-    selected = selected_snapshot()
+    partial_thread = manual.augment_snapshot(with_thread_expander(
+        selected_snapshot(count=9, visible_count=2),
+        6,
+    ))
+    first_expand = compile_preparation_step(
+        partial_thread,
+        REVISION,
+        selected_envelope,
+        receipts,
+    )
+    require(
+        first_expand['phase'] == 'thread_expand'
+        and first_expand['method'] == 'mapped_pointer_activate'
+        and '_total_9_visible_2_more_6' in first_expand['element'],
+        'partial selected thread did not compile one exact expansion',
+    )
+    eight_visible = manual.augment_snapshot(with_thread_expander(
+        selected_snapshot(count=9, visible_count=8),
+        1,
+    ))
+    first_expand_barrier = barrier(first_expand)
+    first_expand_barrier['postcondition_receipt'] = manual.verify_post_action(
+        eight_visible,
+        first_expand['element'],
+        first_expand['verification_operation'],
+    )
+    receipts.append(accept_preparation_step(
+        first_expand,
+        first_expand_barrier,
+        receipts[-1]['receipt_sha256'],
+    ))
+    second_expand = compile_preparation_step(
+        eight_visible,
+        REVISION,
+        selected_envelope,
+        receipts,
+    )
+    require(
+        second_expand['phase'] == 'thread_expand'
+        and '_total_9_visible_8_more_1' in second_expand['element'],
+        'remaining selected thread did not compile its exact singular expansion',
+    )
+    selected = manual.augment_snapshot(
+        selected_snapshot(count=9, visible_count=9)
+    )
+    second_expand_barrier = barrier(second_expand)
+    second_expand_barrier['postcondition_receipt'] = manual.verify_post_action(
+        selected,
+        second_expand['element'],
+        second_expand['verification_operation'],
+    )
+    receipts.append(accept_preparation_step(
+        second_expand,
+        second_expand_barrier,
+        receipts[-1]['receipt_sha256'],
+    ))
     ready_draft = compile_preparation_step(
         selected,
         REVISION,
@@ -1365,22 +1452,27 @@ def main() -> int:
     )
     source = ready_draft['input']['source']
     require(
-        source['thread']['exact_comment_count'] == 2
-        and len(source['thread']['typed_rows']) == 2
+        source['thread']['exact_comment_count'] == 9
+        and len(source['thread']['typed_rows']) == 9
         and source['thread']['typed_rows'][0]['kind'] == 'text'
         and source['thread']['typed_rows'][1]['kind'] == 'media_link_only',
-        'selected thread was not captured as exact typed rows',
+        'expanded selected thread was not captured as exact typed rows',
+    )
+    require(
+        source['thread_open_receipt_sha256'] == receipts[-3]['receipt_sha256']
+        and source['thread_ready_receipt_sha256'] == receipts[-1]['receipt_sha256'],
+        'expanded selected source lost open-to-ready receipt provenance',
     )
 
     repost_ready = compile_preparation_step(
-        selected_snapshot(repost=True),
+        selected_snapshot(count=9, visible_count=9, repost=True),
         REVISION,
         selected_envelope,
         receipts,
     )
     require(
         repost_ready['state'] == 'ready_for_private_draft'
-        and repost_ready['input']['source']['thread']['exact_comment_count'] == 2,
+        and repost_ready['input']['source']['thread']['exact_comment_count'] == 9,
         'exact repost structure did not produce private draft input',
     )
 
@@ -1413,13 +1505,15 @@ def main() -> int:
         zero_snapshot,
         REVISION,
         selected_envelope,
-        receipts,
+        thread_open_receipts,
     )
     zero_source = zero_ready['input']['source']
     require(
         zero_ready['state'] == 'ready_for_private_draft'
         and zero_source['thread_open_receipt_sha256']
-        == receipts[-1]['receipt_sha256']
+        == thread_open_receipts[-1]['receipt_sha256']
+        and zero_source['thread_ready_receipt_sha256']
+        == thread_open_receipts[-1]['receipt_sha256']
         and zero_source['thread']['exact_comment_count'] == 0
         and zero_source['thread']['typed_rows'] == [],
         'exact zero thread was not represented',
@@ -1438,7 +1532,8 @@ def main() -> int:
             selected_activity=ACTIVITY_A,
             notification_inventory_sha256=artifact['inventory_sha256'],
             selection_sha256=selection['selection_sha256'],
-            thread_open_receipt=receipts[-1],
+            thread_open_receipt=thread_open_receipts[-1],
+            thread_ready_receipt=thread_open_receipts[-1],
             transaction_sha256=transaction_sha256,
         ),
         'thread count mismatch became ready',

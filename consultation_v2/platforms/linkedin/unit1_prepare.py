@@ -15,6 +15,7 @@ from consultation_v2.platforms.linkedin.manual import (
     NOTIFICATIONS_CONTINUATION,
     NOTIFICATIONS_NAVIGATION,
     SELECTED_POST_PREFIX,
+    SELECTED_THREAD_EXPAND_PREFIX,
     SELECTED_THREAD_OPEN_PREFIX,
     _comment_relative_text,
     _manual_comment_contract,
@@ -47,6 +48,12 @@ _ACTIVITY = re.compile(r'^[0-9]+$')
 _AGE = re.compile(r'^(?P<count>[1-9][0-9]*)(?P<unit>[smhdw])$')
 _CONTINUATION = re.compile(
     rf'^{re.escape(NOTIFICATIONS_CONTINUATION)}$'
+)
+_THREAD_EXPAND = re.compile(
+    rf'^{re.escape(SELECTED_THREAD_EXPAND_PREFIX)}'
+    r'(?P<activity>[0-9]+)_body_(?P<body>[0-9a-f]{64})_'
+    r'total_(?P<total>[1-9][0-9]*)_'
+    r'visible_(?P<visible>[1-9][0-9]*)_more_(?P<more>[1-9][0-9]*)$'
 )
 
 _ENVELOPE_KEYS = frozenset({
@@ -134,7 +141,8 @@ _PHASE_TRANSITIONS = {
     }),
     'notification_candidate': frozenset({'thread_scroll', 'thread_open'}),
     'thread_scroll': frozenset({'thread_open'}),
-    'thread_open': frozenset(),
+    'thread_open': frozenset({'thread_expand'}),
+    'thread_expand': frozenset({'thread_expand'}),
 }
 _PHASE_METHODS = {
     'notifications_navigation': 'activate',
@@ -142,6 +150,7 @@ _PHASE_METHODS = {
     'notification_candidate': 'activate',
     'thread_scroll': 'scroll_into_view',
     'thread_open': 'mapped_pointer_activate',
+    'thread_expand': 'mapped_pointer_activate',
 }
 
 
@@ -641,6 +650,7 @@ def extract_selected_source(
     notification_inventory_sha256: str,
     selection_sha256: str,
     thread_open_receipt: Mapping[str, Any],
+    thread_ready_receipt: Mapping[str, Any],
     transaction_sha256: str,
 ) -> dict[str, Any]:
     _require_linkedin_snapshot(snapshot)
@@ -665,6 +675,18 @@ def extract_selected_source(
             'selected source requires an exact thread-open receipt'
         )
     thread_open_receipt_sha256 = str(thread_open_receipt['receipt_sha256'])
+    thread_ready_payload = _receipt_payload(thread_ready_receipt)
+    if (
+        thread_ready_payload.get('transaction_sha256') != transaction_sha256
+        or thread_ready_payload.get('phase') not in {'thread_open', 'thread_expand'}
+        or thread_ready_payload.get('postcondition_passed') is not True
+        or thread_ready_payload.get('fresh_observation_required') is not True
+        or thread_ready_payload.get('next_step_authorized') is not True
+    ):
+        raise LinkedInUnit1PreparationError(
+            'selected source requires an exact thread-ready receipt'
+        )
+    thread_ready_receipt_sha256 = str(thread_ready_receipt['receipt_sha256'])
     if not isinstance(selected_activity, str) or _ACTIVITY.fullmatch(
         selected_activity
     ) is None:
@@ -768,6 +790,7 @@ def extract_selected_source(
         'notification_inventory_sha256': notification_inventory_sha256,
         'selection_sha256': selection_sha256,
         'thread_open_receipt_sha256': thread_open_receipt_sha256,
+        'thread_ready_receipt_sha256': thread_ready_receipt_sha256,
         'transaction_sha256': transaction_sha256,
         'post': {
             'body': body_text,
@@ -1151,9 +1174,41 @@ def compile_preparation_step(
             element_key=thread_key,
         )
 
-    if previous_phase != 'thread_open':
+    if previous_phase not in {'thread_open', 'thread_expand'}:
         raise LinkedInUnit1PreparationError(
             'preparation receipt history cannot produce draft input'
+        )
+    expand_keys = [
+        key
+        for key, matches in snapshot.mapped.items()
+        if (
+            (match := _THREAD_EXPAND.fullmatch(key)) is not None
+            and match.group('activity') == activity
+            and match.group('body') == body_sha256
+            and matches
+        )
+    ]
+    if len(expand_keys) > 1:
+        raise LinkedInUnit1PreparationError(
+            'selected thread expansion is ambiguous'
+        )
+    if expand_keys:
+        return _preparation_card(
+            snapshot=snapshot,
+            snapshot_revision=snapshot_revision,
+            transaction_sha256=transaction_sha256,
+            sequence=sequence,
+            phase='thread_expand',
+            element_key=expand_keys[0],
+        )
+    thread_open_receipts = [
+        receipt
+        for receipt in receipts
+        if receipt.get('phase') == 'thread_open'
+    ]
+    if len(thread_open_receipts) != 1:
+        raise LinkedInUnit1PreparationError(
+            'selected source requires one exact thread-open receipt'
         )
     source = extract_selected_source(
         snapshot,
@@ -1163,7 +1218,8 @@ def compile_preparation_step(
             'notification_inventory_sha256'
         ],
         selection_sha256=selection['selection_sha256'],
-        thread_open_receipt=receipts[-1],
+        thread_open_receipt=thread_open_receipts[0],
+        thread_ready_receipt=receipts[-1],
         transaction_sha256=transaction_sha256,
     )
     selected_notification = {
