@@ -525,15 +525,18 @@ def _grok_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
 
     fresh_url = urls.get("fresh")
     exact_url = raw_spec.get("exact_url")
+    detect_scope = raw_spec.get("detect_scope")
     detect = raw_spec.get("detect")
     detect_states = raw_spec.get("detect_states")
     blocked_state_absent = raw_spec.get("blocked_state_absent")
     recovery = raw_spec.get("recovery")
     if not isinstance(fresh_url, str) or exact_url != fresh_url:
         raise RuntimeError("grok pre-send exception must bind the exact fresh URL")
+    if detect_scope not in {"base", "app_root_snapshot"}:
+        raise RuntimeError("grok pre-send exception detect scope is invalid")
     if (
         not isinstance(detect, list)
-        or len(detect) != 3
+        or not detect
         or len(detect) != len(set(detect))
         or not all(isinstance(key, str) and key in element_map for key in detect)
     ):
@@ -561,6 +564,8 @@ def _grok_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
     if not isinstance(recovery, dict):
         raise RuntimeError("grok pre-send exception has no recovery mapping")
     element = recovery.get("element")
+    selected_model = recovery.get("selected_model")
+    absence_receipt_field = recovery.get("absence_receipt_field")
     absent_after_recovery = recovery.get("absent_after_recovery")
     postcondition = recovery.get("postcondition")
     observation = recovery.get("observation")
@@ -568,9 +573,16 @@ def _grok_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
         recovery.get("action") != "click"
         or recovery.get("max_attempts") != 1
         or element not in detect
-        or element != "grok_bot_dismiss"
     ):
-        raise RuntimeError("grok pre-send recovery must click exact Dismiss once")
+        raise RuntimeError("grok pre-send recovery must click one exact detected control once")
+    if not isinstance(selected_model, bool):
+        raise RuntimeError("grok pre-send recovery selected-model contract is invalid")
+    if (
+        not isinstance(absence_receipt_field, str)
+        or absence_receipt_field
+        not in {"interstitial_absent", "model_menu_absent"}
+    ):
+        raise RuntimeError("grok pre-send recovery absence receipt field is invalid")
     if absent_after_recovery != detect:
         raise RuntimeError("grok pre-send recovery must remove the complete exception set")
     if not isinstance(postcondition, dict) or postcondition.get("scope") != "base":
@@ -616,14 +628,18 @@ def _grok_pre_send_recovery_spec(exception_key: str) -> dict[str, object]:
         raise RuntimeError("grok pre-send recovery sample bound is invalid")
     return {
         "exact_url": exact_url,
+        "detect_scope": detect_scope,
         "detect": tuple(detect),
         "detect_states": {
             key: tuple(states) for key, states in detect_states.items()
         },
         "blocked_state_absent": tuple(blocked_state_absent),
         "element": element,
+        "selected_model": selected_model,
+        "absence_receipt_field": absence_receipt_field,
         "exact_singletons": tuple(exact_singletons),
         "absent_after_recovery": tuple(absent),
+        "postcondition_scope": str(postcondition["scope"]),
         "stable_cycles": stable_cycles,
         "max_samples": max_samples,
     }
@@ -1243,8 +1259,17 @@ def _grok_pre_send_recovery_content(
     )
     element = str(spec["element"])
     exact_url = str(spec["exact_url"])
+    detect_scope = str(spec["detect_scope"])
+    selected_model = bool(spec["selected_model"])
+    absence_receipt_field = str(spec["absence_receipt_field"])
+    postcondition_scope = str(spec["postcondition_scope"])
     stable_cycles = int(spec["stable_cycles"])
     max_samples = int(spec["max_samples"])
+    selection_guard = (
+        f"Do not select any model except {element} through the one authorized click. "
+        if selected_model
+        else "Do not select a model. "
+    )
     state_contract = "; ".join(
         f"{key} states include {', '.join(str(state) for state in states)}"
         for key, states in detect_states.items()
@@ -1254,48 +1279,51 @@ def _grok_pre_send_recovery_content(
         f"The terminal source identity is {source_terminal_identity}; never invoke or retry "
         "that identity. This turn has a distinct new seat identity. Use drive_chat only and "
         "pass element keys only, never opaque refs. Do not navigate, attach, paste, send, "
-        "extract, select a model, open a menu, focus, press a key, scroll, retry, or click any "
+        f"extract, open a menu, focus, press a key, scroll, or retry. {selection_guard}Do not click any "
         f"control except {element} exactly once.\n"
-        f"1. observe scope=base exactly once. Require current_url exactly {exact_url}, one "
+        f"1. observe scope={detect_scope} exactly once. Require current_url exactly {exact_url}, one "
         f"populated Grok tree, exactly one each of {', '.join(detect)}, and {state_contract}. "
         f"Require zero each of {', '.join(blocked_state_absent)}. Record "
         "classification_revision_1 and exact pre-recovery match counts. Any missing, duplicate, "
-        "renamed, different, or additional mapped interstitial control is a first mismatch and "
+        "renamed, different, or additional mapped exception control is a first mismatch and "
         "ends the turn without mutation.\n"
-        "2. observe scope=base exactly once more without mutation. Require the same exact URL, "
-        "singleton interstitial controls, states, and absent controls. Record "
+        f"2. observe scope={detect_scope} exactly once more without mutation. Require the same exact URL, "
+        "singleton exception controls, states, and absent controls. Record "
         "classification_revision_2 and exact pre-recovery match counts. Any difference ends the "
         "turn without mutation.\n"
         f"3. click element={element} exactly once. Require performed=true and "
-        "performed_primitive=click. This is the only mutation authorized. Never click "
-        "grok_bot_get.\n"
+        "performed_primitive=click. This is the only mutation authorized. Never click any "
+        "other control.\n"
         f"4. Take at most {max_samples} fresh base observations. A sample matches only when "
         f"current_url is exactly {exact_url}, the Grok tree is populated, exactly one each of "
         f"{', '.join(exact_singletons)} is mapped, and every element in "
         f"{', '.join(absent_after_recovery)} is absent. Require {stable_cycles} consecutive "
         "matching samples. A nonmatching settling sample authorizes only the next read-only base "
-        "observation; it never authorizes another mutation. If an interstitial remains after the "
+        "observation; it never authorizes another mutation. If the detected exception remains after the "
         "click, an attachment, Send, or Stop control appears, a required fresh control is missing "
         "or duplicated, the URL changes, or the sample bound ends without the stable "
         "postcondition, return a FIRST-MISMATCH STOP REPORT with every observation revision and "
         "exact match count, then stop.\n"
         "5. After the stable barrier, make no more drive_chat calls. Return a GROK PRE-SEND "
         "RECOVERY RECEIPT containing platform, display, source_terminal_identity, exception_key, "
-        "classification_revision_1, classification_revision_2, pre_recovery_counts_1, "
-        "pre_recovery_counts_2, clicked_element, click_count, performed_primitive, "
-        "postcondition_elements, stable_cycles, post_recovery_revision_1, "
+        "classification_scope, classification_revision_1, classification_revision_2, "
+        "pre_recovery_counts_1, pre_recovery_counts_2, pre_recovery_states_1, "
+        "pre_recovery_states_2, clicked_element, click_count, performed_primitive, "
+        "postcondition_scope, postcondition_elements, stable_cycles, post_recovery_revision_1, "
         "post_recovery_revision_2, post_recovery_counts_1, post_recovery_counts_2, "
-        "interstitial_absent, observe_count, navigation_count, attachment_count, paste_count, "
+        f"{absence_receipt_field}, observe_count, navigation_count, attachment_count, paste_count, "
         "send_count, selected_model, sent, and recovered. Use exact values platform=grok, "
         f"display={display}, source_terminal_identity={source_terminal_identity}, "
         f"exception_key={exception_key}, clicked_element={element}, click_count=1, "
-        f"performed_primitive=click, stable_cycles={stable_cycles}, interstitial_absent=true, "
+        f"classification_scope={detect_scope}, postcondition_scope={postcondition_scope}, "
+        f"performed_primitive=click, stable_cycles={stable_cycles}, {absence_receipt_field}=true, "
         "navigation_count=0, attachment_count=0, paste_count=0, send_count=0, "
-        "selected_model=false, sent=false, and recovered=true. observe_count must equal two plus "
+        f"selected_model={str(selected_model).lower()}, sent=false, and recovered=true. observe_count must equal two plus "
         "the exact number of post-click barrier samples. The two post-recovery revisions and "
-        "count maps must be the final two matching barrier samples. Write each of the four count "
-        "maps as one unquoted compact JSON object on its own field-name line, for example "
-        "pre_recovery_counts_1: {\"grok_bot_dialog\":1}. Write observe_count on its own "
+        "count maps must be the final two matching barrier samples. Write each count or state "
+        "map as one unquoted compact JSON object on its own field-name line. Each pre-recovery "
+        "state map must contain every detected element mapped to exactly its required-state list. "
+        "For example pre_recovery_counts_1: {\"grok_bot_dialog\":1}. Write observe_count on its own "
         "field-name line. Then halt."
     )
 
@@ -2424,6 +2452,39 @@ def _grok_recovery_count_map(receipt: str, field: str) -> dict[str, int]:
     ):
         raise RuntimeError(
             f"Grok pre-send recovery receipt has invalid counts in {field}"
+        )
+    return value
+
+
+def _grok_recovery_state_map(receipt: str, field: str) -> dict[str, list[str]]:
+    matches = re.findall(
+        rf"(?im)^\s*(?:[-*]\s*)?`?{re.escape(field)}`?\s*[:=]\s*"
+        r"`?(\{[^\n`]+\})`?\s*$",
+        receipt,
+    )
+    if len(matches) != 1:
+        raise RuntimeError(
+            f"Grok pre-send recovery receipt has {len(matches)} exact {field} maps"
+        )
+    try:
+        value = json.loads(matches[0])
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(
+            f"Grok pre-send recovery receipt has invalid JSON in {field}"
+        ) from exc
+    if (
+        not isinstance(value, dict)
+        or not all(isinstance(key, str) for key in value)
+        or not all(
+            isinstance(states, list)
+            and states
+            and len(states) == len(set(states))
+            and all(isinstance(state, str) and state for state in states)
+            for states in value.values()
+        )
+    ):
+        raise RuntimeError(
+            f"Grok pre-send recovery receipt has invalid states in {field}"
         )
     return value
 
@@ -4326,26 +4387,31 @@ def main() -> int:
             assert source_terminal_identity is not None
             spec = _grok_pre_send_recovery_spec(exception_key)
             lowered_receipt = receipt.lower()
+            absence_receipt_field = str(spec["absence_receipt_field"])
             required_receipt_fields = (
                 "grok pre-send recovery receipt",
                 "platform",
                 "display",
                 "source_terminal_identity",
                 "exception_key",
+                "classification_scope",
                 "classification_revision_1",
                 "classification_revision_2",
                 "pre_recovery_counts_1",
                 "pre_recovery_counts_2",
+                "pre_recovery_states_1",
+                "pre_recovery_states_2",
                 "clicked_element",
                 "click_count",
                 "performed_primitive",
+                "postcondition_scope",
                 "postcondition_elements",
                 "stable_cycles",
                 "post_recovery_revision_1",
                 "post_recovery_revision_2",
                 "post_recovery_counts_1",
                 "post_recovery_counts_2",
-                "interstitial_absent",
+                absence_receipt_field,
                 "observe_count",
                 "navigation_count",
                 "attachment_count",
@@ -4370,16 +4436,18 @@ def main() -> int:
                 "display": args.display,
                 "source_terminal_identity": source_terminal_identity,
                 "exception_key": exception_key,
+                "classification_scope": str(spec["detect_scope"]),
                 "clicked_element": str(spec["element"]),
                 "click_count": "1",
                 "performed_primitive": "click",
+                "postcondition_scope": str(spec["postcondition_scope"]),
                 "stable_cycles": str(spec["stable_cycles"]),
-                "interstitial_absent": "true",
+                absence_receipt_field: "true",
                 "navigation_count": "0",
                 "attachment_count": "0",
                 "paste_count": "0",
                 "send_count": "0",
-                "selected_model": "false",
+                "selected_model": str(bool(spec["selected_model"])).lower(),
                 "sent": "false",
                 "recovered": "true",
             }
@@ -4428,12 +4496,21 @@ def main() -> int:
                 **{key: 1 for key in detect},
                 **{key: 0 for key in blocked_state_absent},
             }
+            expected_pre_states = {
+                str(key): [str(state) for state in states]
+                for key, states in dict(spec["detect_states"]).items()
+            }
             expected_post_counts = {
                 **{key: 1 for key in exact_singletons},
                 **{key: 0 for key in absent_after_recovery},
             }
             for field in ("pre_recovery_counts_1", "pre_recovery_counts_2"):
                 if _grok_recovery_count_map(receipt, field) != expected_pre_counts:
+                    raise RuntimeError(
+                        f"Grok pre-send recovery response has invalid {field}"
+                    )
+            for field in ("pre_recovery_states_1", "pre_recovery_states_2"):
+                if _grok_recovery_state_map(receipt, field) != expected_pre_states:
                     raise RuntimeError(
                         f"Grok pre-send recovery response has invalid {field}"
                     )

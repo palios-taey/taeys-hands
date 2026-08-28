@@ -346,6 +346,7 @@ workflow:
     exceptions:
       meet_grok_bot:
         exact_url: https://grok.com/
+        detect_scope: base
         detect:
           - grok_bot_dialog
           - grok_bot_dismiss
@@ -372,6 +373,8 @@ workflow:
           action: click
           element: grok_bot_dismiss
           max_attempts: 1
+          selected_model: false
+          absence_receipt_field: interstitial_absent
           absent_after_recovery:
             - grok_bot_dialog
             - grok_bot_dismiss
@@ -391,6 +394,76 @@ workflow:
               - remove_attachment
               - send_button
               - stop_button
+          observation:
+            refresh_policy: invalidate_reacquire
+            stable_cycles: 2
+            interval_ms: 250
+            timeout_ms: 12000
+      model_menu_open:
+        exact_url: https://grok.com/
+        detect_scope: base
+        detect:
+          - model_auto
+          - model_fast
+          - model_expert
+          - model_heavy
+        detect_states:
+          model_auto:
+            - showing
+            - focusable
+            - enabled
+          model_fast:
+            - showing
+            - focusable
+            - enabled
+          model_expert:
+            - showing
+            - focusable
+            - enabled
+          model_heavy:
+            - showing
+            - focusable
+            - enabled
+        blocked_state_absent:
+          - grok_bot_dialog
+          - grok_bot_dismiss
+          - grok_bot_get
+          - uploaded_file_chip
+          - remove_attachment
+          - send_button
+          - stop_button
+          - copy_button
+        recovery:
+          action: click
+          element: model_heavy
+          max_attempts: 1
+          selected_model: true
+          absence_receipt_field: model_menu_absent
+          absent_after_recovery:
+            - model_auto
+            - model_fast
+            - model_expert
+            - model_heavy
+          postcondition:
+            scope: base
+            exact_singletons:
+              - input
+              - attach_trigger
+              - model_selector
+              - new_chat
+            absent:
+              - model_auto
+              - model_fast
+              - model_expert
+              - model_heavy
+              - grok_bot_dialog
+              - grok_bot_dismiss
+              - grok_bot_get
+              - uploaded_file_chip
+              - remove_attachment
+              - send_button
+              - stop_button
+              - copy_button
           observation:
             refresh_policy: invalidate_reacquire
             stable_cycles: 2
