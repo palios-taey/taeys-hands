@@ -166,14 +166,22 @@ def _validate_yaml() -> list[str]:
         errors.append(f'{YAML_PATH}: engagement operation boundary drifted')
     navigation = engagement.get('navigation') or {}
     if navigation.get('target') != {
-        'scope': 'current_platform_document',
+        'scope': 'exact_linkedin_navigation_preload_document',
+        'ancestor_document': {
+            'scheme': 'https',
+            'host': 'www.linkedin.com',
+            'normalized_path': '/preload',
+            'exact_query': {'_bprMode': 'vanilla'},
+        },
         'role': 'link',
-        'states_include': ['showing', 'enabled'],
+        'states_exact': ['enabled', 'focusable', 'showing'],
         'uri': {
             'scheme': 'https',
             'host': 'www.linkedin.com',
             'normalized_path': '/notifications',
+            'exact_query': {'filter': 'all', 'refresh': 'true'},
         },
+        'action_names_exact': ['jump'],
     } or navigation.get('action') != {'name': 'jump', 'index': 0}:
         errors.append(f'{YAML_PATH}: Notifications exact jump contract drifted')
     if navigation.get('manual_post_action') != {
@@ -1146,14 +1154,16 @@ def _validate_restore_projection() -> list[str]:
         uri: str,
         document_url: str,
         action_names: tuple[str, ...] = ('jump',),
+        role: str = 'link',
+        states: tuple[str, ...] = ('enabled', 'focusable', 'showing'),
     ) -> ElementRef:
         return ElementRef(
             key=None,
             name=name,
-            role='link',
+            role=role,
             x=None,
             y=None,
-            states=['showing', 'enabled'],
+            states=list(states),
             atspi_obj=Accessible(uri, document_url, action_names),
         )
 
@@ -1166,13 +1176,15 @@ def _validate_restore_projection() -> list[str]:
 
     errors: list[str] = []
     current_name = 'Notifications, 15 new notifications'
-    notifications_uri = 'https://www.linkedin.com/notifications'
+    notifications_uri = (
+        'https://www.linkedin.com/notifications?filter=all&refresh=true'
+    )
     return_url = 'https://www.linkedin.com/jobs/search-results?keywords=engineering'
     preload_url = 'https://www.linkedin.com/preload/?_bprMode=vanilla'
     samples = [
         snapshot(
-            notifications(current_name, notifications_uri, return_url),
             notifications('15 new notifications Notifications', notifications_uri, preload_url),
+            notifications(current_name, notifications_uri, return_url),
         )
         for _sample in range(3)
     ]
@@ -1191,15 +1203,15 @@ def _validate_restore_projection() -> list[str]:
             and restored == start
             and isinstance(digest, str)
         ):
-            errors.append('current-document Notifications authority was not exact')
+            errors.append('preload-document Notifications authority was not exact')
             break
         digests.append(digest)
     if len(digests) != 3 or len(set(digests)) != 1:
         errors.append('three read-only Notifications samples did not stabilize')
 
     changed_name = snapshot(
-        notifications('Notifications, 933 new notifications', notifications_uri, return_url),
         notifications('933 new notifications Notifications', notifications_uri, preload_url),
+        notifications('Notifications, 933 new notifications', notifications_uri, return_url),
     )
     changed_target, changed_count = _notifications_target(changed_name)
     changed_start = observe_engagement_start(changed_name, return_url)
@@ -1214,18 +1226,75 @@ def _validate_restore_projection() -> list[str]:
 
     failures = {
         'zero': snapshot(),
-        'duplicate_current_document': snapshot(
+        'duplicate_preload_document': snapshot(
+            notifications(current_name, notifications_uri, preload_url),
+            notifications('Notifications, 1 new notification', notifications_uri, preload_url),
+        ),
+        'current_document_only': snapshot(
             notifications(current_name, notifications_uri, return_url),
-            notifications('Notifications, 1 new notification', notifications_uri, return_url),
         ),
-        'preload_only': snapshot(
-            notifications('15 new notifications Notifications', notifications_uri, preload_url),
+        'preload_extra_query': snapshot(
+            notifications(
+                current_name,
+                notifications_uri,
+                preload_url + '&extra=true',
+            ),
         ),
-        'wrong_uri': snapshot(
-            notifications(current_name, 'https://www.linkedin.com/feed/', return_url),
+        'preload_wrong_host': snapshot(
+            notifications(
+                current_name,
+                notifications_uri,
+                'https://example.com/preload/?_bprMode=vanilla',
+            ),
+        ),
+        'target_extra_query': snapshot(
+            notifications(
+                current_name,
+                notifications_uri + '&extra=true',
+                preload_url,
+            ),
+        ),
+        'target_wrong_path': snapshot(
+            notifications(
+                current_name,
+                'https://www.linkedin.com/feed/?filter=all&refresh=true',
+                preload_url,
+            ),
+        ),
+        'missing_state': snapshot(
+            notifications(
+                current_name,
+                notifications_uri,
+                preload_url,
+                states=('enabled', 'showing'),
+            ),
+        ),
+        'extra_state': snapshot(
+            notifications(
+                current_name,
+                notifications_uri,
+                preload_url,
+                states=('enabled', 'focusable', 'showing', 'selected'),
+            ),
         ),
         'wrong_action': snapshot(
-            notifications(current_name, notifications_uri, return_url, ('click',)),
+            notifications(current_name, notifications_uri, preload_url, ('click',)),
+        ),
+        'extra_action': snapshot(
+            notifications(
+                current_name,
+                notifications_uri,
+                preload_url,
+                ('jump', 'click'),
+            ),
+        ),
+        'wrong_role': snapshot(
+            notifications(
+                current_name,
+                notifications_uri,
+                preload_url,
+                role='push button',
+            ),
         ),
     }
     for label, candidate in failures.items():
