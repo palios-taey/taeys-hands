@@ -207,27 +207,31 @@ def _validate_yaml() -> list[str]:
         (
             navigation.get('initial_observation_barrier'),
             'exact_notifications_navigation',
+            45000,
         ),
         (
             navigation.get('observation_barrier'),
             'exact_route_and_my_posts_state',
+            10000,
         ),
         (
             engagement.get('observation_barrier'),
             'exact_route_marker_and_candidate_set',
+            10000,
         ),
         (
             (engagement.get('restore') or {}).get('observation_barrier'),
             'exact_return_route_and_current_notifications_state',
+            10000,
         ),
     )
-    for barrier, projection in expected_barriers:
+    for barrier, projection, timeout_ms in expected_barriers:
         if barrier != {
             'projection': projection,
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
-            'timeout_ms': 10000,
+            'timeout_ms': timeout_ms,
         }:
             errors.append(f'{YAML_PATH}: {projection} barrier drifted')
     candidate = engagement.get('candidate_observation') or {}
