@@ -12,6 +12,7 @@ from consultation_v2.platforms.linkedin.driver import (
     _element_uri,
     _exact_engagement_route,
     _notifications_target,
+    _notifications_target_state_digest,
 )
 from consultation_v2.snapshot import build_snapshot
 from consultation_v2.types import Snapshot
@@ -83,6 +84,25 @@ def _manual_post_action_contract() -> dict[str, Any]:
     }
     if contract != expected:
         raise RuntimeError('LinkedIn manual post-action contract is invalid')
+    return dict(contract)
+
+
+def _initial_preparation_observation_contract() -> dict[str, Any]:
+    workflow = load_platform_yaml('linkedin').get('workflow') or {}
+    engagement = workflow.get('engagement_signal_capture') or {}
+    navigation = engagement.get('navigation') or {}
+    contract = navigation.get('initial_observation_barrier')
+    expected = {
+        'projection': 'exact_notifications_navigation',
+        'refresh_policy': 'invalidate_reacquire',
+        'stable_cycles': 2,
+        'interval_ms': 200,
+        'timeout_ms': 10000,
+    }
+    if contract != expected:
+        raise RuntimeError(
+            'LinkedIn initial preparation observation contract is invalid'
+        )
     return dict(contract)
 
 
@@ -2169,6 +2189,101 @@ def stable_post_action_observation(
     }
 
 
+def stable_initial_preparation_observation(
+    deadline_at: float,
+) -> tuple[Snapshot | None, dict[str, Any]]:
+    barrier = _initial_preparation_observation_contract()
+    if isinstance(deadline_at, bool) or not isinstance(deadline_at, (int, float)):
+        raise ValueError(
+            'LinkedIn initial preparation deadline must be monotonic seconds'
+        )
+    stable_cycles_required = barrier['stable_cycles']
+    interval = barrier['interval_ms'] / 1000.0
+    started_at = time.monotonic()
+    barrier_deadline = min(
+        float(deadline_at),
+        started_at + (barrier['timeout_ms'] / 1000.0),
+    )
+    stable_cycles_observed = 0
+    previous_state_digest: str | None = None
+    last_snapshot: Snapshot | None = None
+    samples: list[dict[str, Any]] = []
+
+    while time.monotonic() < barrier_deadline:
+        _firefox, _document, snapshot = build_snapshot('linkedin')
+        target, match_count = _notifications_target(snapshot)
+        augmented = augment_snapshot(snapshot)
+        augmented_matches = list(
+            augmented.mapped.get(NOTIFICATIONS_NAVIGATION) or []
+        )
+        declared: dict[str, Any] | None = None
+        if len(augmented_matches) == 1:
+            declared = element_operation(
+                NOTIFICATIONS_NAVIGATION,
+                list(augmented_matches[0].states),
+                dict(augmented_matches[0].raw or {}),
+            )
+        state_digest = (
+            _notifications_target_state_digest(snapshot, target, match_count)
+            if target is not None and match_count == 1
+            else None
+        )
+        exact = (
+            match_count == 1
+            and len(augmented_matches) == 1
+            and isinstance(declared, dict)
+            and declared.get('allowed_now') == ['activate']
+            and state_digest is not None
+        )
+        if exact:
+            stable_cycles_observed = (
+                stable_cycles_observed + 1
+                if state_digest == previous_state_digest
+                else 1
+            )
+            previous_state_digest = state_digest
+        else:
+            stable_cycles_observed = 0
+            previous_state_digest = None
+        last_snapshot = augmented
+        samples.append({
+            'sample': len(samples) + 1,
+            'elapsed_ms': round((time.monotonic() - started_at) * 1000),
+            'observed_url': snapshot.url,
+            'notifications_target_match_count': match_count,
+            'augmented_match_count': len(augmented_matches),
+            'declared_method': declared.get('method') if declared else None,
+            'allowed_now': declared.get('allowed_now') if declared else None,
+            'target_state_digest': state_digest,
+            'exact': exact,
+        })
+        if stable_cycles_observed >= stable_cycles_required:
+            return augmented, {
+                'result': 'PASS',
+                'compile_authorized': True,
+                'next_mutation_authorized': False,
+                'projection': barrier['projection'],
+                'refresh_policy': barrier['refresh_policy'],
+                'stable_cycles_required': stable_cycles_required,
+                'stable_cycles_observed': stable_cycles_observed,
+                'samples': samples,
+            }
+        remaining = barrier_deadline - time.monotonic()
+        if remaining > 0:
+            time.sleep(min(interval, remaining))
+
+    return last_snapshot, {
+        'result': 'TIMEOUT',
+        'compile_authorized': False,
+        'next_mutation_authorized': False,
+        'projection': barrier['projection'],
+        'refresh_policy': barrier['refresh_policy'],
+        'stable_cycles_required': stable_cycles_required,
+        'stable_cycles_observed': stable_cycles_observed,
+        'samples': samples,
+    }
+
+
 __all__ = [
     'NOTIFICATION_CANDIDATE_PREFIX',
     'NOTIFICATIONS_NAVIGATION',
@@ -2178,6 +2293,7 @@ __all__ = [
     'SELECTED_POST_SUBMIT_PREFIX',
     'augment_snapshot',
     'element_operation',
+    'stable_initial_preparation_observation',
     'stable_scroll_post_action_observation',
     'stable_post_action_observation',
     'verify_comment_submit_precondition',

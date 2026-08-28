@@ -386,7 +386,99 @@ def schema_required(name: str) -> set[str]:
     )['required'])
 
 
+class Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def monotonic(self) -> float:
+        return self.now
+
+    def sleep(self, interval: float) -> None:
+        self.now += interval
+
+
+def validate_initial_observation_barrier() -> None:
+    exact = navigation_snapshot()
+    missing = Snapshot(platform='linkedin', url=exact.url)
+    sequence = [missing, exact, exact]
+    clock = Clock()
+    original_build_snapshot = manual.build_snapshot
+    original_notifications_target = manual._notifications_target
+    original_monotonic = manual.time.monotonic
+    original_sleep = manual.time.sleep
+
+    def build_sequence(_platform: str):
+        return object(), object(), sequence.pop(0)
+
+    def mapped_target(snapshot: Snapshot):
+        matches = list(
+            snapshot.mapped.get(manual.NOTIFICATIONS_NAVIGATION) or []
+        )
+        return (matches[0] if len(matches) == 1 else None), len(matches)
+
+    manual.build_snapshot = build_sequence
+    manual._notifications_target = mapped_target
+    manual.time.monotonic = clock.monotonic
+    manual.time.sleep = clock.sleep
+    try:
+        snapshot, receipt = manual.stable_initial_preparation_observation(10.0)
+    finally:
+        manual.build_snapshot = original_build_snapshot
+        manual._notifications_target = original_notifications_target
+        manual.time.monotonic = original_monotonic
+        manual.time.sleep = original_sleep
+    require(
+        snapshot is not None
+        and snapshot.url == exact.url
+        and len(
+            snapshot.mapped.get(manual.NOTIFICATIONS_NAVIGATION) or []
+        ) == 1,
+        'barrier did not return the last augmented exact snapshot',
+    )
+    require(not sequence, 'barrier did not require two exact samples after stale read')
+    require(
+        receipt['result'] == 'PASS'
+        and receipt['compile_authorized'] is True
+        and receipt['next_mutation_authorized'] is False
+        and receipt['stable_cycles_observed'] == 2,
+        'stale-first-read barrier did not authorize compile without mutation',
+    )
+    require(
+        [sample['notifications_target_match_count'] for sample in receipt['samples']]
+        == [0, 1, 1]
+        and all(
+            sample['allowed_now'] == ['activate']
+            for sample in receipt['samples'][1:]
+        ),
+        'barrier samples did not preserve exact target evidence',
+    )
+
+    clock = Clock()
+    manual.build_snapshot = lambda _platform: (
+        object(),
+        object(),
+        Snapshot(platform='linkedin', url=exact.url),
+    )
+    manual._notifications_target = mapped_target
+    manual.time.monotonic = clock.monotonic
+    manual.time.sleep = clock.sleep
+    try:
+        _snapshot, timeout = manual.stable_initial_preparation_observation(0.4)
+    finally:
+        manual.build_snapshot = original_build_snapshot
+        manual._notifications_target = original_notifications_target
+        manual.time.monotonic = original_monotonic
+        manual.time.sleep = original_sleep
+    require(
+        timeout['result'] == 'TIMEOUT'
+        and timeout['compile_authorized'] is False
+        and timeout['next_mutation_authorized'] is False,
+        'unsettled initial observation authorized compile or mutation',
+    )
+
+
 def main() -> int:
+    validate_initial_observation_barrier()
     stream = inventory_snapshot(include_categories=True)
     inventory = project_notification_inventory(stream, REVISION)
     artifact = inventory.artifact
