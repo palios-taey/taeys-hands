@@ -123,6 +123,9 @@ Every accepted nonterminal step still requires a new observation before the comp
 When an exact Notifications-All snapshot contains both actionable candidates and Show more, the LinkedIn
 projection carries both target sets. Candidate selection outranks continuation; Show more remains authorized
 only by complete inventory-bound exclusions.
+The inventory decision digest excludes only observation revision metadata; the full artifact retains top-level
+and per-row revisions. This lets an exact selection or complete exclusions survive a semantically identical
+fresh observation without weakening refusal on any changed notification semantics.
 The submit card is last, and only the exact rendered-comment postcondition produces a terminal delivery receipt
 under [`unit1-step-receipt.schema.json`](../consultation_v2/platforms/linkedin/unit1-step-receipt.schema.json).
 This code boundary is not itself production qualification; the live chain must still earn the qualification

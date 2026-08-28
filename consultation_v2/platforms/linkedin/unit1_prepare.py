@@ -576,7 +576,21 @@ def project_notification_inventory(
         'rows': rows,
         'actionable_links': actionable_links,
     }
-    artifact['inventory_sha256'] = _sha256(artifact)
+    artifact['inventory_sha256'] = _sha256({
+        'schema': artifact['schema'],
+        'platform': artifact['platform'],
+        'route': artifact['route'],
+        'mounted_article_count': artifact['mounted_article_count'],
+        'rows': [
+            {
+                key: value
+                for key, value in row.items()
+                if key != 'snapshot_revision'
+            }
+            for row in rows
+        ],
+        'actionable_links': actionable_links,
+    })
     return NotificationInventoryProjection(artifact=artifact, targets=targets)
 
 

@@ -44,7 +44,10 @@ bootstrap envelope
 continuation can compile, and only when every mounted notification article has been represented. The ordered inventory preserves the
 raw notification text, text digest, article state, exact relative-age token and seconds, structural path,
 snapshot revision, and optional activity identity. Exact actionable content links are carried separately from
-the complete raw inventory. The inventory digest binds both ordered collections and the observation revision.
+the complete raw inventory. Top-level and per-row snapshot revisions remain in the full provenance artifact.
+The inventory digest binds only the stable semantic material: schema, platform, route, mounted count, ordered
+rows without their observation revisions, and actionable links. An equivalent fresh observation therefore
+retains the same decision identity, while changed text, activity, age, ordinal, URI, or structural path does not.
 One exact qualifying selection compiles immediately even when continuation is available. When none qualifies,
 continuation requires exclusions covering the exact ordered actionable inventory with closed reason codes,
 bound to the current transaction, policy, and inventory digests. An accepted continuation invalidates that
