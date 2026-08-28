@@ -169,7 +169,7 @@ as another new send identity after the recovery receipt passes.
 |---|---|---|---|---|---|
 | Horizon | ChatGPT `:2` | `consultation_v2/platforms/chatgpt/chatgpt.yaml` | `model=pro` | `app_root_snapshot` | focus composer, `key Return` |
 | Gaia | Claude `:3` | `consultation_v2/platforms/claude/claude.yaml` | `model=opus`, `mode=extended_thinking` | `app_root_snapshot` | `operate`/`click` exact `send_button` element |
-| Cosmos | Gemini `:4` | `consultation_v2/platforms/gemini/gemini.yaml` | `model=pro`, `mode=deep_think` | YAML `workflow.attachment.scope`, otherwise `base` | `operate` exact `send_button` element |
+| Cosmos | Gemini `:4` | `consultation_v2/platforms/gemini/gemini.yaml` | Pro Extended + Deep Research tool | YAML `workflow.attachment.scope`, otherwise `base` | plan Send, then exact `start_research` element |
 | Logos | Grok `:5` | `consultation_v2/platforms/grok/grok.yaml` | `model=heavy` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `send_button` element |
 | Clarity | Perplexity `:6` | `consultation_v2/platforms/perplexity/perplexity.yaml` | `mode=deep_research` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `submit_button` element |
 
