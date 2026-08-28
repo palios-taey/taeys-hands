@@ -214,21 +214,22 @@ tree:
       name: Stop model response
       role: push button
     # --- model/mode dropdown items (live app-root after clicking Model select) ---
+    # Current Firefox/AT-SPI exposes these as menu item, not radio menu item.
     model_auto:
       name: "Auto Chooses Fast or Expert"
-      role: radio menu item
+      role: menu item
       scope: app_root_snapshot
     model_fast:
       name: "Fast Quick responses · Grok 4.5"
-      role: radio menu item
+      role: menu item
       scope: app_root_snapshot
     model_expert:
       name: "Expert Thinks hard · Grok 4.5"
-      role: radio menu item
+      role: menu item
       scope: app_root_snapshot
     model_heavy:
       name: "Heavy Team of Experts · Grok 4.5"
-      role: radio menu item
+      role: menu item
       scope: app_root_snapshot
     # --- attach dropdown item (menu_snapshot after clicking Attach) ---
     upload_files_item:
@@ -321,6 +322,23 @@ workflow:
             click_strategy: atspi_only
         default_for_fresh: auto
         example_rationale: Use Auto when the caller wants Grok to choose between Fast and Expert for this consult.
+  model_selector_post_action:
+    trigger: model_selector
+    scope: app_root_snapshot
+    refresh_policy: live_reacquire_no_clear
+    exact_singletons:
+      - model_auto
+      - model_fast
+      - model_expert
+      - model_heavy
+    required_states: [showing, focusable, enabled]
+    absent:
+      - grok_bot_dialog
+      - grok_bot_dismiss
+      - grok_bot_get
+    stable_cycles: 2
+    interval_ms: 250
+    timeout_ms: 8000
   navigate:
     new_chat_key: new_chat
     fresh_input_key: input
@@ -418,33 +436,6 @@ workflow:
   extract:
     primary_key: copy_button
 validation:
-  # mode_active: gate on the dropdown menu item carrying a selected/checked
-  # state. Read ONLY inside an opened model dropdown (menu_snapshot), since the
-  # persistent "Model select" button name does not expose the active model.
-  auto_active:
-    indicators:
-    - name: "Auto Chooses Fast or Expert"
-      role: radio menu item
-      states_include:
-      - checked
-  fast_active:
-    indicators:
-    - name: "Fast Quick responses · Grok 4.5"
-      role: radio menu item
-      states_include:
-      - checked
-  expert_active:
-    indicators:
-    - name: "Expert Thinks hard · Grok 4.5"
-      role: radio menu item
-      states_include:
-      - checked
-  heavy_active:
-    indicators:
-    - name: "Heavy Team of Experts · Grok 4.5"
-      role: radio menu item
-      states_include:
-      - checked
   # attach_present: presence of the static remove button (doc scope). Its name
   # is static (the filename is dynamic, the button name is not), so it is an
   # EXACT indicator — no structural locator. LIVE-CONFIRMED on :5 2026-06-03.

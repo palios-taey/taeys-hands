@@ -56,6 +56,9 @@ jobs:
       - name: Prove Grok one-shot pre-send interstitial recovery contract
         run: python3 consultation_v2/validators/validate_grok_pre_send_recovery_contract.py
 
+      - name: Prove Grok model-selector post-action contract
+        run: python3 consultation_v2/validators/validate_grok_model_selector_post_action_contract.py
+
       - name: Prove Claude semantic attachment shortcut contract
         run: python3 consultation_v2/validators/validate_claude_semantic_shortcut_contract.py
 

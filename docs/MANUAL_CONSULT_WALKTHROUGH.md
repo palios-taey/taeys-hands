@@ -204,6 +204,13 @@ mutation. A passed recovery authorizes only a new send identity; it never resume
 | Logos | Grok `:5` | `consultation_v2/platforms/grok/grok.yaml` | `model=heavy` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `send_button` element |
 | Clarity | Perplexity `:6` | `consultation_v2/platforms/perplexity/perplexity.yaml` | `mode=deep_research` | YAML `workflow.attachment.scope`, otherwise `base` | `operate`/`click` exact `submit_button` element |
 
+Grok's model-selector open is one mapped-pointer mutation followed internally by the YAML-owned
+`workflow.model_selector_post_action` observation barrier. The barrier performs only fresh live app-root reads;
+it does not clear the transient portal or repeat the selector action. All four declared model options must map
+exactly once with their declared states for two consecutive samples, while all three mapped Grok Bot interstitial
+controls remain absent, before the operation can return success. Current Firefox AT-SPI exposes those options as
+`menu item`. The undeclared Build option may remain unknown and cannot authorize a selection.
+
 At the start of the leg, inspect only the executable parts of that one YAML:
 
 ```bash
