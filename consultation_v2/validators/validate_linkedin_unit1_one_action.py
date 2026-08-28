@@ -199,6 +199,7 @@ def main() -> int:
         receipts[-1]['receipt_sha256'],
         private,
     ))
+    candidate_receipts = list(receipts)
 
     selected_post_key = f'{manual.SELECTED_POST_PREFIX}{ACTIVITY}'
     thread_key = (
@@ -234,6 +235,41 @@ def main() -> int:
     finally:
         manual._selected_thread_viewport_state = original_viewport
     require(thread_card['phase'] == 'thread_open', 'thread was not opened explicitly')
+    zero_thread_key = (
+        f'{manual.SELECTED_THREAD_ZERO_OPEN_PREFIX}{ACTIVITY}_body_{BODY_SHA256}'
+    )
+    zero_thread = element(
+        zero_thread_key,
+        states=['showing', 'enabled', 'focusable'],
+        raw={
+            'selected_activity': ACTIVITY,
+            'selected_post_body_sha256': BODY_SHA256,
+            'selected_thread_expected_count': 0,
+            'comment_editor_ready_before': False,
+        },
+    )
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'live_extent_in_viewport': True,
+    }
+    try:
+        zero_thread_card = compile_unit1_step(
+            snapshot({
+                selected_post_key: [selected],
+                zero_thread_key: [zero_thread],
+            }),
+            REVISION,
+            private,
+            candidate_receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        zero_thread_card['phase'] == 'thread_open'
+        and zero_thread_card['element'] == zero_thread_key
+        and zero_thread_card['postcondition_kind']
+        == 'exact_selected_activity_zero_comment_thread_open',
+        'exact zero-comment thread opener was not isolated',
+    )
     receipts.append(accept_unit1_step(
         thread_card,
         barrier(thread_card, private),

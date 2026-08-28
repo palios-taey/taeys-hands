@@ -173,6 +173,10 @@ has not been completely observed.
    `selected_post_thread_expand_activity_<id>_body_<digest>_total_<total>_visible_<before>_more_<n>` control
    with its declared pointer primitive. Require a fresh receipt proving the same activity/body/total and exactly
    N additional typed rows. Repeat one receipted action at a time until displayed count equals typed rows.
+   When the card instead proves exact zero—no positive count, visible comment row, or expander—require the
+   distinct `selected_post_zero_thread_open_activity_<id>_body_<digest>` key at the YAML-owned `Comment`
+   control. Activate it once and require the same activity/body, exact zero state, and one empty ready same-card
+   editor. A positive-count opener receipt cannot authorize this zero path.
 10. Like, compose, gate, send, rendered-comment verification, and durable touch persistence are separate effects.
    They may execute only after each effect has its own current public YAML mapping and production qualification.
 

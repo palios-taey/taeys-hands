@@ -17,6 +17,7 @@ from consultation_v2.platforms.linkedin.manual import (
     SELECTED_POST_PREFIX,
     SELECTED_THREAD_EXPAND_PREFIX,
     SELECTED_THREAD_OPEN_PREFIX,
+    SELECTED_THREAD_ZERO_OPEN_PREFIX,
     _manual_comment_contract,
     _manual_notification_contract,
     _notification_article_content_link,
@@ -24,7 +25,9 @@ from consultation_v2.platforms.linkedin.manual import (
     _notification_activity,
     _notification_relative_age,
     _selected_post_root_and_body,
+    _selected_comment_controls,
     _selected_thread_controls,
+    _selected_thread_zero_is_exact,
     _selected_thread_typed_rows,
     _structural_index_path,
     element_operation,
@@ -701,30 +704,36 @@ def extract_selected_source(
         raise LinkedInUnit1PreparationError(
             'selected thread comment count is ambiguous'
         )
-    count_contract = notification_contract['selected_thread']['comment_count']
-    count_elements = {
-        id(element.atspi_obj): element
-        for element in _all_elements(snapshot)
-        if element.atspi_obj is not None
-    }
-    declared_count_elements = []
-    for index_path in count_contract['index_paths']:
-        count_node = _node_at_index_path(root.atspi_obj, index_path)
-        count_element = count_elements.get(id(count_node))
-        if count_element is not None:
-            declared_count_elements.append(count_element)
     expected_count = _comment_count(count_controls[0].name) if count_controls else 0
-    if (
-        not count_controls
-        and any(
-            count_element.role == count_contract['role']
-            or 'comment' in count_element.name.lower()
-            for count_element in declared_count_elements
-        )
+    expected_thread_key = (
+        f'{SELECTED_THREAD_ZERO_OPEN_PREFIX}{selected_activity}_body_{body_sha256}'
+        if expected_count == 0
+        else f'{SELECTED_THREAD_OPEN_PREFIX}{selected_activity}_body_{body_sha256}'
+    )
+    if thread_receipt_payload.get('element_sha256') != _text_sha256(
+        expected_thread_key
     ):
         raise LinkedInUnit1PreparationError(
-            'selected thread zero state is not exact'
+            'thread-open receipt does not bind the exact observed thread state'
         )
+    if expected_count == 0:
+        comment_controls = _selected_comment_controls(
+            snapshot,
+            root,
+            _manual_comment_contract(),
+        )
+        if (
+            not _selected_thread_zero_is_exact(
+                snapshot,
+                root,
+                notification_contract,
+            )
+            or comment_controls['editor_ready'] is not True
+            or comment_controls['editor_text'] != ''
+        ):
+            raise LinkedInUnit1PreparationError(
+                'selected thread zero state is not exact and editor-ready'
+            )
     if expected_count != len(visible_controls):
         raise LinkedInUnit1PreparationError(
             'selected thread count does not equal the typed visible row count'
@@ -1091,12 +1100,18 @@ def compile_preparation_step(
     _require_sha256(body_sha256, 'selected_post_body_sha256')
 
     if previous_phase in {'notification_candidate', 'thread_scroll'}:
-        thread_key = f'{SELECTED_THREAD_OPEN_PREFIX}{activity}_body_{body_sha256}'
-        matches = list(snapshot.mapped.get(thread_key) or [])
-        if not matches:
+        thread_keys = [
+            f'{SELECTED_THREAD_OPEN_PREFIX}{activity}_body_{body_sha256}',
+            f'{SELECTED_THREAD_ZERO_OPEN_PREFIX}{activity}_body_{body_sha256}',
+        ]
+        mapped_thread_keys = [
+            key for key in thread_keys if snapshot.mapped.get(key)
+        ]
+        if len(mapped_thread_keys) != 1:
             raise LinkedInUnit1PreparationError(
                 'selected activity lacks one exact mandatory thread opener'
             )
+        thread_key = mapped_thread_keys[0]
         target = _mapped_singleton(snapshot, thread_key)
         try:
             declared = element_operation(
@@ -1118,6 +1133,13 @@ def compile_preparation_step(
         if previous_phase == 'thread_scroll' and phase != 'thread_open':
             raise LinkedInUnit1PreparationError(
                 'thread opener is still outside the verified viewport'
+            )
+        if (
+            previous_phase == 'thread_scroll'
+            and receipts[-1]['element_sha256'] != _text_sha256(thread_key)
+        ):
+            raise LinkedInUnit1PreparationError(
+                'thread opener identity changed after the verified scroll'
             )
         return _preparation_card(
             snapshot=snapshot,

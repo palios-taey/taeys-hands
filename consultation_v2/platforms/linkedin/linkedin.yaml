@@ -304,6 +304,7 @@ workflow:
           allowed_now: []
       selected_thread:
         open_element_key_prefix: selected_post_thread_open_activity_
+        zero_open_element_key_prefix: selected_post_zero_thread_open_activity_
         expand_element_key_prefix: selected_post_thread_expand_activity_
         comment_count:
           role: push button
@@ -321,6 +322,27 @@ workflow:
           role: push button
           name_prefix: View more options for
           name_suffix: comment.
+        zero_open:
+          body_index_path:
+            - 0
+            - 9
+            - 0
+          index_path:
+            - 0
+            - 15
+          role: push button
+          name: Comment
+          states_include:
+            - showing
+            - enabled
+            - focusable
+          action:
+            effect_class: page
+            primitives:
+              - mapped_pointer_activate
+            allowed_now:
+              - mapped_pointer_activate
+          postcondition: exact_selected_activity_zero_comment_thread_open
         expand:
           role: push button
           relative_depth: 2

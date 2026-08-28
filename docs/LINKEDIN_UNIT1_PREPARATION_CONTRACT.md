@@ -22,7 +22,8 @@ a required transition in the production graph.
 
 The implementation consumes the existing canonical `Snapshot`, the existing LinkedIn structural helpers, and
 the existing `element_operation` authority. It adds no AT-SPI traversal, locator grammar, action primitive, or
-generic-platform behavior. The existing final Unit 1 compiler in `unit1.py` remains unchanged.
+generic-platform behavior. The final Unit 1 compiler in `unit1.py` consumes the same distinct positive-count
+or exact-zero opener identity.
 
 ## Exact machine sequence
 
@@ -73,8 +74,10 @@ and must add exactly N typed rows. Expansion repeats one action at a time until 
 or ambiguous opener/expander is terminal; it cannot be interpreted as an already-open, complete, or zero-comment
 thread. Every visible comment row has an exact author,
 `text` or `media_link_only` kind, exact text, and text digest. The displayed comment count must equal the
-typed-row count. Absence is accepted only as exact zero after the thread-open receipt: no count control and no
-visible comment row.
+typed-row count. Absence is accepted only through the distinct exact-zero opener key and its receipt: no
+positive count control, visible comment row, or expander; one exact YAML-owned `Comment` control before
+activation; and one empty ready same-card editor afterward. The extracted source binds the zero opener's
+element digest, so a positive-count opener receipt cannot be borrowed.
 The current LinkedIn feed-card contract maps original/repost bodies at structural paths `[0,9,0]` and
 `[0,12,0]`, with their exact comment-count controls at `[0,12]` and `[0,15]`. Body bytes come from the complete AT-SPI node text before any shallow mapped
 text projection; a changed role, state, path, or empty body stops preparation before drafting.

@@ -61,6 +61,24 @@ def main() -> int:
     )
     selected_thread = selection.get('selected_thread') or {}
     _require(
+        selected_thread.get('zero_open') == {
+            'body_index_path': [0, 9, 0],
+            'index_path': [0, 15],
+            'role': 'push button',
+            'name': 'Comment',
+            'states_include': ['showing', 'enabled', 'focusable'],
+            'action': {
+                'effect_class': 'page',
+                'primitives': ['mapped_pointer_activate'],
+                'allowed_now': ['mapped_pointer_activate'],
+            },
+            'postcondition': (
+                'exact_selected_activity_zero_comment_thread_open'
+            ),
+        },
+        'LinkedIn exact zero-comment opener contract drifted',
+    )
+    _require(
         selected_thread.get('scroll_into_view') == {
             'effect_class': 'viewport',
             'primitives': ['scroll_into_view'],
@@ -95,6 +113,7 @@ def main() -> int:
     operation_source = _function_source(MANUAL_PATH, 'element_operation')
     for required in (
         '_SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)',
+        '_SELECTED_THREAD_ZERO_OPEN_KEY.fullmatch(',
         '_selected_thread_viewport_state(dict(context or {}))',
         "viewport.get('live_extent_in_viewport') is True",
         "viewport.get('error') == 'live_extent_outside_display'",
@@ -106,6 +125,7 @@ def main() -> int:
         "'mapped_pointer_activate'",
         '_SELECTED_THREAD_EXPAND_KEY.fullmatch(',
         "'expand'",
+        "'zero_open'",
     ):
         _require(
             required in operation_source,
@@ -114,6 +134,9 @@ def main() -> int:
 
     verification_source = _function_source(MANUAL_PATH, 'verify_post_action')
     for required in (
+        '_SELECTED_THREAD_ZERO_OPEN_KEY.fullmatch(',
+        "'exact_selected_activity_zero_comment_thread_open'",
+        "comment_controls['editor_ready'] is not True",
         '_SELECTED_THREAD_EXPAND_KEY.fullmatch(',
         "'exact_selected_thread_growth'",
         'observed_visible_count != prior_visible_count + declared_more_count',
