@@ -39,6 +39,7 @@ NOTIFICATIONS_ALL_CATEGORY_AUTHORITY_SCHEMA = (
     'linkedin_notifications_all_category_authority_v1'
 )
 NOTIFICATION_INVENTORY_SCHEMA = 'linkedin_notification_inventory_v1'
+NOTIFICATION_EXCLUSIONS_SCHEMA = 'linkedin_notification_inventory_exclusions_v1'
 SELECTED_SOURCE_SCHEMA = 'linkedin_selected_post_thread_source_v1'
 _SHA256 = re.compile(r'^[0-9a-f]{64}$')
 _PUBLIC_ID = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$')
@@ -69,6 +70,25 @@ _SELECTION_KEYS = frozenset({
     'selection_sha256',
     'target_passed',
     'transaction_sha256',
+})
+_EXCLUSIONS_KEYS = frozenset({
+    'excluded_candidates',
+    'exclusions_sha256',
+    'notification_inventory_sha256',
+    'policy_sha256',
+    'schema',
+    'transaction_sha256',
+})
+_EXCLUDED_CANDIDATE_KEYS = frozenset({'activity', 'reason_codes'})
+_EXCLUSION_REASON_CODES = frozenset({
+    'already_used',
+    'author_cooloff',
+    'event_announcement',
+    'hostile_or_irrelevant',
+    'off_target',
+    'pitch_or_promotion',
+    'self_authored',
+    'stale',
 })
 _CARD_KEYS = frozenset({
     'card_sha256',
@@ -205,7 +225,66 @@ def _age_seconds(age: str) -> int:
 def _validate_selection(value: Any) -> dict[str, Any] | None:
     if value is None:
         return None
-    if not isinstance(value, Mapping) or frozenset(value) != _SELECTION_KEYS:
+    if not isinstance(value, Mapping):
+        raise LinkedInUnit1PreparationError(
+            'private decision fields are incomplete or unknown'
+        )
+    if frozenset(value) == _EXCLUSIONS_KEYS:
+        exclusions = dict(value)
+        if exclusions['schema'] != NOTIFICATION_EXCLUSIONS_SCHEMA:
+            raise LinkedInUnit1PreparationError(
+                'private exclusions schema is invalid'
+            )
+        for field in (
+            'exclusions_sha256',
+            'notification_inventory_sha256',
+            'policy_sha256',
+            'transaction_sha256',
+        ):
+            _require_sha256(exclusions[field], field)
+        rows = exclusions['excluded_candidates']
+        if not isinstance(rows, list):
+            raise LinkedInUnit1PreparationError(
+                'excluded_candidates must be one exact list'
+            )
+        activities: set[str] = set()
+        for row in rows:
+            if (
+                not isinstance(row, Mapping)
+                or frozenset(row) != _EXCLUDED_CANDIDATE_KEYS
+            ):
+                raise LinkedInUnit1PreparationError(
+                    'excluded candidate fields are incomplete or unknown'
+                )
+            activity = row['activity']
+            reason_codes = row['reason_codes']
+            if (
+                not isinstance(activity, str)
+                or _ACTIVITY.fullmatch(activity) is None
+                or activity in activities
+                or not isinstance(reason_codes, list)
+                or not reason_codes
+                or reason_codes != sorted(set(reason_codes))
+                or any(
+                    not isinstance(reason, str)
+                    or reason not in _EXCLUSION_REASON_CODES
+                    for reason in reason_codes
+                )
+            ):
+                raise LinkedInUnit1PreparationError(
+                    'excluded candidate evidence is invalid'
+                )
+            activities.add(activity)
+        unsigned = {
+            key: exclusions[key]
+            for key in sorted(_EXCLUSIONS_KEYS - {'exclusions_sha256'})
+        }
+        if exclusions['exclusions_sha256'] != _sha256(unsigned):
+            raise LinkedInUnit1PreparationError(
+                'exclusions_sha256 does not match exclusion bytes'
+            )
+        return exclusions
+    if frozenset(value) != _SELECTION_KEYS:
         raise LinkedInUnit1PreparationError(
             'selection fields are incomplete or unknown'
         )
@@ -319,7 +398,15 @@ def preparation_transaction_sha256(value: Mapping[str, Any]) -> str:
         and selection['transaction_sha256'] != transaction_sha256
     ):
         raise LinkedInUnit1PreparationError(
-            'private selection does not bind this preparation transaction'
+            'private decision does not bind this preparation transaction'
+        )
+    if (
+        selection is not None
+        and selection.get('schema') == NOTIFICATION_EXCLUSIONS_SCHEMA
+        and selection['policy_sha256'] != envelope['policy_sha256']
+    ):
+        raise LinkedInUnit1PreparationError(
+            'private exclusions do not bind this preparation policy'
         )
     return transaction_sha256
 
@@ -878,24 +965,6 @@ def compile_preparation_step(
             raise LinkedInUnit1PreparationError(
                 'notification preparation requires exact Notifications-All'
             )
-        continuation_keys = [
-            key
-            for key, matches in snapshot.mapped.items()
-            if _CONTINUATION.fullmatch(key) is not None and matches
-        ]
-        if len(continuation_keys) > 1:
-            raise LinkedInUnit1PreparationError(
-                'Notifications continuation is ambiguous'
-            )
-        if continuation_keys:
-            return _preparation_card(
-                snapshot=snapshot,
-                snapshot_revision=snapshot_revision,
-                transaction_sha256=transaction_sha256,
-                sequence=sequence,
-                phase='notifications_continuation',
-                element_key=continuation_keys[0],
-            )
         if category_authority_sha256 is None:
             raise LinkedInUnit1PreparationError(
                 'notification inventory lacks category authority'
@@ -906,8 +975,17 @@ def compile_preparation_step(
             transaction_sha256=transaction_sha256,
             category_authority_sha256=category_authority_sha256,
         )
-        selection = frozen['selection']
-        if selection is None:
+        continuation_keys = [
+            key
+            for key, matches in snapshot.mapped.items()
+            if _CONTINUATION.fullmatch(key) is not None and matches
+        ]
+        if len(continuation_keys) > 1:
+            raise LinkedInUnit1PreparationError(
+                'Notifications continuation is ambiguous'
+            )
+        decision = frozen['selection']
+        if decision is None:
             return _preparation_result(
                 state='ready_for_private_selection',
                 transaction_sha256=transaction_sha256,
@@ -918,8 +996,41 @@ def compile_preparation_step(
                     'policy_sha256': frozen['policy_sha256'],
                     'transaction_sha256': transaction_sha256,
                     'notification_inventory': inventory.artifact,
+                    'continuation_available': bool(continuation_keys),
                 },
             )
+        if decision.get('schema') == NOTIFICATION_EXCLUSIONS_SCHEMA:
+            if (
+                decision['notification_inventory_sha256']
+                != inventory.artifact['inventory_sha256']
+            ):
+                raise LinkedInUnit1PreparationError(
+                    'private exclusions do not bind the current exact inventory'
+                )
+            expected_activities = [
+                row['activity']
+                for row in inventory.artifact['actionable_links']
+            ]
+            observed_activities = [
+                row['activity'] for row in decision['excluded_candidates']
+            ]
+            if observed_activities != expected_activities:
+                raise LinkedInUnit1PreparationError(
+                    'private exclusions do not cover every exact actionable candidate'
+                )
+            if not continuation_keys:
+                raise LinkedInUnit1PreparationError(
+                    'private exclusions cannot authorize an absent continuation'
+                )
+            return _preparation_card(
+                snapshot=snapshot,
+                snapshot_revision=snapshot_revision,
+                transaction_sha256=transaction_sha256,
+                sequence=sequence,
+                phase='notifications_continuation',
+                element_key=continuation_keys[0],
+            )
+        selection = decision
         if (
             selection['notification_inventory_sha256']
             != inventory.artifact['inventory_sha256']
@@ -967,7 +1078,10 @@ def compile_preparation_step(
         )
 
     selection = frozen['selection']
-    if selection is None:
+    if (
+        selection is None
+        or selection.get('schema') == NOTIFICATION_EXCLUSIONS_SCHEMA
+    ):
         raise LinkedInUnit1PreparationError(
             'selected-post preparation requires a frozen private selection'
         )

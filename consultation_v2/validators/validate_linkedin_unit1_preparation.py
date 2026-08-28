@@ -53,6 +53,7 @@ if 'gi' not in sys.modules:
 from consultation_v2.platforms.linkedin import manual  # noqa: E402
 from consultation_v2.platforms.linkedin.unit1_prepare import (  # noqa: E402
     LinkedInUnit1PreparationError,
+    NOTIFICATION_EXCLUSIONS_SCHEMA,
     _category_authority_sha256,
     accept_preparation_step,
     compile_preparation_step,
@@ -92,6 +93,32 @@ def canonical_sha256(value) -> str:
         sort_keys=True,
         separators=(',', ':'),
     ).encode('utf-8')).hexdigest()
+
+
+def exclusion_decision(readiness: dict, transaction_sha256: str) -> dict:
+    require(
+        readiness['state'] == 'ready_for_private_selection'
+        and readiness['input']['continuation_available'] is True,
+        'continuation exclusions were requested without exact readiness',
+    )
+    inventory = readiness['input']['notification_inventory']
+    unsigned = {
+        'excluded_candidates': [
+            {
+                'activity': row['activity'],
+                'reason_codes': ['off_target'],
+            }
+            for row in inventory['actionable_links']
+        ],
+        'notification_inventory_sha256': inventory['inventory_sha256'],
+        'policy_sha256': POLICY_SHA256,
+        'schema': NOTIFICATION_EXCLUSIONS_SCHEMA,
+        'transaction_sha256': transaction_sha256,
+    }
+    return {
+        **unsigned,
+        'exclusions_sha256': canonical_sha256(unsigned),
+    }
 
 
 def require(condition: bool, message: str) -> None:
@@ -874,15 +901,31 @@ def main() -> int:
         first_continuation_surface
     )
     continuation_receipts = list(receipts)
-    first_continuation = compile_preparation_step(
+    first_continuation_readiness = compile_preparation_step(
         first_continuation_surface,
         REVISION,
         envelope,
         continuation_receipts,
     )
     require(
+        first_continuation_readiness['state'] == 'ready_for_private_selection'
+        and first_continuation_readiness['input']['continuation_available'] is True,
+        'continuation bypassed the mounted candidate inventory',
+    )
+    first_exclusions = exclusion_decision(
+        first_continuation_readiness,
+        transaction_sha256,
+    )
+    first_excluded_envelope = {**envelope, 'selection': first_exclusions}
+    first_continuation = compile_preparation_step(
+        first_continuation_surface,
+        REVISION,
+        first_excluded_envelope,
+        continuation_receipts,
+    )
+    require(
         first_continuation['phase'] == 'notifications_continuation',
-        'first category-authorized continuation did not compile',
+        'complete exact exclusions did not authorize continuation',
     )
     continuation_receipts.append(accept_preparation_step(
         first_continuation,
@@ -926,15 +969,96 @@ def main() -> int:
         ),
         'second continuation exposed candidate keys without live category proof',
     )
-    second_continuation = compile_preparation_step(
+    expect_error(
+        lambda: compile_preparation_step(
+            second_continuation_surface,
+            REVISION,
+            first_excluded_envelope,
+            continuation_receipts,
+        ),
+        'stale exclusions authorized a changed mounted inventory',
+    )
+    second_continuation_readiness = compile_preparation_step(
         second_continuation_surface,
         REVISION,
         envelope,
         continuation_receipts,
     )
     require(
+        second_continuation_readiness['state'] == 'ready_for_private_selection'
+        and second_continuation_readiness['input']['continuation_available'] is True,
+        'second continuation bypassed its changed mounted inventory',
+    )
+    second_exclusions = exclusion_decision(
+        second_continuation_readiness,
+        transaction_sha256,
+    )
+    partial_exclusions = {
+        **second_exclusions,
+        'excluded_candidates': second_exclusions['excluded_candidates'][:-1],
+    }
+    partial_unsigned = dict(partial_exclusions)
+    partial_unsigned.pop('exclusions_sha256')
+    partial_exclusions['exclusions_sha256'] = canonical_sha256(partial_unsigned)
+    expect_error(
+        lambda: compile_preparation_step(
+            second_continuation_surface,
+            REVISION,
+            {**envelope, 'selection': partial_exclusions},
+            continuation_receipts,
+        ),
+        'partial exclusions authorized continuation',
+    )
+    duplicate_exclusions = {
+        **second_exclusions,
+        'excluded_candidates': [
+            *second_exclusions['excluded_candidates'],
+            second_exclusions['excluded_candidates'][0],
+        ],
+    }
+    duplicate_unsigned = dict(duplicate_exclusions)
+    duplicate_unsigned.pop('exclusions_sha256')
+    duplicate_exclusions['exclusions_sha256'] = canonical_sha256(
+        duplicate_unsigned
+    )
+    expect_error(
+        lambda: preparation_transaction_sha256({
+            **envelope,
+            'selection': duplicate_exclusions,
+        }),
+        'duplicate excluded activity was accepted',
+    )
+    unknown_reason_exclusions = {
+        **second_exclusions,
+        'excluded_candidates': [
+            {
+                **second_exclusions['excluded_candidates'][0],
+                'reason_codes': ['unknown_reason'],
+            },
+            *second_exclusions['excluded_candidates'][1:],
+        ],
+    }
+    unknown_reason_unsigned = dict(unknown_reason_exclusions)
+    unknown_reason_unsigned.pop('exclusions_sha256')
+    unknown_reason_exclusions['exclusions_sha256'] = canonical_sha256(
+        unknown_reason_unsigned
+    )
+    expect_error(
+        lambda: preparation_transaction_sha256({
+            **envelope,
+            'selection': unknown_reason_exclusions,
+        }),
+        'unknown exclusion reason was accepted',
+    )
+    second_continuation = compile_preparation_step(
+        second_continuation_surface,
+        REVISION,
+        {**envelope, 'selection': second_exclusions},
+        continuation_receipts,
+    )
+    require(
         second_continuation['phase'] == 'notifications_continuation',
-        'second continuation required category controls to re-enter viewport',
+        'complete second inventory exclusions did not authorize continuation',
     )
 
     stream_without_categories = without_visible_categories(
@@ -950,6 +1074,10 @@ def main() -> int:
     require(
         ready_selection['state'] == 'ready_for_private_selection',
         'complete stream did not produce private selection input',
+    )
+    require(
+        ready_selection['input']['continuation_available'] is False,
+        'complete stream incorrectly exposed continuation authority',
     )
     require(
         schema_required('unit1-preparation-result.schema.json')
@@ -975,6 +1103,39 @@ def main() -> int:
         'selection_sha256': canonical_sha256(selection_unsigned),
     }
     selected_envelope = {**envelope, 'selection': selection}
+    candidate_key = next(
+        key
+        for key in first_continuation_surface.mapped
+        if (
+            key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
+            and key.endswith(ACTIVITY_A)
+        )
+    )
+    require(
+        len(
+            first_continuation_surface.mapped.get(
+                manual.NOTIFICATIONS_CONTINUATION,
+            ) or []
+        ) == 1
+        and len(first_continuation_surface.mapped.get(candidate_key) or []) == 1,
+        'candidate and continuation did not coexist as exact runtime targets',
+    )
+    candidate_before_continuation = compile_preparation_step(
+        first_continuation_surface,
+        REVISION,
+        selected_envelope,
+        receipts,
+    )
+    require(
+        candidate_before_continuation['phase'] == 'notification_candidate'
+        and candidate_before_continuation['element'].endswith(ACTIVITY_A)
+        and len(
+            first_continuation_surface.mapped.get(
+                candidate_before_continuation['element'],
+            ) or []
+        ) == 1,
+        'exact qualifying selection did not outrank continuation availability',
+    )
     candidate = compile_preparation_step(
         stream_without_categories,
         REVISION,

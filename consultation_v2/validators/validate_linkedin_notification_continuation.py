@@ -128,7 +128,7 @@ def main() -> int:
         'volatile inventory remained in the semantic action projection',
     )
     require(
-        not any(
+        any(
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
             for key in before_augmented.mapped
         )
@@ -136,7 +136,7 @@ def main() -> int:
             key.startswith(manual.NOTIFICATION_CANDIDATE_PREFIX)
             for key in after_augmented.mapped
         ),
-        'candidate mappings remained live while continuation was mandatory',
+        'candidate/continuation coexistence bypassed exact category authority',
     )
     before_declared = manual.element_operation(
         manual.NOTIFICATIONS_CONTINUATION,

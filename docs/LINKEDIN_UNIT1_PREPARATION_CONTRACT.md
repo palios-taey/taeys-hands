@@ -13,7 +13,7 @@ a required transition in the production graph.
 
 - `consultation_v2/platforms/linkedin/unit1_prepare.py` — evidence projection and one-step preparation compiler.
 - `consultation_v2/platforms/linkedin/unit1-preparation-envelope.schema.json` — stable bootstrap plus optional
-  frozen private selection.
+  frozen private selection or complete inventory-bound exclusions.
 - `consultation_v2/platforms/linkedin/unit1-preparation-action-card.schema.json` — one existing YAML-owned UI
   action.
 - `consultation_v2/platforms/linkedin/unit1-preparation-receipt.schema.json` — immutable postcondition chain.
@@ -29,21 +29,29 @@ generic-platform behavior. The existing final Unit 1 compiler in `unit1.py` rema
 ```text
 bootstrap envelope
 -> Notifications navigation card
--> zero or more separately receipted Show more cards
 -> complete mounted notification inventory
 -> ready_for_private_selection
 -> digest-bound private selection
+   or complete closed-reason exclusions for every exact actionable candidate
+-> zero or more separately receipted Show more cards after complete exclusions
 -> exact candidate card
 -> mandatory selected-thread scroll/open card and receipt
 -> selected post and complete typed thread evidence
 -> ready_for_private_draft
 ```
 
-`ready_for_private_selection` is emitted only after the exact Notifications-All route has no mapped
-continuation and every mounted notification article has been represented. The ordered inventory preserves the
+`ready_for_private_selection` is emitted after every exact Notifications-All observation, before any mapped
+continuation can compile, and only when every mounted notification article has been represented. The ordered inventory preserves the
 raw notification text, text digest, article state, exact relative-age token and seconds, structural path,
 snapshot revision, and optional activity identity. Exact actionable content links are carried separately from
 the complete raw inventory. The inventory digest binds both ordered collections and the observation revision.
+One exact qualifying selection compiles immediately even when continuation is available. When none qualifies,
+continuation requires exclusions covering the exact ordered actionable inventory with closed reason codes,
+bound to the current transaction, policy, and inventory digests. An accepted continuation invalidates that
+decision; the newly mounted inventory must produce a new readiness result and private decision.
+The augmented snapshot projects exact candidate keys and the exact continuation key together when both are
+present. This preserves the selected candidate as the runtime card target while retaining exclusion-gated
+continuation authority.
 
 `ready_for_private_draft` is emitted only after the selected activity exposes one exact mapped post body and a
 separately receipted exact thread-open action exposes a complete typed thread. A missing opener is terminal; it
@@ -56,6 +64,9 @@ The private selection repeats the public preparation `transaction_sha256` inside
 selection from another cycle, transaction, display, or policy envelope is rejected even when its inventory and
 activity happen to match.
 
+Private exclusions repeat the transaction, policy, and notification-inventory digests inside their own signed
+bytes. Missing, partial, duplicate, reordered, stale, or unknown-reason exclusions cannot authorize Show more.
+
 ## Fail-loud boundary
 
 Preparation stops without a readiness result when any of these is true:
@@ -66,6 +77,7 @@ Preparation stops without a readiness result when any of these is true:
 - two structural paths expose the same raw article/text/age/URI identity;
 - activity identities or structural paths are duplicated;
 - a private selection has a false verdict, stale/unknown digest, different age, or non-actionable activity;
+- private exclusions do not cover every current actionable activity exactly once with closed reason codes;
 - the selected activity/body identity is absent or ambiguous;
 - the exact selected-thread opener or its receipt is absent;
 - the thread count differs from the number of typed visible rows; or
