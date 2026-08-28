@@ -53,7 +53,7 @@ jobs:
       - name: Prove Grok exact address-bar rendering contract
         run: python3 consultation_v2/validators/validate_grok_address_bar_paste_contract.py
 
-      - name: Prove Grok one-shot pre-send interstitial recovery contract
+      - name: Prove Grok one-shot pre-send exception recovery contracts
         run: python3 consultation_v2/validators/validate_grok_pre_send_recovery_contract.py
 
       - name: Prove Grok model-selector post-action contract
