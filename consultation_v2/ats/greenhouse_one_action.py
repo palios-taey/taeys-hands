@@ -25,6 +25,7 @@ from consultation_v2.native_dialog_snapshot import (
     normalize_native_dialog_contract,
 )
 from consultation_v2.runtime import ConsultationRuntime
+from consultation_v2.snapshot import _direct_child_elements
 from consultation_v2.supervised_ui_contract import canonical_json_bytes
 from consultation_v2.supervised_ui_receipts import HandsReceiptStore
 from consultation_v2.tree import find_elements
@@ -1133,7 +1134,29 @@ def _selected_option_matches(
         ) from exc
     if parent is None or parent_role != 'section':
         return False
-    return _control_text({'atspi_obj': parent}) == calling_code
+    try:
+        children = _direct_child_elements(parent)
+        country_children = [
+            child for child in children
+            if {
+                'name': child.get('name'),
+                'role': child.get('role'),
+            } == semantic_projection['origin']
+        ]
+        selected_value_children = [
+            child for child in children
+            if child.get('role') == 'section'
+            and _control_text(child) == calling_code
+        ]
+    except Exception as exc:
+        raise GreenhouseOneActionError(
+            'ATS Country selected-value relation is unavailable'
+        ) from exc
+    return (
+        len(children) == 2
+        and len(country_children) == 1
+        and len(selected_value_children) == 1
+    )
 
 
 def _capture_options(

@@ -103,10 +103,11 @@ continues to expose no semantic token.
 
 After exact Country-option activation, Greenhouse may expose no selected value
 on the collapsed combo itself. In that exact surface only, the postcondition
-also accepts the parsed calling-code suffix when it is the complete text of the
-bound Country combo's immediate parent `section` and the combo is collapsed.
-This is an exact structural equality check, not a document scan, substring
-match, alternate locator, or value emitted in the public surface or receipt.
+also accepts the parsed calling-code suffix when the combo's immediate parent
+is a `section` with exactly two direct children: the exact bound Country combo
+and one `section` whose complete text is that suffix. This is an exact
+structural equality check, not a document scan, substring match, alternate
+locator, or value emitted in the public surface or receipt.
 
 The native chooser is also one action per call. The ATS lane supplies its
 validated YAML contract, one exact Firefox object, and the exact configured
