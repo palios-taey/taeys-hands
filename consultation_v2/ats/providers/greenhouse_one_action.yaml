@@ -65,6 +65,11 @@ options_surface:
     role: combo box
     states_all:
       - expanded
+  semantic_projection:
+    origin:
+      name: Country
+      role: combo box
+    kind: country_calling_code_suffix_v1
   container:
     roles_any_of:
       - list box

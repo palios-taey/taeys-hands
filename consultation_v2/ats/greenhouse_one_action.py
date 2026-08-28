@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import time
 from typing import Any, Callable, Iterable, Mapping
@@ -51,6 +52,10 @@ _SHA256 = frozenset('0123456789abcdef')
 _UUID_FIELDS = ('transaction_id', 'action_id')
 _MAX_FROZEN_ACTION_BYTES = 4 * 1024 * 1024
 _INTERACTIVE_STATES = frozenset({'showing', 'visible', 'enabled'})
+_COUNTRY_CALLING_CODE_SUFFIX = re.compile(
+    r'(?P<semantic_token>\S(?:.*\S)?) \+[0-9]{1,3}',
+    flags=re.ASCII,
+)
 _STOP_CODES = frozenset({
     'exact_postcondition_failure',
     'missing_truthful_applicant_data',
@@ -343,6 +348,7 @@ def load_action_spec() -> ActionSpec:
             'max_depth',
             'prune_subtree_roles',
             'origin',
+            'semantic_projection',
             'container',
             'option',
         },
@@ -369,6 +375,32 @@ def load_action_spec() -> ActionSpec:
         'options_surface.origin.states_all',
     ) != ['expanded']:
         raise GreenhouseOneActionError('options_surface.origin contract is invalid')
+    semantic_projection = _mapping(
+        options_surface['semantic_projection'],
+        'options_surface.semantic_projection',
+    )
+    _exact_keys(
+        semantic_projection,
+        {'origin', 'kind'},
+        'options_surface.semantic_projection',
+    )
+    semantic_origin = _mapping(
+        semantic_projection['origin'],
+        'options_surface.semantic_projection.origin',
+    )
+    _exact_keys(
+        semantic_origin,
+        {'name', 'role'},
+        'options_surface.semantic_projection.origin',
+    )
+    if semantic_origin != {'name': 'Country', 'role': 'combo box'}:
+        raise GreenhouseOneActionError(
+            'options_surface semantic projection origin is invalid'
+        )
+    if semantic_projection['kind'] != 'country_calling_code_suffix_v1':
+        raise GreenhouseOneActionError(
+            'options_surface semantic projection kind is invalid'
+        )
     for key in ('container', 'option'):
         option_part = _mapping(options_surface[key], f'options_surface.{key}')
         _exact_keys(
@@ -1051,6 +1083,20 @@ def _capture_form(
     return BoundSurface(public, bindings, firefox, document, route)
 
 
+def _option_semantic_token(rendered_name: str, contract_kind: str) -> str:
+    if contract_kind != 'country_calling_code_suffix_v1':
+        raise GreenhouseOneActionError('country option semantic contract kind is invalid')
+    match = _COUNTRY_CALLING_CODE_SUFFIX.fullmatch(rendered_name)
+    if match is None:
+        raise GreenhouseOneActionError(
+            'country option does not satisfy country_calling_code_suffix_v1'
+        )
+    semantic_token = match.group('semantic_token')
+    if not semantic_token:
+        raise GreenhouseOneActionError('country option semantic token is empty')
+    return semantic_token
+
+
 def _capture_options(
     provider_spec: ProviderSpec,
     action_spec: ActionSpec,
@@ -1148,8 +1194,15 @@ def _capture_options(
     option_names = [str(item.get('name') or '') for item in candidates]
     if len(option_names) != len(set(option_names)):
         raise GreenhouseOneActionError('exact activated combo options contain duplicate names')
+    semantic_projection = options_contract['semantic_projection']
+    semantic_origin = semantic_projection['origin']
+    projects_semantic_tokens = (
+        expanded[0].get('name') == semantic_origin['name']
+        and expanded[0].get('role') == semantic_origin['role']
+    )
     bindings: dict[str, Mapping[str, Any]] = {}
     options: list[dict[str, Any]] = []
+    semantic_tokens: list[str] = []
     for ordinal, element in enumerate(candidates):
         name = str(element.get('name') or '')
         role = str(element.get('role') or '').strip().lower()
@@ -1162,13 +1215,26 @@ def _capture_options(
             ordinal,
         )
         bindings[ref] = element
-        options.append({
+        option = {
             'ref': ref,
             'name': name,
             'role': role,
             'states': sorted(_live_states(element)),
             'operations': ['select_option'],
-        })
+        }
+        if projects_semantic_tokens:
+            semantic_token = _option_semantic_token(
+                name,
+                semantic_projection['kind'],
+            )
+            semantic_tokens.append(semantic_token)
+            option['semantic_token'] = semantic_token
+        options.append(option)
+    if projects_semantic_tokens:
+        if not semantic_tokens:
+            raise GreenhouseOneActionError('country options contain zero semantic tokens')
+        if len(semantic_tokens) != len(set(semantic_tokens)):
+            raise GreenhouseOneActionError('country options contain duplicate semantic tokens')
     public = {
         'schema': SURFACE_SCHEMA,
         'surface': 'options',
@@ -1590,6 +1656,8 @@ def _next_action_surface_capsule(
                 control['is_empty'] = raw['value_length'] == 0
             if 'semantic_values' in raw:
                 control['has_semantic_value'] = bool(raw['semantic_values'])
+            if 'semantic_token' in raw:
+                control['semantic_token'] = raw['semantic_token']
             for key in ('artifact_slot', 'boundary', 'combo_safety'):
                 if key in raw:
                     control[key] = raw[key]
