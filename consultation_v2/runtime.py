@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 import os
 import subprocess
@@ -15,6 +17,7 @@ from consultation_v2.interact import (
 from consultation_v2.platforms import routing as platform_routing
 from consultation_v2.platforms_runtime import display_environment
 from consultation_v2.tree import find_elements
+from .native_dialog_snapshot import build_native_dialog_snapshot
 from .snapshot import build_app_root_snapshot, build_menu_snapshot, build_snapshot
 from .types import ElementRef, Snapshot
 from .yaml_contract import load_platform_yaml
@@ -279,6 +282,278 @@ class ConsultationRuntime:
             anchor_key=anchor_key,
             require_non_empty=require_non_empty,
         )
+
+    def wait_for_observation_barrier(
+        self,
+        *,
+        scope: str,
+        expected_elements: Iterable[str] = (),
+        stable_cycles: int = 2,
+        timeout: float = 45.0,
+        interval: float = 0.2,
+    ) -> tuple[Snapshot | None, dict[str, Any]]:
+        factories: dict[str, Callable[[], Snapshot]] = {
+            'base': self.snapshot,
+            'menu_snapshot': self.menu_snapshot,
+            'app_root_snapshot': self.app_root_snapshot,
+        }
+        policies = {
+            'base': 'invalidate_reacquire',
+            'menu_snapshot': 'invalidate_reacquire_menu',
+            'app_root_snapshot': 'live_reacquire_no_clear',
+        }
+        if scope not in factories:
+            raise ValueError(f'unsupported observation barrier scope {scope!r}')
+        required = max(2, int(stable_cycles))
+        started = time.monotonic()
+        deadline = started + max(float(timeout), float(interval))
+        expected = tuple(sorted({str(key) for key in expected_elements if str(key)}))
+        samples: list[dict[str, Any]] = []
+        previous_projection = ''
+        stable = 0
+        last_snapshot: Snapshot | None = None
+
+        while time.monotonic() < deadline:
+            refresh = self._refresh_observation_scope(scope)
+            sample_number = len(samples) + 1
+            if refresh['result'] != 'success':
+                samples.append({
+                    'sample': sample_number,
+                    'elapsed_ms': round((time.monotonic() - started) * 1000),
+                    'refresh': refresh,
+                    'postcondition_matched': False,
+                })
+                break
+            try:
+                last_snapshot = factories[scope]()
+            except Exception as exc:
+                samples.append({
+                    'sample': sample_number,
+                    'elapsed_ms': round((time.monotonic() - started) * 1000),
+                    'refresh': refresh,
+                    'postcondition_matched': False,
+                    'error': f'{type(exc).__name__}: {str(exc)[:300]}',
+                })
+                break
+            projection = self._observation_projection(
+                last_snapshot,
+                expected_elements=expected,
+            )
+            projection_sha256 = hashlib.sha256(
+                json.dumps(
+                    projection,
+                    ensure_ascii=True,
+                    separators=(',', ':'),
+                    sort_keys=True,
+                ).encode('utf-8')
+            ).hexdigest()
+            matched = bool(projection['mapped']) and int(last_snapshot.raw_count or 0) > 0
+            stable = (
+                stable + 1
+                if matched and projection_sha256 == previous_projection
+                else (1 if matched else 0)
+            )
+            previous_projection = projection_sha256
+            samples.append({
+                'sample': sample_number,
+                'elapsed_ms': round((time.monotonic() - started) * 1000),
+                'refresh': refresh,
+                'projection_sha256': projection_sha256,
+                'current_url': last_snapshot.url,
+                'raw_count': int(last_snapshot.raw_count or 0),
+                'match_counts': {
+                    key: len(items)
+                    for key, items in projection['mapped'].items()
+                },
+                'postcondition_matched': matched,
+                'stable_cycles': stable,
+            })
+            if stable >= required:
+                return last_snapshot, {
+                    'schema': 'post_action_observation.v1',
+                    'surface': 'browser',
+                    'scope': scope,
+                    'refresh_policy': policies[scope],
+                    'stable_cycles_required': required,
+                    'stable_cycles_observed': stable,
+                    'samples': samples,
+                    'result': 'PASS',
+                    'next_mutation_authorized': True,
+                }
+            time.sleep(max(0.0, float(interval)))
+
+        return last_snapshot, {
+            'schema': 'post_action_observation.v1',
+            'surface': 'browser',
+            'scope': scope,
+            'refresh_policy': policies[scope],
+            'stable_cycles_required': required,
+            'stable_cycles_observed': stable,
+            'samples': samples,
+            'result': 'HALT',
+            'next_mutation_authorized': False,
+        }
+
+    def wait_for_native_dialog_observation_barrier(
+        self,
+        *,
+        stable_cycles: int = 2,
+        timeout: float = 6.0,
+        interval: float = 0.15,
+    ) -> tuple[Any | None, dict[str, Any]]:
+        required = max(2, int(stable_cycles))
+        started = time.monotonic()
+        deadline = started + max(float(timeout), float(interval))
+        previous_revision = ''
+        stable = 0
+        samples: list[dict[str, Any]] = []
+        last_snapshot = None
+
+        while time.monotonic() < deadline:
+            sample_number = len(samples) + 1
+            try:
+                last_snapshot = build_native_dialog_snapshot(self.platform)
+            except Exception as exc:
+                samples.append({
+                    'sample': sample_number,
+                    'elapsed_ms': round((time.monotonic() - started) * 1000),
+                    'refresh': {'result': 'failed'},
+                    'postcondition_matched': False,
+                    'error': f'{type(exc).__name__}: {str(exc)[:300]}',
+                })
+                break
+            matched = bool(last_snapshot.mapped) and last_snapshot.raw_count > 0
+            stable = (
+                stable + 1
+                if matched and last_snapshot.revision == previous_revision
+                else (1 if matched else 0)
+            )
+            previous_revision = last_snapshot.revision
+            samples.append({
+                'sample': sample_number,
+                'elapsed_ms': round((time.monotonic() - started) * 1000),
+                'refresh': {
+                    'result': 'success',
+                    'desktop': 'invalidated',
+                    'firefox': 'invalidated_reacquired',
+                    'document': 'not_applicable',
+                },
+                'projection_sha256': last_snapshot.revision,
+                'raw_count': last_snapshot.raw_count,
+                'match_counts': {
+                    key: len(items)
+                    for key, items in last_snapshot.mapped.items()
+                },
+                'postcondition_matched': matched,
+                'stable_cycles': stable,
+            })
+            if stable >= required:
+                return last_snapshot, {
+                    'schema': 'post_action_observation.v1',
+                    'surface': 'native_dialog',
+                    'scope': 'native_dialog',
+                    'refresh_policy': 'native_invalidate_reacquire',
+                    'stable_cycles_required': required,
+                    'stable_cycles_observed': stable,
+                    'samples': samples,
+                    'result': 'PASS',
+                    'next_mutation_authorized': True,
+                }
+            time.sleep(max(0.0, float(interval)))
+
+        return last_snapshot, {
+            'schema': 'post_action_observation.v1',
+            'surface': 'native_dialog',
+            'scope': 'native_dialog',
+            'refresh_policy': 'native_invalidate_reacquire',
+            'stable_cycles_required': required,
+            'stable_cycles_observed': stable,
+            'samples': samples,
+            'result': 'HALT',
+            'next_mutation_authorized': False,
+        }
+
+    def _refresh_observation_scope(self, scope: str) -> dict[str, str]:
+        if scope == 'app_root_snapshot':
+            firefox = platform_routing.find_firefox_for_platform(self.platform)
+            if firefox is None:
+                return {
+                    'result': 'failed',
+                    'desktop': 'not_requested',
+                    'firefox': 'missing',
+                    'document': 'not_requested',
+                }
+            return {
+                'result': 'success',
+                'desktop': 'not_requested',
+                'firefox': 'reacquired_no_clear',
+                'document': 'not_requested',
+            }
+
+        receipt = {
+            'result': 'success',
+            'desktop': 'pending',
+            'firefox': 'pending',
+            'document': 'pending',
+        }
+        try:
+            import gi
+            gi.require_version('Atspi', '2.0')
+            from gi.repository import Atspi as _Atspi
+            _Atspi.get_desktop(0).clear_cache_single()
+            receipt['desktop'] = 'invalidated'
+        except Exception as exc:
+            receipt['result'] = 'failed'
+            receipt['desktop'] = f'failed:{type(exc).__name__}'
+            return receipt
+        firefox = platform_routing.find_firefox_for_platform(self.platform)
+        if firefox is None:
+            receipt['result'] = 'failed'
+            receipt['firefox'] = 'missing'
+            return receipt
+        try:
+            firefox.clear_cache_single()
+            receipt['firefox'] = 'invalidated_reacquired'
+        except Exception as exc:
+            receipt['result'] = 'failed'
+            receipt['firefox'] = f'failed:{type(exc).__name__}'
+            return receipt
+        document = platform_routing.get_platform_document(firefox, self.platform)
+        if document is None:
+            receipt['result'] = 'failed'
+            receipt['document'] = 'missing'
+            return receipt
+        try:
+            document.clear_cache_single()
+            receipt['document'] = 'invalidated_reacquired'
+        except Exception as exc:
+            receipt['result'] = 'failed'
+            receipt['document'] = f'failed:{type(exc).__name__}'
+        return receipt
+
+    @staticmethod
+    def _observation_projection(
+        snapshot: Snapshot,
+        *,
+        expected_elements: Iterable[str] = (),
+    ) -> dict[str, Any]:
+        expected = set(expected_elements)
+        mapped: dict[str, list[dict[str, Any]]] = {}
+        for key, items in sorted((snapshot.mapped or {}).items()):
+            if not items or (expected and key not in expected):
+                continue
+            mapped[key] = sorted(
+                (
+                    {
+                        'name': item.name or '',
+                        'role': item.role or '',
+                        'states': sorted(str(state) for state in (item.states or [])),
+                    }
+                    for item in items
+                ),
+                key=lambda row: json.dumps(row, sort_keys=True, separators=(',', ':')),
+            )
+        return {'url': snapshot.url, 'mapped': mapped}
 
     def _wait_for_stable_tree(
         self,
