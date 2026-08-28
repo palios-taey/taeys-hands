@@ -109,8 +109,10 @@ The compiler enforces this only order:
 
 ```text
 Notifications
--> zero or more separately receipted Show more transitions
+-> complete exact mounted-candidate inventory
 -> one frozen qualifying mapped candidate
+   or exact closed-reason exclusions for every mounted actionable candidate
+-> zero or more separately receipted Show more transitions only after exclusions
 -> selected thread (separate scroll when required, then open)
 -> optional Like when privately authorized
 -> frozen paste
@@ -131,26 +133,32 @@ has not been completely observed.
 1. Observe the current LinkedIn document and require exactly one YAML-mapped `notifications_navigation`.
 2. Activate it once and require the exact `notifications_all` route in the fresh post-action observation.
 3. Observe all mounted notification cards raw before filtering. Do not narrow the read to one activity type.
-4. If exact `notifications_show_more_results` is mapped, activate that continuation once. Its public key,
-   description, and action card are stable semantic authority; mounted candidates and inventory identities are
-   not encoded in the Taey-facing card while continuation is mandatory. After the exact live target/ref is
-   re-resolved inside the one-action child, Hands freezes that immediate inventory in one process-local context,
-   consumes and clears it exactly once, then requires the transaction-bound All-category authority, the exact
-   Notifications-All route, and a stable fresh inventory containing at least one exact YAML-declared content-link
-   URI identity absent from that immediate pre-action inventory.
+4. Classify the complete exact mounted actionable inventory before continuation. One exact qualifying private
+   selection compiles immediately even when `notifications_show_more_results` is mapped. If none qualifies,
+   continuation requires one transaction-, policy-, and inventory-bound exclusion decision covering every
+   actionable activity in exact inventory order. Each activity carries one or more closed reason codes. Missing,
+   partial, duplicate, reordered, stale, or unknown-reason evidence refuses continuation.
+5. If exact `notifications_show_more_results` is mapped after complete exclusions, activate that continuation
+   once. Its public key, description, and action card are stable semantic authority. After the exact live
+   target/ref is re-resolved inside the one-action child, Hands freezes that immediate inventory in one
+   process-local context, consumes and clears it exactly once, then requires the transaction-bound All-category
+   authority, the exact Notifications-All route, and a stable fresh inventory containing at least one exact
+   YAML-declared content-link URI identity absent from that immediate pre-action inventory. The accepted
+   continuation invalidates the prior exclusions; the newly mounted inventory must be classified before another
+   continuation can compile.
    Mounted article counts may shrink when LinkedIn virtualizes the refreshed tree, so monotonic DOM growth is not
    an action postcondition. Pure unmount or reorder is not novelty. Candidate projection remains independently
    exact. Each further continuation is a new transition with a new observation.
-5. Only after the mounted stream is fully evidenced, apply the runtime-injected freshness, target, dedup, and
-   author-cooloff policy. A comment target must be no older than 72 hours.
-6. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.
-7. Bind the exact observed `selected_post_activity_<id>` key, its activity identity, and its body SHA-256. Read the full selected post.
-8. If exact `selected_post_thread_open_activity_<id>_body_<digest>` is observed off-screen, invoke its declared
+6. Apply the runtime-injected freshness, target, dedup, and author-cooloff policy to each newly mounted exact
+   inventory. A comment target must be no older than 72 hours.
+7. Activate one exact `notification_candidate_<ordinal>_activity_<id>` and require that same activity in the selected route.
+8. Bind the exact observed `selected_post_activity_<id>` key, its activity identity, and its body SHA-256. Read the full selected post.
+9. If exact `selected_post_thread_open_activity_<id>_body_<digest>` is observed off-screen, invoke its declared
    `scroll_into_view` primitive once, require that same exact activity/body key fully inside the actual display,
    and observe again. Only when the fresh observation declares `mapped_pointer_activate`, invoke that exact key
    once and require the same activity, same body digest, and visible target-scoped comment controls. Read the
    complete visible thread, including every visible author reply, before any draft exists.
-9. Like, compose, gate, send, rendered-comment verification, and durable touch persistence are separate effects.
+10. Like, compose, gate, send, rendered-comment verification, and durable touch persistence are separate effects.
    They may execute only after each effect has its own current public YAML mapping and production qualification.
 
 Qualification at Hands baseline `f270b31c9c0c86a302ea6193d4696d8a08e0e68f`: selected-post and thread-open

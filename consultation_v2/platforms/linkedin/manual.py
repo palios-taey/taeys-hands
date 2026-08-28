@@ -1327,8 +1327,8 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                 x=None,
                 y=None,
                 description=(
-                    'continue only after all mounted candidates have '
-                    'evidenced exclusions'
+                    'continue only with exact inventory-bound exclusions '
+                    'for every mounted actionable candidate'
                 ),
                 raw={
                     **dict(continuations[0].raw),
