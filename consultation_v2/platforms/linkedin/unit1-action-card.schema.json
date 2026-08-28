@@ -1,0 +1,63 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://palios-taey.org/schemas/linkedin-unit1-action-card-v1.json",
+  "title": "LinkedIn Unit 1 one-action card",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "transaction_sha256",
+    "sequence",
+    "phase",
+    "snapshot_revision",
+    "element",
+    "element_sha256",
+    "method",
+    "verification_operation",
+    "effect_class",
+    "postcondition_kind",
+    "card_sha256"
+  ],
+  "properties": {
+    "schema": {"const": "linkedin_unit1_action_card_v1"},
+    "transaction_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sequence": {"type": "integer", "minimum": 1},
+    "phase": {
+      "enum": [
+        "notifications_navigation",
+        "notifications_continuation",
+        "notification_candidate",
+        "thread_scroll",
+        "thread_open",
+        "optional_like",
+        "comment_paste",
+        "comment_submit"
+      ]
+    },
+    "snapshot_revision": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "element": {"type": "string", "minLength": 1},
+    "element_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "method": {
+      "enum": [
+        "activate",
+        "mapped_pointer_activate",
+        "scroll_into_view",
+        "activate_optional_like",
+        "paste_frozen_text",
+        "submit_frozen_comment"
+      ]
+    },
+    "verification_operation": {
+      "enum": [
+        "activate",
+        "scroll_into_view",
+        "activate_optional_like",
+        "paste_frozen_text",
+        "submit_frozen_comment"
+      ]
+    },
+    "effect_class": {"enum": ["page", "viewport", "outward", "draft"]},
+    "postcondition_kind": {"type": "string", "minLength": 1},
+    "card_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

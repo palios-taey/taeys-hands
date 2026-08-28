@@ -78,6 +78,42 @@ Each transition receipt records at least:
 item. A later unit may begin only when it is independent and cannot repeat, conceal, or compound the mismatch.
 `side_effect_uncertain` stops the entire cycle and forbids replay.
 
+### Deterministic Unit 1 step boundary
+
+[`consultation_v2/platforms/linkedin/unit1.py`](../consultation_v2/platforms/linkedin/unit1.py)
+compiles one Unit 1 transition at a time from the fresh augmented LinkedIn snapshot, the complete preceding
+receipt chain, and one frozen private policy/draft binding. It does not define another locator, walker, or UI
+primitive. The returned card names exactly one operation already declared by `linkedin.yaml` and
+`manual.py`; the existing revenue-UI adapter executes that one card and returns the YAML-owned postcondition
+barrier for `accept_unit1_step` to bind into the next immutable receipt. The card shape is frozen by
+[`unit1-action-card.schema.json`](../consultation_v2/platforms/linkedin/unit1-action-card.schema.json).
+
+The private binding schema is
+[`unit1-private-input.schema.json`](../consultation_v2/platforms/linkedin/unit1-private-input.schema.json).
+It contains no human per-action approval token. It freezes the complete mounted candidate-stream digest before
+private policy filtering, one policy-qualified activity, the exact 72-hour freshness evidence,
+target/dedup/author-cooloff verdicts, selected post and thread-evidence digests, optional-Like authority,
+byte-exact draft, and expected own-account author. A changed stream, false/missing verdict, changed age,
+activity/body mismatch, different editor bytes, or incomplete receipt chain stops before another card is issued.
+
+The compiler enforces this only order:
+
+```text
+Notifications
+-> zero or more separately receipted Show more transitions
+-> one frozen qualifying mapped candidate
+-> selected thread (separate scroll when required, then open)
+-> optional Like when privately authorized
+-> frozen paste
+-> final comment submit
+```
+
+Every accepted nonterminal step still requires a new observation before the compiler can issue another card.
+The submit card is last, and only the exact rendered-comment postcondition produces a terminal delivery receipt
+under [`unit1-step-receipt.schema.json`](../consultation_v2/platforms/linkedin/unit1-step-receipt.schema.json).
+This code boundary is not itself production qualification; the live chain must still earn the qualification
+evidence below from a clean merged and deployed commit.
+
 ## Unit 1 — Comment
 
 Notifications is the mandatory entry. Taey must not begin from the feed or content search while Notifications
