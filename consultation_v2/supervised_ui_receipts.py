@@ -14,9 +14,11 @@ import uuid
 
 from .supervised_ui_contract import (
     CONTRACT_VERSION,
+    SupervisedUiContractError,
     TRAINING_PROTOCOL_COMMIT,
     canonical_json_bytes,
     sha256_hex,
+    validate_runtime_config_manifest,
 )
 
 
@@ -107,6 +109,7 @@ class HandsReceiptStore:
         presence_incarnation_id: str,
         hands_incarnation_id: str,
         hands_commit: str,
+        runtime_config: Mapping[str, Any],
         dir_fd: int,
         lock_fd: int,
         events: list[dict[str, Any]],
@@ -117,6 +120,7 @@ class HandsReceiptStore:
         self.presence_incarnation_id = presence_incarnation_id
         self.hands_incarnation_id = hands_incarnation_id
         self.hands_commit = hands_commit
+        self.runtime_config = dict(runtime_config)
         self._dir_fd = dir_fd
         self._lock_fd = lock_fd
         self._events = events
@@ -132,12 +136,21 @@ class HandsReceiptStore:
         presence_incarnation_id: str,
         hands_incarnation_id: str,
         hands_commit: str,
+        platform: str,
+        runtime_config: Mapping[str, Any],
     ) -> 'HandsReceiptStore':
         _uuid_text(session_id, 'session_id')
         _uuid_text(presence_incarnation_id, 'presence_incarnation_id')
         _uuid_text(hands_incarnation_id, 'hands_incarnation_id')
         if not isinstance(hands_commit, str) or not _GIT_COMMIT_RE.fullmatch(hands_commit):
             raise ReceiptStoreError('hands_commit must be an exact commit SHA')
+        try:
+            validated_runtime_config = validate_runtime_config_manifest(
+                runtime_config,
+                platform,
+            )
+        except SupervisedUiContractError as exc:
+            raise ReceiptStoreError('runtime_config is invalid') from exc
         validated_root = _validate_external_root(root, public_repo_roots)
         session_dir = validated_root / session_id
         try:
@@ -178,7 +191,9 @@ class HandsReceiptStore:
                 raise ReceiptStoreError('another worker owns this supervised session') from exc
             events = cls._load_and_verify_events(
                 dir_fd=dir_fd,
+                hands_commit=hands_commit,
                 session_id=session_id,
+                runtime_config=validated_runtime_config,
             )
             return cls(
                 root=validated_root,
@@ -187,6 +202,7 @@ class HandsReceiptStore:
                 presence_incarnation_id=presence_incarnation_id,
                 hands_incarnation_id=hands_incarnation_id,
                 hands_commit=hands_commit,
+                runtime_config=validated_runtime_config,
                 dir_fd=dir_fd,
                 lock_fd=lock_fd,
                 events=events,
@@ -223,7 +239,9 @@ class HandsReceiptStore:
         cls,
         *,
         dir_fd: int,
+        hands_commit: str,
         session_id: str,
+        runtime_config: Mapping[str, Any],
     ) -> list[dict[str, Any]]:
         names = sorted(name for name in os.listdir(dir_fd) if name != '.worker.lock')
         if any(_RECEIPT_RE.fullmatch(name) is None for name in names):
@@ -265,6 +283,8 @@ class HandsReceiptStore:
                 event.get('caused_by_event_id') == prior_event_id,
                 event.get('payload_sha256') == sha256_hex(raw_bytes),
                 event.get('raw_artifact') == f'{prefix}.raw',
+                event.get('runtime_config') == runtime_config,
+                event.get('runtime_config_sha256') == runtime_config['sha256'],
             }
             commits = event.get('public_repository_commits')
             if not isinstance(commits, dict) or frozenset(commits) != frozenset({
@@ -278,6 +298,8 @@ class HandsReceiptStore:
                 commits['palios-taey/taeys-hands']
             ):
                 raise ReceiptStoreError('receipt Hands commit provenance is invalid')
+            if commits['palios-taey/taeys-hands'] != hands_commit:
+                raise ReceiptStoreError('receipt Hands commit provenance changed')
             if False in checks:
                 raise ReceiptStoreError('receipt causal chain verification failed')
             _uuid_text(event.get('event_id'), 'receipt.event_id')
@@ -364,6 +386,8 @@ class HandsReceiptStore:
             },
             'raw_artifact': raw_filename,
             'recorded_at': datetime.now(timezone.utc).isoformat(timespec='microseconds'),
+            'runtime_config': self.runtime_config,
+            'runtime_config_sha256': self.runtime_config['sha256'],
             'schema_version': CONTRACT_VERSION,
             'sequence': sequence,
             'session_id': self.session_id,
