@@ -2,8 +2,12 @@
 from __future__ import annotations
 
 import ast
+import hashlib
+import json
+import os
 from pathlib import Path
 import sys
+import tempfile
 import types
 from unittest import mock
 
@@ -39,6 +43,7 @@ from consultation_v2.ats.greenhouse_one_action import (  # noqa: E402
     _capture_options,
     _complete_form_sha256,
     _native_public,
+    load_frozen_action_fd,
     load_action_spec,
     project_form_surface,
 )
@@ -58,6 +63,7 @@ from consultation_v2 import native_dialog_snapshot as native_snapshot  # noqa: E
 
 ONE_ACTION_PATH = REPO_ROOT / 'consultation_v2/ats/greenhouse_one_action.py'
 NATIVE_PATH = REPO_ROOT / 'consultation_v2/native_dialog_snapshot.py'
+RUNNER_PATH = REPO_ROOT / 'scripts/run_ats_greenhouse_one_action.py'
 
 
 class _FakeState:
@@ -551,7 +557,7 @@ def _assert_one_action_static_contract() -> None:
 
     execute = next(
         node for node in tree.body
-        if isinstance(node, ast.FunctionDef) and node.name == 'execute_frozen_action'
+        if isinstance(node, ast.FunctionDef) and node.name == 'execute_frozen_action_fd'
     )
     start_lines = [
         node.lineno
@@ -613,11 +619,116 @@ def _assert_native_text_redaction() -> None:
         raise RuntimeError('private native chooser text was not redacted from receipts')
 
 
+def _assert_fd_only_frozen_action_boundary() -> None:
+    runner_tree = ast.parse(RUNNER_PATH.read_text(encoding='utf-8'))
+    runner_strings = {
+        node.value
+        for node in ast.walk(runner_tree)
+        if isinstance(node, ast.Constant) and isinstance(node.value, str)
+    }
+    if '--transaction' in runner_strings:
+        raise RuntimeError('Greenhouse runner retained a pathname transaction input')
+    if not {
+        '--transaction-fd',
+        '--expected-transaction-sha256',
+    }.issubset(runner_strings):
+        raise RuntimeError('Greenhouse runner lost its exact descriptor contract')
+
+    one_action_tree = ast.parse(ONE_ACTION_PATH.read_text(encoding='utf-8'))
+    loader = next(
+        node for node in one_action_tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == '_secure_private_json_fd'
+    )
+    calls = {
+        (
+            f'{node.func.value.id}.{node.func.attr}'
+            if isinstance(node.func, ast.Attribute)
+            and isinstance(node.func.value, ast.Name)
+            else node.func.id
+            if isinstance(node.func, ast.Name)
+            else ''
+        )
+        for node in ast.walk(loader)
+        if isinstance(node, ast.Call)
+    }
+    if {'open', 'os.open', 'Path', 'Path.open', 'Path.read_text', 'Path.read_bytes'} & calls:
+        raise RuntimeError('Greenhouse fd loader retained a pathname reopen')
+    if not {'os.fstat', 'os.pread', 'fcntl.fcntl'}.issubset(calls):
+        raise RuntimeError('Greenhouse fd loader lost exact inode reads')
+
+    original = {
+        'schema': 'ats_greenhouse_frozen_action_v1',
+        'provider': 'greenhouse',
+        'transaction_id': '00000000-0000-4000-8000-000000000000',
+        'action_id': '00000000-0000-4000-8000-000000000001',
+        'application_identity_sha256': '1' * 64,
+        'expected_prior_event_hash': None,
+        'action': {'kind': 'observe_form'},
+    }
+    replacement = {
+        **original,
+        'action_id': '00000000-0000-4000-8000-000000000002',
+    }
+    original_raw = json.dumps(
+        original,
+        ensure_ascii=True,
+        separators=(',', ':'),
+        sort_keys=True,
+    ).encode('utf-8')
+    replacement_raw = json.dumps(
+        replacement,
+        ensure_ascii=True,
+        separators=(',', ':'),
+        sort_keys=True,
+    ).encode('utf-8')
+    digest = hashlib.sha256(original_raw).hexdigest()
+    with tempfile.TemporaryDirectory(prefix='ats-greenhouse-fd-') as temp:
+        action_path = Path(temp) / 'action.json'
+        replacement_path = Path(temp) / 'replacement.json'
+        action_path.write_bytes(original_raw)
+        replacement_path.write_bytes(replacement_raw)
+        action_path.chmod(0o400)
+        replacement_path.chmod(0o400)
+        descriptor = os.open(
+            action_path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        try:
+            os.replace(replacement_path, action_path)
+            loaded = load_frozen_action_fd(descriptor, digest)
+            if loaded['action_id'] != original['action_id']:
+                raise RuntimeError('path replacement substituted the held action inode')
+            try:
+                load_frozen_action_fd(descriptor, 'f' * 64)
+            except GreenhouseOneActionError:
+                pass
+            else:
+                raise RuntimeError('Greenhouse fd loader accepted a mismatched digest')
+        finally:
+            os.close(descriptor)
+
+        action_path.chmod(0o600)
+        descriptor = os.open(action_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+        try:
+            try:
+                load_frozen_action_fd(
+                    descriptor,
+                    hashlib.sha256(replacement_raw).hexdigest(),
+                )
+            except GreenhouseOneActionError:
+                pass
+            else:
+                raise RuntimeError('Greenhouse fd loader accepted a mode-0600 action')
+        finally:
+            os.close(descriptor)
+
+
 def main() -> int:
     _assert_one_action_static_contract()
     _assert_greenhouse_surface()
     _assert_combo_owned_options_surface()
     _assert_native_text_redaction()
+    _assert_fd_only_frozen_action_boundary()
     _assert_public_native_walker()
     print('ATS_GREENHOUSE_ONE_ACTION_OK')
     return 0

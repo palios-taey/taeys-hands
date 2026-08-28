@@ -13,7 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from consultation_v2.ats.greenhouse_one_action import (  # noqa: E402
     GreenhouseOneActionError,
-    execute_frozen_action,
+    execute_frozen_action_fd,
 )
 
 
@@ -21,10 +21,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(
         description='Execute exactly one frozen Greenhouse ATS action.',
     )
-    parser.add_argument('--transaction', required=True)
+    parser.add_argument('--transaction-fd', required=True, type=int)
+    parser.add_argument('--expected-transaction-sha256', required=True)
     args = parser.parse_args()
     try:
-        result = execute_frozen_action(args.transaction)
+        result = execute_frozen_action_fd(
+            args.transaction_fd,
+            args.expected_transaction_sha256,
+        )
     except GreenhouseOneActionError as exc:
         result = {
             'schema': 'ats_greenhouse_one_action_refusal_v1',

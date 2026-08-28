@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import fcntl
 import hashlib
 import hmac
 import json
@@ -48,6 +49,7 @@ PUBLIC_REPO_ROOT = Path(__file__).resolve().parents[2]
 
 _SHA256 = frozenset('0123456789abcdef')
 _UUID_FIELDS = ('transaction_id', 'action_id')
+_MAX_FROZEN_ACTION_BYTES = 4 * 1024 * 1024
 _INTERACTIVE_STATES = frozenset({'showing', 'visible', 'enabled'})
 _STOP_CODES = frozenset({
     'exact_postcondition_failure',
@@ -424,45 +426,111 @@ def load_action_spec() -> ActionSpec:
     return ActionSpec(document=document, sha256=hashlib.sha256(raw).hexdigest())
 
 
-def _secure_private_json(path_value: str | os.PathLike[str]) -> dict[str, Any]:
-    path = Path(path_value)
-    if not path.is_absolute():
+def _secure_private_json_fd(fd_value: int, expected_sha256: str) -> dict[str, Any]:
+    if isinstance(fd_value, bool) or not isinstance(fd_value, int) or fd_value < 3:
         raise GreenhouseOneActionError(
-            'frozen action path must be absolute',
+            'frozen action descriptor is invalid',
+            code='policy_or_authority_boundary',
+        )
+    if (
+        not isinstance(expected_sha256, str)
+        or len(expected_sha256) != 64
+        or any(character not in _SHA256 for character in expected_sha256)
+    ):
+        raise GreenhouseOneActionError(
+            'expected frozen action SHA-256 is invalid',
             code='policy_or_authority_boundary',
         )
     try:
-        metadata = os.lstat(path)
+        descriptor_flags = fcntl.fcntl(fd_value, fcntl.F_GETFL)
+        before = os.fstat(fd_value)
     except OSError as exc:
         raise GreenhouseOneActionError(
-            'frozen action path is unavailable',
+            'frozen action descriptor is unavailable',
             code='policy_or_authority_boundary',
         ) from exc
-    if stat.S_ISLNK(metadata.st_mode) or not stat.S_ISREG(metadata.st_mode):
+    if descriptor_flags & os.O_ACCMODE != os.O_RDONLY:
         raise GreenhouseOneActionError(
-            'frozen action must be a real regular file',
+            'frozen action descriptor must be read-only',
             code='policy_or_authority_boundary',
         )
-    if metadata.st_uid != os.getuid() or stat.S_IMODE(metadata.st_mode) not in {0o400, 0o600}:
+    if (
+        not stat.S_ISREG(before.st_mode)
+        or before.st_uid != os.geteuid()
+        or stat.S_IMODE(before.st_mode) != 0o400
+        or not 0 < before.st_size <= _MAX_FROZEN_ACTION_BYTES
+    ):
         raise GreenhouseOneActionError(
-            'frozen action must be owner-only and worker-owned',
+            'frozen action descriptor is not an exact owner-only regular file',
             code='policy_or_authority_boundary',
         )
-    resolved = path.resolve(strict=True)
-    if resolved == PUBLIC_REPO_ROOT or PUBLIC_REPO_ROOT in resolved.parents:
-        raise GreenhouseOneActionError(
-            'frozen action must remain outside the public repository',
-            code='policy_or_authority_boundary',
-        )
+    signature = (
+        before.st_dev,
+        before.st_ino,
+        before.st_mode,
+        before.st_uid,
+        before.st_gid,
+        before.st_size,
+        before.st_mtime_ns,
+        before.st_ctime_ns,
+    )
+    chunks: list[bytes] = []
+    offset = 0
     try:
-        value = json.loads(path.read_text(encoding='utf-8'))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-        raise GreenhouseOneActionError('frozen action is not UTF-8 JSON') from exc
+        while offset < before.st_size:
+            chunk = os.pread(
+                fd_value,
+                min(1024 * 1024, before.st_size - offset),
+                offset,
+            )
+            if not chunk:
+                raise OSError('short read')
+            chunks.append(chunk)
+            offset += len(chunk)
+        if os.pread(fd_value, 1, before.st_size):
+            raise OSError('frozen action grew while read')
+        after = os.fstat(fd_value)
+    except OSError as exc:
+        raise GreenhouseOneActionError(
+            'frozen action descriptor changed while read',
+            code='policy_or_authority_boundary',
+        ) from exc
+    after_signature = (
+        after.st_dev,
+        after.st_ino,
+        after.st_mode,
+        after.st_uid,
+        after.st_gid,
+        after.st_size,
+        after.st_mtime_ns,
+        after.st_ctime_ns,
+    )
+    raw = b''.join(chunks)
+    if signature != after_signature or len(raw) != before.st_size:
+        raise GreenhouseOneActionError(
+            'frozen action descriptor changed while read',
+            code='policy_or_authority_boundary',
+        )
+    if not hmac.compare_digest(hashlib.sha256(raw).hexdigest(), expected_sha256):
+        raise GreenhouseOneActionError(
+            'frozen action descriptor digest mismatch',
+            code='policy_or_authority_boundary',
+        )
+
+    def exact_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        if len(pairs) != len({key for key, _value in pairs}):
+            raise ValueError('duplicate frozen action key')
+        return dict(pairs)
+
+    try:
+        value = json.loads(raw.decode('utf-8'), object_pairs_hook=exact_object)
+    except (UnicodeDecodeError, ValueError) as exc:
+        raise GreenhouseOneActionError('frozen action is not exact UTF-8 JSON') from exc
     return _mapping(value, 'frozen_action')
 
 
-def load_frozen_action(path_value: str | os.PathLike[str]) -> dict[str, Any]:
-    request = _secure_private_json(path_value)
+def load_frozen_action_fd(fd_value: int, expected_sha256: str) -> dict[str, Any]:
+    request = _secure_private_json_fd(fd_value, expected_sha256)
     _exact_keys(
         request,
         {
@@ -1737,8 +1805,8 @@ def _perform_action(
     }, mutation_started
 
 
-def execute_frozen_action(path_value: str | os.PathLike[str]) -> dict[str, Any]:
-    request = load_frozen_action(path_value)
+def execute_frozen_action_fd(fd_value: int, expected_sha256: str) -> dict[str, Any]:
+    request = load_frozen_action_fd(fd_value, expected_sha256)
     provider_spec = load_provider_spec('greenhouse')
     action_spec = load_action_spec()
     secret = _lease_secret()
@@ -1851,8 +1919,8 @@ __all__ = [
     'ActionSpec',
     'BoundSurface',
     'GreenhouseOneActionError',
-    'execute_frozen_action',
+    'execute_frozen_action_fd',
     'load_action_spec',
-    'load_frozen_action',
+    'load_frozen_action_fd',
     'project_form_surface',
 ]
