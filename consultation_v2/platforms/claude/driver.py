@@ -4213,20 +4213,82 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
     # Enter prompt
     # ------------------------------------------------------------------
 
+    def _wait_for_prompt_input_focus(
+        self,
+        input_key: str,
+    ) -> tuple[Snapshot | None, ElementRef | None, list[dict[str, object]]]:
+        observation = self.cfg['workflow']['prompt']['observation']
+        stable_cycles = max(1, int(observation['stable_cycles']))
+        interval = max(1, int(observation['interval_ms'])) / 1000.0
+        timeout = max(int(observation['interval_ms']), int(observation['timeout_ms'])) / 1000.0
+        started = time.monotonic()
+        deadline = started + timeout
+        matched_cycles = 0
+        samples: list[dict[str, object]] = []
+        last_snapshot: Snapshot | None = None
+        last_input: ElementRef | None = None
+        while True:
+            last_snapshot = self.runtime.snapshot()
+            last_input = self.find_first(last_snapshot, input_key)
+            states = {
+                str(state).strip().lower()
+                for state in ((last_input.states or []) if last_input else [])
+            }
+            matched = last_input is not None and 'focused' in states
+            matched_cycles = matched_cycles + 1 if matched else 0
+            samples.append({
+                'sample': len(samples) + 1,
+                'elapsed_ms': round((time.monotonic() - started) * 1000.0, 1),
+                'revision': self._snapshot_receipt_revision(last_snapshot),
+                'input_present': last_input is not None,
+                'input_states': sorted(states),
+                'postcondition_matched': matched,
+                'stable_cycles': matched_cycles,
+            })
+            if matched_cycles >= stable_cycles:
+                return last_snapshot, last_input, samples
+            if time.monotonic() >= deadline:
+                return last_snapshot, None, samples
+            time.sleep(interval)
+
     def enter_prompt(
         self, request: ConsultationRequest, result: ConsultationResult
     ) -> bool:
+        prompt_cfg = self.cfg['workflow']['prompt']
+        input_key = str(prompt_cfg['input'])
         snap = self.runtime.snapshot()
-        input_el = self.find_first(snap, 'input')
+        input_el = self.find_first(snap, input_key)
         if not input_el:
             result.add_step('prompt', False, 'Claude input field not found',
                             snapshot=snap.serializable())
             return False
-        if not self.runtime.click(input_el):
+        input_states = {
+            str(state).strip().lower() for state in (input_el.states or [])
+        }
+        focus_action = 'already_focused'
+        if 'focused' not in input_states and not self.runtime.click(input_el):
             result.add_step('prompt', False, 'Claude input focus click failed',
+                            input_states=sorted(input_states),
                             snapshot=snap.serializable())
             return False
-        time.sleep(0.3)
+        if 'focused' not in input_states:
+            focus_action = 'atspi_click'
+        focus_snap, input_el, focus_samples = self._wait_for_prompt_input_focus(input_key)
+        if input_el is None:
+            result.add_step(
+                'prompt',
+                False,
+                'Claude input focus postcondition did not stabilize',
+                focus_action=focus_action,
+                focus_observation={
+                    **prompt_cfg['observation'],
+                    'samples': focus_samples,
+                    'result': 'HALT',
+                    'next_mutation_authorized': False,
+                },
+                snapshot=focus_snap.serializable() if focus_snap else snap.serializable(),
+            )
+            return False
         pasted = self.runtime.paste(request.message)
         verify_snap = self.runtime.wait_until(
             lambda: (
@@ -4253,6 +4315,13 @@ class ClaudeConsultationDriver(_ClaudeInlineBase):
         verified = bool(pasted and prompt_ready)
         result.add_step('prompt', verified, 'Claude prompt entered',
                         landed_chars=landed_chars, expected_chars=len(request.message),
+                        focus_action=focus_action,
+                        focus_observation={
+                            **prompt_cfg['observation'],
+                            'samples': focus_samples,
+                            'result': 'PASS',
+                            'next_mutation_authorized': True,
+                        },
                         paste_chip_names=paste_chip_names[:3],
                         snapshot=verify_snap.serializable())
         return verified
