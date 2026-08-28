@@ -725,6 +725,157 @@ def _assert_combo_owned_options_surface() -> None:
     else:
         raise RuntimeError('duplicate options containers did not fail loud')
 
+    collapsed_public, _ = project_form_surface(
+        provider_spec,
+        action_spec,
+        route,
+        collapsed_form,
+        Rect(0, 100, 1000, 700),
+        secret,
+    )
+    multi_public, _ = project_form_surface(
+        provider_spec,
+        action_spec,
+        route,
+        [expanded_form[0], referral_form[0]],
+        Rect(0, 100, 1000, 700),
+        secret,
+    )
+    request = {
+        'application_identity_sha256': route.application_identity_sha256,
+        'action': {'kind': 'observe_form'},
+    }
+    captured_option_refs: list[str] = []
+
+    def observe(
+        form_public: dict,
+        inherited_surface: greenhouse.BoundSurface | GreenhouseOneActionError | None,
+    ) -> tuple[dict, bool]:
+        captured_option_refs.clear()
+        form_surface = greenhouse.BoundSurface(
+            form_public,
+            {},
+            firefox,
+            document,
+            route,
+        )
+
+        def inherited_capture(
+            _provider_spec: object,
+            _action_spec: object,
+            _secret: bytes,
+            combo_ref: str,
+        ) -> greenhouse.BoundSurface:
+            captured_option_refs.append(combo_ref)
+            if isinstance(inherited_surface, GreenhouseOneActionError):
+                raise inherited_surface
+            if not isinstance(inherited_surface, greenhouse.BoundSurface):
+                raise RuntimeError('unexpected inherited options capture')
+            return inherited_surface
+
+        with (
+            mock.patch.object(greenhouse, '_capture_form', return_value=form_surface),
+            mock.patch.object(greenhouse, '_capture_options', side_effect=inherited_capture),
+            mock.patch.object(greenhouse.time, 'sleep', return_value=None),
+        ):
+            return greenhouse._perform_action(
+                request,
+                provider_spec,
+                action_spec,
+                secret,
+            )
+
+    base_result, base_mutation_started = observe(collapsed_public, None)
+    if (
+        base_mutation_started
+        or set(base_result) != {
+            'state',
+            'surface',
+            'surface_capsule',
+            'samples',
+            'mutation_count',
+            'next_mutation_authorized',
+        }
+        or base_result['state'] != 'action_ready'
+        or base_result['surface'] != collapsed_public
+        or base_result['surface']['surface'] != 'form'
+        or base_result['surface_capsule'] != greenhouse._next_action_surface_capsule(
+            collapsed_public,
+            route.application_identity_sha256,
+        )
+        or base_result['mutation_count'] != 0
+        or base_result['next_mutation_authorized'] is not True
+        or len(base_result['samples']) != 2
+        or {
+            sample['refresh_policy']
+            for sample in base_result['samples']
+        } != {'invalidate_reacquire'}
+        or captured_option_refs
+    ):
+        raise RuntimeError('zero-expanded observe_form behavior changed')
+
+    country_result, country_mutation_started = observe(expanded_public, exact)
+    if (
+        country_mutation_started
+        or country_result['surface'] != exact.public
+        or country_result['surface']['origin']['combo_ref'] != origin_ref
+        or country_result['surface']['origin']['match_count'] != 1
+        or [
+            control.get('semantic_token')
+            for control in country_result['surface_capsule']['controls']
+        ] != ['Canada', 'United States']
+        or country_result['mutation_count'] != 0
+        or len(country_result['samples']) != 2
+        or {
+            sample['refresh_policy']
+            for sample in country_result['samples']
+        } != {'live_reacquire_no_clear'}
+        or captured_option_refs != [origin_ref, origin_ref]
+    ):
+        raise RuntimeError('inherited Country options were not classified exactly')
+
+    referral_result, referral_mutation_started = observe(referral_public, referral)
+    if (
+        referral_mutation_started
+        or referral_result['surface'] != referral.public
+        or referral_result['surface']['origin']['combo_ref'] != referral_ref
+        or referral_result['surface']['origin']['match_count'] != 1
+        or any(
+            'semantic_token' in control
+            for control in referral_result['surface_capsule']['controls']
+        )
+        or referral_result['mutation_count'] != 0
+        or captured_option_refs != [referral_ref, referral_ref]
+    ):
+        raise RuntimeError('inherited non-Country options classification changed')
+
+    try:
+        observe(multi_public, exact)
+    except GreenhouseOneActionError as exc:
+        if (
+            'inherited expanded combo cardinality is 2' not in str(exc)
+            or exc.mutation_started
+            or captured_option_refs
+        ):
+            raise
+    else:
+        raise RuntimeError('multiple inherited expanded combos did not halt')
+
+    try:
+        observe(
+            expanded_public,
+            GreenhouseOneActionError('inherited exact options are invalid'),
+        )
+    except GreenhouseOneActionError as exc:
+        if (
+            str(exc) != 'inherited exact options are invalid'
+            or exc.mutation_started
+            or captured_option_refs != [origin_ref]
+        ):
+            raise
+    else:
+        raise RuntimeError('invalid inherited options did not halt')
+
 
 def _assert_one_action_static_contract() -> None:
     expected = {

@@ -1755,6 +1755,50 @@ def _perform_action(
         )
         surface = barrier.surface
         assert isinstance(surface, BoundSurface)
+        origin_contract = action_spec.document['options_surface']['origin']
+        expanded = [
+            control
+            for control in surface.public['controls']
+            if control.get('role') == origin_contract['role']
+            and set(origin_contract['states_all']) <= set(control.get('states') or [])
+        ]
+        if len(expanded) > 1:
+            raise GreenhouseOneActionError(
+                'inherited expanded combo cardinality is '
+                f'{len(expanded)}; expected at most 1'
+            )
+        if expanded:
+            origin_ref = expanded[0].get('ref')
+            if not isinstance(origin_ref, str) or not origin_ref:
+                raise GreenhouseOneActionError(
+                    'inherited expanded combo has no exact ref'
+                )
+            inherited_form_revision = surface.public['revision']
+            barrier = _wait_barrier(
+                lambda: _capture_options(
+                    provider_spec,
+                    action_spec,
+                    secret,
+                    origin_ref,
+                ),
+                barriers['options'],
+                lambda candidate: (
+                    isinstance(candidate, BoundSurface)
+                    and candidate.public.get('surface') == 'options'
+                    and candidate.route.application_identity_sha256 == identity
+                    and candidate.public['application_identity_sha256'] == identity
+                    and candidate.public['origin']['combo_ref'] == origin_ref
+                    and candidate.public['origin']['name'] == expanded[0]['name']
+                    and candidate.public['origin']['role'] == expanded[0]['role']
+                    and candidate.public['origin']['form_revision']
+                    == inherited_form_revision
+                    and candidate.public['origin']['match_count'] == 1
+                    and candidate.public['container']['match_count'] == 1
+                    and bool(candidate.public['controls'])
+                ),
+            )
+            surface = barrier.surface
+            assert isinstance(surface, BoundSurface)
         return {
             'state': 'action_ready',
             'surface': surface.public,
