@@ -5,10 +5,42 @@ import hashlib
 import json
 from pathlib import Path
 import sys
+import types
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
+
+if 'gi' not in sys.modules:
+    fake_gi = types.ModuleType('gi')
+    fake_gi.require_version = lambda *_args: None
+    fake_repository = types.ModuleType('gi.repository')
+
+    class _FakeAtspi:
+        class CoordType:
+            SCREEN = 0
+
+        class StateType:
+            CHECKED = 'checked'
+            DEFUNCT = 'defunct'
+            EDITABLE = 'editable'
+            ENABLED = 'enabled'
+            EXPANDED = 'expanded'
+            FOCUSABLE = 'focusable'
+            FOCUSED = 'focused'
+            MULTI_LINE = 'multi line'
+            PRESSED = 'pressed'
+            REQUIRED = 'required'
+            SELECTED = 'selected'
+            SHOWING = 'showing'
+            VISIBLE = 'visible'
+
+        class Text:
+            pass
+
+    fake_repository.Atspi = _FakeAtspi
+    sys.modules['gi'] = fake_gi
+    sys.modules['gi.repository'] = fake_repository
 
 from consultation_v2.platforms.linkedin import manual  # noqa: E402
 from consultation_v2.platforms.linkedin.unit1 import (  # noqa: E402
@@ -59,19 +91,32 @@ def snapshot(mapped: dict[str, list[ElementRef]]) -> Snapshot:
     )
 
 
-def barrier(card: dict) -> dict:
+def barrier(card: dict, private: dict) -> dict:
     terminal = card['phase'] == 'comment_submit'
+    postcondition = {
+        'element_key': card['element'],
+        'operation': card['verification_operation'],
+        'effect_class': card['effect_class'],
+        'postcondition': card['postcondition_kind'],
+    }
+    if terminal:
+        postcondition.update({
+            'route_exact': True,
+            'activity_exact': True,
+            'activity_sources': ['document_url'],
+            'selected_post_body_sha256': private['selected_post_body_sha256'],
+            'editor_empty': True,
+            'exact_own_comment_count': 1,
+            'comment_text_sha256': private['text_sha256'],
+            'comment_text_chars': len(private['text']),
+            'observed_url': 'https://www.linkedin.com/feed/update/example/',
+        })
     return {
         'result': 'PASS',
         'next_mutation_authorized': not terminal,
         'terminal_delivery_verified': terminal,
         'observe_required_before_next_mutation': not terminal,
-        'postcondition_receipt': {
-            'element_key': card['element'],
-            'operation': card['verification_operation'],
-            'effect_class': card['effect_class'],
-            'postcondition': card['postcondition_kind'],
-        },
+        'postcondition_receipt': postcondition,
     }
 
 
@@ -144,14 +189,15 @@ def main() -> int:
         set(card_schema['required']) == set(navigation),
         'action card schema drifted from the compiler output',
     )
-    receipts.append(accept_unit1_step(navigation, barrier(navigation), None))
+    receipts.append(accept_unit1_step(navigation, barrier(navigation, private), None, private))
 
     candidate_card = compile_unit1_step(stream_snapshot, REVISION, private, receipts)
     require(candidate_card['phase'] == 'notification_candidate', 'qualifying post was not selected')
     receipts.append(accept_unit1_step(
         candidate_card,
-        barrier(candidate_card),
+        barrier(candidate_card, private),
         receipts[-1]['receipt_sha256'],
+        private,
     ))
 
     selected_post_key = f'{manual.SELECTED_POST_PREFIX}{ACTIVITY}'
@@ -190,8 +236,9 @@ def main() -> int:
     require(thread_card['phase'] == 'thread_open', 'thread was not opened explicitly')
     receipts.append(accept_unit1_step(
         thread_card,
-        barrier(thread_card),
+        barrier(thread_card, private),
         receipts[-1]['receipt_sha256'],
+        private,
     ))
 
     reaction_key = (
@@ -234,8 +281,9 @@ def main() -> int:
     require(like_card['phase'] == 'optional_like', 'authorized Like was not isolated')
     receipts.append(accept_unit1_step(
         like_card,
-        barrier(like_card),
+        barrier(like_card, private),
         receipts[-1]['receipt_sha256'],
+        private,
     ))
 
     liked = element(
@@ -260,8 +308,9 @@ def main() -> int:
     require(paste_card['phase'] == 'comment_paste', 'frozen paste was not isolated')
     receipts.append(accept_unit1_step(
         paste_card,
-        barrier(paste_card),
+        barrier(paste_card, private),
         receipts[-1]['receipt_sha256'],
+        private,
     ))
 
     filled_editor = element(
@@ -303,10 +352,57 @@ def main() -> int:
         receipts,
     )
     require(submit_card['phase'] == 'comment_submit', 'publication was not final')
+    submit_barrier = barrier(submit_card, private)
+    for field, wrong_value in (
+        ('route_exact', False),
+        ('activity_exact', False),
+        ('selected_post_body_sha256', '4' * 64),
+        ('exact_own_comment_count', 0),
+        ('comment_text_sha256', '5' * 64),
+    ):
+        insufficient = json.loads(json.dumps(submit_barrier))
+        insufficient['postcondition_receipt'][field] = wrong_value
+        try:
+            accept_unit1_step(
+                submit_card,
+                insufficient,
+                receipts[-1]['receipt_sha256'],
+                private,
+            )
+        except LinkedInUnit1Error:
+            pass
+        else:
+            raise AssertionError(f'terminal barrier accepted invalid {field}')
+    insufficient = json.loads(json.dumps(submit_barrier))
+    insufficient['postcondition_receipt'].pop('activity_sources')
+    try:
+        accept_unit1_step(
+            submit_card,
+            insufficient,
+            receipts[-1]['receipt_sha256'],
+            private,
+        )
+    except LinkedInUnit1Error:
+        pass
+    else:
+        raise AssertionError('terminal barrier accepted incomplete evidence')
+    wrong_private = {**private, 'expected_author_name': 'Different Private Author'}
+    try:
+        accept_unit1_step(
+            submit_card,
+            submit_barrier,
+            receipts[-1]['receipt_sha256'],
+            wrong_private,
+        )
+    except LinkedInUnit1Error:
+        pass
+    else:
+        raise AssertionError('terminal barrier escaped the frozen author binding')
     receipts.append(accept_unit1_step(
         submit_card,
-        barrier(submit_card),
+        submit_barrier,
         receipts[-1]['receipt_sha256'],
+        private,
     ))
     require(
         verify_receipt_chain(receipts, transaction_sha256) == 'comment_submit',

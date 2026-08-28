@@ -35,6 +35,10 @@ _CONTINUATION = re.compile(
     rf'^{NOTIFICATIONS_CONTINUATION_PREFIX}(?P<count>[0-9]+)_'
     r'(?P<prefix>[0-9a-f]{16})$'
 )
+_SUBMIT = re.compile(
+    rf'^{SELECTED_POST_SUBMIT_PREFIX}(?P<activity>[0-9]+)_body_'
+    r'(?P<body>[0-9a-f]{64})_draft_(?P<draft>[0-9a-f]{64})$'
+)
 _AGE = re.compile(r'^(?P<count>[1-9][0-9]*)(?P<unit>[smhdw])$')
 
 _PRIVATE_KEYS = frozenset({
@@ -535,7 +539,10 @@ def accept_unit1_step(
     card: Mapping[str, Any],
     barrier_receipt: Mapping[str, Any],
     previous_receipt_sha256: str | None,
+    private_input: Mapping[str, Any],
 ) -> dict[str, Any]:
+    private = validate_private_input(private_input)
+    transaction_sha256 = _sha256(private)
     if not isinstance(card, Mapping) or frozenset(card) != _CARD_KEYS:
         raise LinkedInUnit1Error('action card fields are incomplete or unknown')
     card_payload = dict(card)
@@ -544,6 +551,8 @@ def accept_unit1_step(
         raise LinkedInUnit1Error('action card digest is invalid')
     if card_payload.get('schema') != ACTION_CARD_SCHEMA:
         raise LinkedInUnit1Error('action card schema is invalid')
+    if card_payload.get('transaction_sha256') != transaction_sha256:
+        raise LinkedInUnit1Error('action card is not bound to the frozen private input')
     phase = card_payload.get('phase')
     if phase not in _PHASE_TRANSITIONS:
         raise LinkedInUnit1Error('action card phase is invalid')
@@ -564,6 +573,8 @@ def accept_unit1_step(
         _require_sha256(previous_receipt_sha256, 'previous_receipt_sha256')
     if (sequence == 1) != (previous_receipt_sha256 is None):
         raise LinkedInUnit1Error('action card sequence is not bound to the prior receipt')
+    if sequence == 1 and phase != 'notifications_navigation':
+        raise LinkedInUnit1Error('Unit 1 must begin from Notifications navigation')
     if not isinstance(barrier_receipt, Mapping):
         raise LinkedInUnit1Error('postcondition barrier receipt is invalid')
     postcondition = barrier_receipt.get('postcondition_receipt')
@@ -581,6 +592,51 @@ def accept_unit1_step(
         or (terminal and next_mutation_authorized is not False)
     ):
         raise LinkedInUnit1Error('exact postcondition barrier did not authorize the step')
+    if postcondition.get('effect_class') != card_payload.get('effect_class'):
+        raise LinkedInUnit1Error('postcondition effect class does not match the action card')
+    if terminal:
+        submit_match = _SUBMIT.fullmatch(element)
+        expected_postcondition_keys = {
+            'activity_exact',
+            'activity_sources',
+            'comment_text_chars',
+            'comment_text_sha256',
+            'editor_empty',
+            'effect_class',
+            'element_key',
+            'exact_own_comment_count',
+            'observed_url',
+            'operation',
+            'postcondition',
+            'route_exact',
+            'selected_post_body_sha256',
+        }
+        activity_sources = postcondition.get('activity_sources')
+        observed_url = postcondition.get('observed_url')
+        if (
+            submit_match is None
+            or submit_match.group('activity') != private['selected_activity']
+            or submit_match.group('body') != private['selected_post_body_sha256']
+            or submit_match.group('draft') != private['text_sha256']
+            or set(postcondition) != expected_postcondition_keys
+            or postcondition.get('route_exact') is not True
+            or postcondition.get('activity_exact') is not True
+            or not isinstance(activity_sources, list)
+            or not activity_sources
+            or not all(isinstance(source, str) and source for source in activity_sources)
+            or postcondition.get('selected_post_body_sha256')
+            != private['selected_post_body_sha256']
+            or postcondition.get('editor_empty') is not True
+            or postcondition.get('exact_own_comment_count') != 1
+            or postcondition.get('comment_text_sha256') != private['text_sha256']
+            or postcondition.get('comment_text_chars') != len(private['text'])
+            or not isinstance(observed_url, str)
+            or not observed_url.startswith('https://www.linkedin.com/')
+        ):
+            raise LinkedInUnit1Error(
+                'terminal barrier did not prove the exact route/activity/body '
+                'and one rendered own author/text comment'
+            )
     receipt = {
         'schema': STEP_RECEIPT_SCHEMA,
         'transaction_sha256': card_payload['transaction_sha256'],
