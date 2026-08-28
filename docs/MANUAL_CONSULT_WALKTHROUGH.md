@@ -168,6 +168,32 @@ real mismatch or exhausted barrier writes failure evidence and stops. A successf
 paste, send, register a monitor, or authorize reuse of the failed send identity. Start the valuable consultation
 as another new send identity after the recovery receipt passes.
 
+## Grok Bot pre-send recovery
+
+Grok can overlay the exact fresh composer with the exact dialog `Meet Grok Bot` and the two exact push buttons
+`Dismiss` and `Get Grok Bot`. That state is a terminal first mismatch for the send identity. Never reuse or
+retry that identity. After the terminal evidence is preserved, launch one separately identified recovery
+transaction only when two fresh canonical base observations at the exact YAML `urls.fresh` URL each map exactly
+one `grok_bot_dialog`, one enabled `grok_bot_dismiss`, and one enabled `grok_bot_get`, with no uploaded-file,
+remove-attachment, Send, or Stop control:
+
+```bash
+python3 scripts/run_manual_chat_worker.py recover-grok-pre-send \
+  --display :23 \
+  --seat-id NEW_RECOVERY_SEAT \
+  --artifact-root NEW_PRIVATE_ARTIFACT_ROOT \
+  --exception-key meet_grok_bot \
+  --source-terminal-identity SPENT_SEND_IDENTITY
+```
+
+The recovery worker clicks only the YAML-mapped `Dismiss` control once. It never clicks `Get Grok Bot`,
+navigates, selects a model, attaches, pastes, or sends. The post-click barrier requires exactly one `input`,
+`attach_trigger`, `model_selector`, and `new_chat` for two consecutive fresh base observations at the exact fresh
+URL. Every interstitial, attachment, Send, and Stop control must be absent. The receipt binds both pre-click
+revisions and exact count maps, the single click primitive, the final two stable revisions and exact count maps,
+and zero navigation/attachment/paste/send counts. A real mismatch or exhausted barrier stops without another
+mutation. A passed recovery authorizes only a new send identity; it never resumes the spent one.
+
 ## Platform card
 
 | Member | Platform/display | YAML | Requested selection | Attachment menu observation | Submit |
