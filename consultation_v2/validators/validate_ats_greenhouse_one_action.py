@@ -982,6 +982,164 @@ def _assert_combo_owned_options_surface() -> None:
         raise RuntimeError('invalid inherited options did not halt')
 
 
+def _assert_timeout_evidence_retention() -> None:
+    provider_spec = load_provider_spec('greenhouse')
+    action_spec = load_action_spec()
+    route = match_provider_route(
+        provider_spec,
+        'https://boards.greenhouse.io/example/jobs/123456',
+    )
+    combo_node = _FakeNode(
+        'Country',
+        'combo box',
+        ['showing', 'visible', 'enabled', 'focusable', 'editable'],
+    )
+    raw_country = {
+        'name': 'Country',
+        'role': 'combo box',
+        'states': ['showing', 'visible', 'enabled', 'focusable', 'editable'],
+        'x': 120,
+        'y': 200,
+        'extent': {'x': 100, 'y': 180, 'width': 300, 'height': 40},
+        'atspi_obj': combo_node,
+    }
+    public, bindings = project_form_surface(
+        provider_spec,
+        action_spec,
+        route,
+        [raw_country],
+        Rect(0, 100, 1000, 700),
+        b'q' * 32,
+    )
+    surface = greenhouse.BoundSurface(
+        public,
+        bindings,
+        None,
+        None,
+        route,
+    )
+    barrier = {
+        'refresh_policy': 'invalidate_reacquire',
+        'stable_cycles': 2,
+        'interval_ms': 0,
+        'timeout_ms': 1,
+    }
+    with (
+        mock.patch.object(
+            greenhouse.time,
+            'monotonic',
+            side_effect=[0.0, 0.0, 0.0002, 0.0005, 0.0007, 0.002],
+        ),
+        mock.patch.object(greenhouse.time, 'sleep', return_value=None),
+        mock.patch.object(greenhouse, 'find_elements', return_value=[raw_country]),
+    ):
+        try:
+            greenhouse._post_action_barrier(
+                lambda: surface,
+                barrier,
+                lambda _surface: False,
+            )
+        except GreenhouseOneActionError as exc:
+            timeout_error = exc
+        else:
+            raise RuntimeError('unmatched Greenhouse postcondition did not time out')
+    evidence = timeout_error.barrier_evidence
+    country = (evidence or {}).get('last_country_projection') or {}
+    raw_subtree = country.get('raw_subtree') or {}
+    if (
+        timeout_error.mutation_started is not True
+        or timeout_error.reason != 'exact postcondition barrier timed out'
+        or not isinstance(evidence, dict)
+        or evidence.get('schema')
+        != 'ats_greenhouse_postcondition_timeout_evidence_v1'
+        or evidence.get('screenshot_authority')
+        != 'diagnostic_only_not_captured_by_runner'
+        or evidence.get('last_surface') != {
+            'surface': 'form',
+            'revision': public['revision'],
+        }
+        or len(evidence.get('samples') or ()) != 2
+        or [sample.get('elapsed_ms') for sample in evidence['samples']] != [0, 0]
+        or any(
+            sample.get('revision') != public['revision']
+            or sample.get('postcondition_matched') is not False
+            for sample in evidence['samples']
+        )
+        or country.get('canonical_match_count') != 1
+        or country.get('canonical_control') != public['controls'][0]
+        or raw_subtree.get('capture_status') != 'captured'
+        or raw_subtree.get('walker') != 'consultation_v2.tree.find_elements'
+        or raw_subtree.get('observed_count') != 1
+        or raw_subtree.get('truncated') is not False
+        or [
+            (item.get('name'), item.get('role'))
+            for item in raw_subtree.get('elements') or ()
+        ] != [('Country', 'combo box')]
+    ):
+        raise RuntimeError('Greenhouse timeout evidence did not retain the exact barrier frontier')
+
+    class ReceiptStore:
+        def __init__(self) -> None:
+            self.raw_payloads: list[dict[str, object]] = []
+            self.events: tuple[dict[str, object], ...] = ()
+
+        def __enter__(self) -> 'ReceiptStore':
+            return self
+
+        def __exit__(self, *_args: object) -> None:
+            return None
+
+        def has_execution(self, _action_id: str) -> bool:
+            return False
+
+        def write_once(
+            self,
+            _event: dict[str, object],
+            raw: bytes,
+        ) -> dict[str, str]:
+            self.raw_payloads.append(json.loads(raw))
+            return {'event_hash': str(len(self.raw_payloads)) * 64}
+
+    store = ReceiptStore()
+    request = {
+        'schema': 'ats_greenhouse_frozen_action_v1',
+        'provider': 'greenhouse',
+        'transaction_id': '00000000-0000-4000-8000-000000000000',
+        'action_id': '00000000-0000-4000-8000-000000000001',
+        'application_identity_sha256': route.application_identity_sha256,
+        'expected_prior_event_hash': None,
+        'action': {
+            'kind': 'select_option',
+            'ref': 'r_' + ('1' * 32),
+            'revision': '2' * 64,
+            'combo_ref': 'r_' + ('3' * 32),
+            'expected_option_name': 'United States +1',
+        },
+    }
+    fake_spec = types.SimpleNamespace(sha256='4' * 64)
+    with (
+        mock.patch.object(greenhouse, 'load_frozen_action_fd', return_value=request),
+        mock.patch.object(greenhouse, 'load_provider_spec', return_value=fake_spec),
+        mock.patch.object(greenhouse, 'load_action_spec', return_value=fake_spec),
+        mock.patch.object(greenhouse, '_lease_secret', return_value=b'x' * 32),
+        mock.patch.object(greenhouse, '_display', return_value=':17'),
+        mock.patch.object(greenhouse, '_firefox_pid', return_value=4242),
+        mock.patch.object(greenhouse, '_receipt_store', return_value=store),
+        mock.patch.object(greenhouse, '_perform_action', side_effect=timeout_error),
+        mock.patch.dict(os.environ, {'AT_SPI_BUS_ADDRESS': 'unix:path=/synthetic'}),
+    ):
+        returned = greenhouse.execute_frozen_action_fd(9, '5' * 64)
+    durable = store.raw_payloads[-1]
+    if (
+        returned.get('state') != 'side_effect_uncertain'
+        or returned.get('stop_code') != 'side_effect_uncertainty'
+        or returned.get('next_mutation_authorized') is not False
+        or returned.get('postcondition_evidence') != evidence
+        or durable.get('postcondition_evidence') != evidence
+    ):
+        raise RuntimeError('Greenhouse terminal receipt discarded timeout evidence')
+
+
 def _assert_one_action_static_contract() -> None:
     expected = {
         'observe_form': 0,
@@ -1262,6 +1420,7 @@ def main() -> int:
     _assert_one_action_static_contract()
     _assert_greenhouse_surface()
     _assert_combo_owned_options_surface()
+    _assert_timeout_evidence_retention()
     _assert_native_text_redaction()
     _assert_fd_only_frozen_action_boundary()
     _assert_public_native_walker()
