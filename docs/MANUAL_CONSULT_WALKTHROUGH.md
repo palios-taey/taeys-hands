@@ -285,11 +285,29 @@ Return a send receipt containing platform, display, final URL, two-attachment pr
 mapped Stop key, and monitor registration. Then stop all UI calls on that display. The worker never polls for
 completion.
 
-An exception recovery is a new frozen worker turn tied to the source worker-response SHA-256. It makes the
-same two read-only observations before mutation, permits only the exact action and element declared by that
-exception's YAML `recovery`, and enforces `max_attempts: 1`. After that single action, apply the same two-
-observation Stop/exception classification. Stop is handed to the monitor; a persistent or different state
-ends the recovery turn without a second action.
+An exception recovery is a new frozen worker turn tied to the source worker-response SHA-256. The existing
+manual-worker path requires that response to be a terminal worker report and remains unchanged. When a
+one-call consultation instead returns a generic failure report, pass its exact sibling
+`consultation_receipt.json` explicitly:
+
+```text
+python3 scripts/run_manual_chat_worker.py recover \
+  --platform PLATFORM --display DISPLAY --seat-id NEW_SEAT_ID \
+  --artifact-root NEW_ARTIFACT_ROOT --exception-key EXCEPTION_KEY \
+  --source-response-json SOURCE_ROOT/worker_response.json \
+  --source-consultation-receipt SOURCE_ROOT/consultation_receipt.json
+```
+
+Before creating the recovery artifact root or invoking a worker, the launcher requires the generic report to
+bind the exact sibling path, sibling SHA-256, failed result, and display. The sibling receipt must prove
+`ok=false`, the same platform, one successful Send/monitor chain, an empty response, the exact YAML recovery
+URL prefix, Stop absent, and singleton counts for the complete selected YAML exception set. Both source
+hashes are bound into the new recovery identity and instruction. Any mismatch refuses the turn.
+
+The accepted recovery makes the same two read-only observations before mutation, permits only the exact
+action and element declared by that exception's YAML `recovery`, and enforces `max_attempts: 1`. After that
+single action, apply the same two-observation Stop/exception classification. Stop is handed to the monitor;
+a persistent or different state ends the recovery turn without a second action.
 
 ### 7. Extract only after the completion notification
 
