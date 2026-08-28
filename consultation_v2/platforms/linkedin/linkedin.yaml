@@ -151,10 +151,12 @@ workflow:
           exact_query:
             _bprMode: vanilla
         role: link
-        states_exact:
+        states_required:
           - enabled
           - focusable
           - showing
+        allowed_optional_states:
+          - focused
         uri:
           scheme: https
           host: www.linkedin.com
