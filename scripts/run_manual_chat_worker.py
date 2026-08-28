@@ -1283,7 +1283,7 @@ def _send_content(
             "one fresh observation after every mutation:\n"
             "1. navigate to https://gemini.google.com/u/1/app?pageId=none; observe scope=base; "
             "require a populated Gemini tree and exactly one each of input, mode_picker, "
-            "tools_button, upload_menu, and new_chat. Require send_button, stop_button, and "
+            "tools_button, and upload_menu. Require send_button, stop_button, and "
             "copy_button absent. Record this post-navigation fresh URL.\n"
             "2. Require mode_picker name exactly Open mode picker, currently Pro Extended. If it "
             "is not exact: click element=mode_picker; observe scope=menu_snapshot; require "
