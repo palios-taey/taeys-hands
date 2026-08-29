@@ -627,7 +627,7 @@ def project_notification_inventory(
             {
                 key: value
                 for key, value in row.items()
-                if key != 'snapshot_revision'
+                if key not in {'snapshot_revision', 'structural_path'}
             }
             for row in rows
         ],

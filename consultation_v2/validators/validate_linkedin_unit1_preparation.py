@@ -865,7 +865,7 @@ def main() -> int:
                 {
                     key: value
                     for key, value in row.items()
-                    if key != 'snapshot_revision'
+                    if key not in {'snapshot_revision', 'structural_path'}
                 }
                 for row in artifact['rows']
             ],
@@ -893,8 +893,11 @@ def main() -> int:
     for changed_field, changed_surface in semantic_variants:
         changed = project_notification_inventory(changed_surface, REVISION_B)
         require(
-            changed.artifact['inventory_sha256'] != artifact['inventory_sha256'],
-            f'inventory digest ignored changed {changed_field}',
+            (
+                changed.artifact['inventory_sha256']
+                == artifact['inventory_sha256']
+            ) == (changed_field == 'structural_path'),
+            f'inventory digest authority mismatch for changed {changed_field}',
         )
 
     obsolete_one_link = inventory_snapshot(include_categories=True)
@@ -1507,17 +1510,30 @@ def main() -> int:
     )
     for changed_field, changed_surface in semantic_variants:
         changed_continuation_surface = with_continuation(changed_surface)
-        expect_error(
-            lambda changed_continuation_surface=changed_continuation_surface: (
-                compile_preparation_step(
-                    changed_continuation_surface,
-                    REVISION_B,
-                    selected_envelope,
-                    receipts,
-                )
-            ),
-            f'changed {changed_field} retained stale selection authority',
-        )
+        if changed_field == 'structural_path':
+            moved_candidate = compile_preparation_step(
+                changed_continuation_surface,
+                REVISION_B,
+                selected_envelope,
+                receipts,
+            )
+            require(
+                moved_candidate['phase'] == 'notification_candidate'
+                and moved_candidate['element'].endswith(ACTIVITY_A),
+                'structural-path churn invalidated exact selection authority',
+            )
+        else:
+            expect_error(
+                lambda changed_continuation_surface=changed_continuation_surface: (
+                    compile_preparation_step(
+                        changed_continuation_surface,
+                        REVISION_B,
+                        selected_envelope,
+                        receipts,
+                    )
+                ),
+                f'changed {changed_field} retained stale selection authority',
+            )
         if changed_field in {'age', 'ordinal', 'structural_path'}:
             equivalent_exclusion = compile_preparation_step(
                 changed_continuation_surface,
