@@ -154,9 +154,9 @@ workflow:
         states_required:
           - enabled
           - focusable
-          - showing
         allowed_optional_states:
           - focused
+          - showing
         uri:
           scheme: https
           host: www.linkedin.com

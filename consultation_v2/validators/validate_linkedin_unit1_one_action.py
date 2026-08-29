@@ -167,7 +167,7 @@ def main() -> int:
     navigation_snapshot = snapshot({
         manual.NOTIFICATIONS_NAVIGATION: [element(
             manual.NOTIFICATIONS_NAVIGATION,
-            states=['showing', 'enabled'],
+            states=['enabled', 'focusable'],
         )],
     })
     navigation = compile_unit1_step(

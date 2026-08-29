@@ -432,7 +432,7 @@ def navigation_snapshot() -> Snapshot:
     node = Node(
         'push button',
         'Notifications',
-        states=['showing', 'enabled'],
+        states=['enabled', 'focusable'],
     )
     return Snapshot(
         platform='linkedin',
@@ -798,6 +798,7 @@ def validate_initial_observation_barrier() -> None:
     original_build_snapshot = manual.build_snapshot
     original_notifications_target = manual._notifications_target
     original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
+    original_augment_snapshot = manual.augment_snapshot
     original_monotonic = manual.time.monotonic
     original_sleep = manual.time.sleep
 
@@ -810,9 +811,15 @@ def validate_initial_observation_barrier() -> None:
         )
         return (matches[0] if len(matches) == 1 else None), len(matches)
 
+    def forbidden_full_augmentation(_snapshot: Snapshot):
+        raise AssertionError(
+            'initial Notifications barrier entered selected-post augmentation'
+        )
+
     manual.build_snapshot = build_sequence
     manual._notifications_target = mapped_target
     manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
+    manual.augment_snapshot = forbidden_full_augmentation
     manual.time.monotonic = clock.monotonic
     manual.time.sleep = clock.sleep
     try:
@@ -821,6 +828,7 @@ def validate_initial_observation_barrier() -> None:
         manual.build_snapshot = original_build_snapshot
         manual._notifications_target = original_notifications_target
         manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
+        manual.augment_snapshot = original_augment_snapshot
         manual.time.monotonic = original_monotonic
         manual.time.sleep = original_sleep
     require(
@@ -861,6 +869,7 @@ def validate_initial_observation_barrier() -> None:
     )
     manual._notifications_target = mapped_target
     manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
+    manual.augment_snapshot = forbidden_full_augmentation
     manual.time.monotonic = clock.monotonic
     manual.time.sleep = clock.sleep
     try:
@@ -869,6 +878,7 @@ def validate_initial_observation_barrier() -> None:
         manual.build_snapshot = original_build_snapshot
         manual._notifications_target = original_notifications_target
         manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
+        manual.augment_snapshot = original_augment_snapshot
         manual.time.monotonic = original_monotonic
         manual.time.sleep = original_sleep
     require(
