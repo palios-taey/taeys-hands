@@ -149,6 +149,12 @@ def _manual_notification_contract() -> dict[str, Any]:
             'name_prefix': 'Unread notification.',
             'role': 'link',
             'states_include': ['enabled', 'focusable'],
+            'post_action_observation_barrier': {
+                'refresh_policy': 'invalidate_reacquire',
+                'stable_cycles': 2,
+                'interval_ms': 200,
+                'timeout_ms': 90000,
+            },
             'uri': {
                 'scheme': 'https',
                 'host': 'www.linkedin.com',
@@ -2917,6 +2923,7 @@ def stable_post_action_observation(
     selected_reaction_match = _SELECTED_POST_REACTION_KEY.fullmatch(element_key)
     selected_editor_match = _SELECTED_POST_EDITOR_KEY.fullmatch(element_key)
     selected_submit_match = _SELECTED_POST_SUBMIT_KEY.fullmatch(element_key)
+    candidate_match = _CANDIDATE_KEY.fullmatch(element_key)
     continuation_match = _CONTINUATION_KEY.fullmatch(element_key)
     continuation_context = (
         _consume_notification_continuation_context(element_key, operation)
@@ -3022,6 +3029,10 @@ def stable_post_action_observation(
         barrier = comment_contract['observation_barrier']
     elif element_key == navigation_contract['element_key']:
         barrier = navigation_contract['observation_barrier']
+    elif candidate_match is not None:
+        barrier = notification_contract['candidate'][
+            'post_action_observation_barrier'
+        ]
     else:
         barrier = notification_contract['observation_barrier']
     stable_cycles_required = barrier['stable_cycles']
