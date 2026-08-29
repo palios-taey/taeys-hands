@@ -721,7 +721,7 @@ class Clock:
 
 def validate_initial_observation_barrier() -> None:
     require(
-        manual._initial_preparation_observation_contract()['timeout_ms'] == 45000,
+        manual._initial_preparation_observation_contract()['timeout_ms'] == 120000,
         'initial barrier does not cover two measured LinkedIn tree traversals',
     )
     require(
