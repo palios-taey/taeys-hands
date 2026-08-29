@@ -2698,10 +2698,23 @@ def verify_post_action(
             _manual_notification_contract(),
         )
         expected_activity = candidate_match.group('activity')
-        if activity != expected_activity:
+        augmented = augment_snapshot(snapshot)
+        selected_key = f'{SELECTED_POST_PREFIX}{expected_activity}'
+        selected_matches = list(augmented.mapped.get(selected_key) or [])
+        selected_body_sha256 = (
+            selected_matches[0].raw.get('selected_post_body_sha256')
+            if len(selected_matches) == 1
+            else None
+        )
+        if (
+            activity != expected_activity
+            or len(selected_matches) != 1
+            or not isinstance(selected_body_sha256, str)
+            or _SHA256.fullmatch(selected_body_sha256) is None
+        ):
             raise ValueError(
                 'LinkedIn notification candidate postcondition failed: '
-                'fresh surface does not expose one exact selected activity'
+                'fresh surface does not expose one exact selected activity/body'
             )
         return {
             'element_key': element_key,
@@ -2712,6 +2725,7 @@ def verify_post_action(
             'document_url_exact': 'document_url' in activity_sources,
             'activity_exact': True,
             'activity_sources': list(activity_sources),
+            'selected_post_body_sha256': selected_body_sha256,
             'observed_url': snapshot.url,
         }
     if continuation_match is not None:
