@@ -3279,19 +3279,6 @@ def stable_post_action_observation(
             sample.update(continuation_measurement)
         if verification_error is not None:
             sample['verification_error'] = verification_error
-            if selected_thread_open_match is not None:
-                try:
-                    sample['selected_thread_failure_evidence'] = (
-                        _selected_thread_failure_evidence(
-                            snapshot,
-                            selected_thread_open_match.group('activity'),
-                            selected_thread_open_match.group('body'),
-                        )
-                    )
-                except Exception as exc:
-                    sample['selected_thread_failure_evidence_error'] = (
-                        f'{type(exc).__name__}:{exc}'
-                    )
         if exact_receipt is not None:
             sample['postcondition'] = exact_receipt['postcondition']
             if 'activity_sources' in exact_receipt:
@@ -3339,7 +3326,7 @@ def stable_post_action_observation(
         if remaining > 0:
             time.sleep(min(interval, remaining))
 
-    return last_snapshot, {
+    timeout_receipt = {
         'result': 'TIMEOUT',
         'next_mutation_authorized': False,
         'projection': postcondition.get('kind') or postcondition['projection'],
@@ -3348,6 +3335,20 @@ def stable_post_action_observation(
         'stable_cycles_observed': stable_cycles_observed,
         'samples': samples,
     }
+    if selected_thread_open_match is not None and last_snapshot is not None:
+        try:
+            timeout_receipt['selected_thread_failure_evidence'] = (
+                _selected_thread_failure_evidence(
+                    last_snapshot,
+                    selected_thread_open_match.group('activity'),
+                    selected_thread_open_match.group('body'),
+                )
+            )
+        except Exception as exc:
+            timeout_receipt['selected_thread_failure_evidence_error'] = (
+                f'{type(exc).__name__}:{exc}'
+            )
+    return last_snapshot, timeout_receipt
 
 
 def stable_initial_preparation_observation(
