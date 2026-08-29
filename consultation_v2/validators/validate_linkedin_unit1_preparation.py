@@ -1770,6 +1770,44 @@ def main() -> int:
         first_expand['element'],
         first_expand['verification_operation'],
     )
+    partial_live_before = manual.augment_snapshot(with_thread_expander(
+        selected_snapshot(count=12, visible_count=2),
+        9,
+    ))
+    partial_live_key = next(
+        key
+        for key in partial_live_before.mapped
+        if key.startswith(manual.SELECTED_THREAD_EXPAND_PREFIX)
+    )
+    partial_live_after = manual.augment_snapshot(with_thread_expander(
+        selected_snapshot(count=12, visible_count=7),
+        4,
+    ))
+    partial_live_receipt = manual.verify_post_action(
+        partial_live_after,
+        partial_live_key,
+        'activate',
+    )
+    require(
+        partial_live_receipt['prior_visible_comment_count'] == 2
+        and partial_live_receipt['declared_more_comment_count'] == 9
+        and partial_live_receipt['visible_comment_count'] == 7
+        and partial_live_receipt['remaining_comment_count'] == 4
+        and partial_live_receipt['next_expander_count'] == 1,
+        'partial exact thread growth did not preserve the remaining expander',
+    )
+    try:
+        manual.verify_post_action(
+            partial_live_before,
+            partial_live_key,
+            'activate',
+        )
+    except ValueError:
+        pass
+    else:
+        raise AssertionError(
+            'unchanged partial thread was accepted as exact growth'
+        )
     receipts.append(accept_preparation_step(
         first_expand,
         first_expand_barrier,
