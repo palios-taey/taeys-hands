@@ -408,6 +408,7 @@ def selected_snapshot(
     visible: bool = True,
     visible_count: int | None = None,
     repost: bool = False,
+    body_index: int = 9,
 ) -> Snapshot:
     document = Node('document web', 'LinkedIn post')
     post_root = Node('list item', states=['showing'])
@@ -415,7 +416,8 @@ def selected_snapshot(
     heading = Node('heading', 'Feed post')
     body = Node('section', text=BODY, states=['showing'])
     body_wrapper = Node('generic').add(body)
-    fillers = [Node('generic') for _index in range(11 if repost else 8)]
+    effective_body_index = 12 if repost else body_index
+    fillers = [Node('generic') for _index in range(effective_body_index - 1)]
     count_node = (
         Node(
             'push button',
@@ -1422,6 +1424,17 @@ def main() -> int:
         == set(receipts[-1]),
         'preparation receipt schema drifted',
     )
+
+    for body_index in (8, 9, 12):
+        variant = selected_snapshot(body_index=body_index)
+        root, body, body_text = manual._selected_post_root_and_body(
+            variant,
+            manual._manual_notification_contract(),
+        )
+        require(
+            root is not None and body is not None and body_text == BODY,
+            f'selected post body variant {body_index} was not mapped exactly',
+        )
 
     missing_thread = selected_snapshot(visible=False)
     expect_error(

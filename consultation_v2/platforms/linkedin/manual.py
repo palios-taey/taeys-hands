@@ -206,7 +206,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'name': 'Feed post',
             },
             'body': {
-                'index_paths': [[0, 9, 0], [0, 12, 0]],
+                'index_paths': [[0, 8, 0], [0, 9, 0], [0, 12, 0]],
                 'role': 'section',
                 'states_include': ['showing'],
                 'content_digest': 'sha256_utf8',
