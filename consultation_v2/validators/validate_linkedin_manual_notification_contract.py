@@ -113,7 +113,7 @@ def main() -> int:
                 'refresh_policy': 'invalidate_reacquire',
                 'stable_cycles': 2,
                 'interval_ms': 200,
-                'timeout_ms': 45000,
+                'timeout_ms': 120000,
             },
         },
         'LinkedIn selected-thread viewport transition drifted',
