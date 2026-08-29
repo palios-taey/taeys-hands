@@ -1346,14 +1346,19 @@ def main() -> int:
         notification_text='Unread notification. Alice changed the exact update.',
         include_categories=True,
     ))
-    expect_error(
-        lambda: compile_preparation_step(
-            changed_candidate_surface,
-            REVISION,
-            first_excluded_envelope,
-            continuation_receipts,
-        ),
-        'stale exclusions authorized changed exact candidate content',
+    changed_candidate_readiness = compile_preparation_step(
+        changed_candidate_surface,
+        REVISION,
+        first_excluded_envelope,
+        continuation_receipts,
+    )
+    require(
+        changed_candidate_readiness['state'] == 'ready_for_private_selection'
+        and changed_candidate_readiness['input']['notification_inventory'][
+            'decision_inventory_sha256'
+        ] != first_exclusions['decision_inventory_sha256']
+        and 'phase' not in changed_candidate_readiness,
+        'changed exact candidate content did not require a fresh private decision',
     )
     second_continuation_readiness = compile_preparation_step(
         second_continuation_surface,
@@ -1552,16 +1557,19 @@ def main() -> int:
                 f'changed {changed_field} invalidated exact candidate exclusions',
             )
         else:
-            expect_error(
-                lambda changed_continuation_surface=changed_continuation_surface: (
-                    compile_preparation_step(
-                        changed_continuation_surface,
-                        REVISION_B,
-                        first_excluded_envelope,
-                        receipts,
-                    )
-                ),
-                f'changed {changed_field} retained stale exclusion authority',
+            refreshed_exclusions = compile_preparation_step(
+                changed_continuation_surface,
+                REVISION_B,
+                first_excluded_envelope,
+                receipts,
+            )
+            require(
+                refreshed_exclusions['state'] == 'ready_for_private_selection'
+                and refreshed_exclusions['input']['notification_inventory'][
+                    'decision_inventory_sha256'
+                ] != first_exclusions['decision_inventory_sha256']
+                and 'phase' not in refreshed_exclusions,
+                f'changed {changed_field} did not require fresh private selection',
             )
     candidate = compile_preparation_step(
         stream_without_categories,

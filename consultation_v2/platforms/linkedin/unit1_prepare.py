@@ -1021,7 +1021,13 @@ def compile_preparation_step(
                 'Notifications continuation is ambiguous'
             )
         decision = frozen['selection']
-        if decision is None:
+        exclusions_inventory_changed = bool(
+            decision is not None
+            and decision.get('schema') == NOTIFICATION_EXCLUSIONS_SCHEMA
+            and decision['decision_inventory_sha256']
+            != inventory.artifact['decision_inventory_sha256']
+        )
+        if decision is None or exclusions_inventory_changed:
             return _preparation_result(
                 state='ready_for_private_selection',
                 transaction_sha256=transaction_sha256,
@@ -1036,16 +1042,6 @@ def compile_preparation_step(
                 },
             )
         if decision.get('schema') == NOTIFICATION_EXCLUSIONS_SCHEMA:
-            if (
-                decision['decision_inventory_sha256']
-                != inventory.artifact['decision_inventory_sha256']
-            ):
-                raise LinkedInUnit1PreparationError(
-                    'private exclusions do not bind the current exact candidates; '
-                    f'frozen={decision["decision_inventory_sha256"]}; '
-                    'current='
-                    f'{inventory.artifact["decision_inventory_sha256"]}'
-                )
             expected_activities = [
                 row['activity']
                 for row in inventory.artifact['actionable_links']
