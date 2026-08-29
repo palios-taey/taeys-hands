@@ -58,6 +58,11 @@ The augmented snapshot projects exact candidate keys and the exact continuation 
 present. A candidate key's ordinal is the contiguous order among actionable candidates; the inventory row and
 private-selection ordinal remain the full mounted-article order. This preserves the selected candidate as the
 runtime card target while retaining the complete raw inventory and exclusion-gated continuation authority.
+The readiness result retains that complete inventory for server-side selection and exclusion binding, and also
+derives one model-facing decision input from it. The decision input contains only the exact actionable candidates
+joined to their notification text, age, element, URI, and digests; nonactionable rows and structural provenance
+remain server-side. Its decision and full-inventory digests must equal the complete inventory, so reducing model
+egress does not create a second source of authority or weaken mounted-article completeness.
 After Notifications activation has produced the transaction-bound exact-route and All-category receipt,
 candidate projection continues on the exact `notifications_all` route even if LinkedIn virtualizes the category
 radio controls. Navigation verification still requires the live All-category controls; their later unmount does
