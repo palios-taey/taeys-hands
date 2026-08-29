@@ -713,6 +713,12 @@ def validate_initial_observation_barrier() -> None:
         manual._initial_preparation_observation_contract()['timeout_ms'] == 45000,
         'initial barrier does not cover two measured LinkedIn tree traversals',
     )
+    require(
+        manual._manual_post_action_contract()['observation_barrier'][
+            'timeout_ms'
+        ] == 45000,
+        'post-action barrier does not cover two measured LinkedIn tree traversals',
+    )
     exact = navigation_snapshot()
     missing = Snapshot(platform='linkedin', url=exact.url)
     sequence = [missing, exact, exact]

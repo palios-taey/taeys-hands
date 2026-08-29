@@ -199,7 +199,7 @@ def _validate_yaml() -> list[str]:
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
-            'timeout_ms': 10000,
+            'timeout_ms': 45000,
         },
     }:
         errors.append(f'{YAML_PATH}: manual Notifications route barrier drifted')
