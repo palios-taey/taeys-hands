@@ -690,6 +690,14 @@ def expect_error(operation, message: str) -> None:
     raise AssertionError(message)
 
 
+def expect_value_error(operation, message: str) -> None:
+    try:
+        operation()
+    except ValueError:
+        return
+    raise AssertionError(message)
+
+
 def schema_required(name: str) -> set[str]:
     return set(json.loads(
         (
@@ -1513,6 +1521,38 @@ def main() -> int:
         candidate['phase'] == 'notification_candidate'
         and candidate['element'].endswith(ACTIVITY_A),
         'exact private selection did not compile to one candidate card',
+    )
+    detached_transition = inventory_snapshot(include_categories=True)
+    for item in detached_transition.unknown:
+        if (
+            item.role == 'link'
+            and getattr(item.atspi_obj, 'uri', None) == activity_uri(ACTIVITY_B)
+        ):
+            item.states = []
+            item.atspi_obj.states = []
+    detached_article = next(
+        item.atspi_obj
+        for item in detached_transition.unknown
+        if item.role == 'article'
+    )
+    detached_article.parent = None
+    expect_value_error(
+        lambda: manual.verify_post_action(
+            detached_transition,
+            candidate['element'],
+            'activate',
+        ),
+        'detached Notifications tree authorized the selected-post transition',
+    )
+    settled_candidate_receipt = manual.verify_post_action(
+        selected_snapshot(),
+        candidate['element'],
+        'activate',
+    )
+    require(
+        settled_candidate_receipt['activity_exact'] is True
+        and settled_candidate_receipt['selected_post_body_sha256'] == BODY_SHA256,
+        'settled candidate transition omitted the exact selected activity/body',
     )
     receipts.append(accept_preparation_step(
         candidate,
