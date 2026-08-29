@@ -201,6 +201,14 @@ def _sha256(value: Any) -> str:
     return hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
+def _preparation_card_authority_sha256(card: Mapping[str, Any]) -> str:
+    return _sha256({
+        key: value
+        for key, value in card.items()
+        if key not in {'card_sha256', 'snapshot_revision'}
+    })
+
+
 def _text_sha256(value: str) -> str:
     return hashlib.sha256(value.encode('utf-8')).hexdigest()
 
@@ -929,7 +937,7 @@ def _preparation_card(
             else postcondition['kind']
         ),
     }
-    card['card_sha256'] = _sha256(card)
+    card['card_sha256'] = _preparation_card_authority_sha256(card)
     return card
 
 
@@ -1299,9 +1307,12 @@ def accept_preparation_step(
         )
     card_value = dict(card)
     card_digest = card_value.pop('card_sha256', None)
-    if _require_sha256(card_digest, 'card_sha256') != _sha256(card_value):
+    if (
+        _require_sha256(card_digest, 'card_sha256')
+        != _preparation_card_authority_sha256(card_value)
+    ):
         raise LinkedInUnit1PreparationError(
-            'preparation card_sha256 does not match card bytes'
+            'preparation card_sha256 does not match action authority'
         )
     if previous_receipt_sha256 is not None:
         _require_sha256(previous_receipt_sha256, 'previous_receipt_sha256')
