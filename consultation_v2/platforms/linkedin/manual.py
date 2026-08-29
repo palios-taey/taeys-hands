@@ -3078,7 +3078,11 @@ def stable_post_action_observation(
     samples: list[dict[str, Any]] = []
 
     while time.monotonic() < barrier_deadline:
-        cache_invalidation = _invalidate_linkedin_firefox_subtree()
+        cache_invalidation = (
+            'build_snapshot_invalidate_reacquire'
+            if element_key == navigation_contract['element_key']
+            else _invalidate_linkedin_firefox_subtree()
+        )
         _firefox, _document, snapshot = build_snapshot('linkedin')
         last_snapshot = snapshot
         continuation_measurement = (
