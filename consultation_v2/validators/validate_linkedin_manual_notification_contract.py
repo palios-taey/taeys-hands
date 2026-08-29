@@ -62,11 +62,19 @@ def main() -> int:
     selected_thread = selection.get('selected_thread') or {}
     _require(
         selected_thread.get('zero_open') == {
-            'body_index_path': [0, 9, 0],
-            'index_path': [0, 15],
+            'structural_variants': [
+                {
+                    'body_index_path': [0, 9, 0],
+                    'index_path': [0, 15],
+                },
+                {
+                    'body_index_path': [0, 12, 0],
+                    'index_path': [0, 19],
+                },
+            ],
             'role': 'push button',
             'name': 'Comment',
-            'states_include': ['showing', 'enabled', 'focusable'],
+            'states_include': ['enabled', 'focusable'],
             'action': {
                 'effect_class': 'page',
                 'primitives': ['mapped_pointer_activate'],

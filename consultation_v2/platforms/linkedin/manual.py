@@ -232,11 +232,19 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'name_suffix': 'comment.',
             },
             'zero_open': {
-                'body_index_path': [0, 9, 0],
-                'index_path': [0, 15],
+                'structural_variants': [
+                    {
+                        'body_index_path': [0, 9, 0],
+                        'index_path': [0, 15],
+                    },
+                    {
+                        'body_index_path': [0, 12, 0],
+                        'index_path': [0, 19],
+                    },
+                ],
                 'role': 'push button',
                 'name': 'Comment',
-                'states_include': ['showing', 'enabled', 'focusable'],
+                'states_include': ['enabled', 'focusable'],
                 'action': {
                     'effect_class': 'page',
                     'primitives': ['mapped_pointer_activate'],
@@ -988,17 +996,32 @@ def _selected_thread_zero_is_exact(
         return False
     selected_thread = contract['selected_thread']
     zero_contract = selected_thread['zero_open']
-    body = _node_at_index_path(
-        root.atspi_obj,
-        zero_contract['body_index_path'],
-    )
     body_contract = contract['selected_post_observation']['body']
-    if body is None or _node_role(body) != body_contract['role']:
+    exact_variants = []
+    for variant in zero_contract['structural_variants']:
+        body = _node_at_index_path(
+            root.atspi_obj,
+            variant['body_index_path'],
+        )
+        zero_node = _node_at_index_path(
+            root.atspi_obj,
+            variant['index_path'],
+        )
+        if (
+            body is not None
+            and _node_role(body) == body_contract['role']
+            and zero_node is not None
+            and _node_role(zero_node) == zero_contract['role']
+            and _node_name(zero_node) == zero_contract['name']
+            and _node_has_states(zero_node, zero_contract['states_include'])
+        ):
+            exact_variants.append((variant, zero_node))
+    if len(exact_variants) != 1:
         return False
+    _variant, zero_node = exact_variants[0]
     elements_by_identity = {
         id(element.atspi_obj): element for element in _all_elements(snapshot)
     }
-    zero_node = _node_at_index_path(root.atspi_obj, zero_contract['index_path'])
     for count_path in selected_thread['comment_count']['index_paths']:
         count_node = _node_at_index_path(root.atspi_obj, count_path)
         count_element = elements_by_identity.get(id(count_node))
@@ -1037,7 +1060,22 @@ def _selected_zero_thread_opener(
     zero_contract = contract['selected_thread']['zero_open']
     if not _selected_thread_zero_is_exact(snapshot, root, contract):
         return None
-    node = _node_at_index_path(root.atspi_obj, zero_contract['index_path'])
+    nodes = [
+        node
+        for variant in zero_contract['structural_variants']
+        for node in (
+            _node_at_index_path(root.atspi_obj, variant['index_path']),
+        )
+        if (
+            node is not None
+            and _node_role(node) == zero_contract['role']
+            and _node_name(node) == zero_contract['name']
+            and _node_has_states(node, zero_contract['states_include'])
+        )
+    ]
+    if len(nodes) != 1:
+        return None
+    node = nodes[0]
     elements_by_identity = {
         id(element.atspi_obj): element for element in _all_elements(snapshot)
     }
