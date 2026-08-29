@@ -223,7 +223,7 @@ def _manual_notification_contract() -> dict[str, Any]:
             'expand_element_key_prefix': SELECTED_THREAD_EXPAND_PREFIX,
             'comment_count': {
                 'role': 'push button',
-                'index_paths': [[0, 12], [0, 15]],
+                'index_paths': [[0, 11], [0, 12], [0, 15]],
                 'states_include': ['enabled', 'focusable'],
             },
             'visible_comment': {

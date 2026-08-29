@@ -1435,6 +1435,15 @@ def main() -> int:
             root is not None and body is not None and body_text == BODY,
             f'selected post body variant {body_index} was not mapped exactly',
         )
+        comment_counts, _visible_comments = manual._selected_thread_controls(
+            variant,
+            root,
+            manual._manual_notification_contract(),
+        )
+        require(
+            len(comment_counts) == 1 and comment_counts[0].name == '2 comments',
+            f'selected thread count variant {body_index + 3} was not mapped exactly',
+        )
 
     missing_thread = selected_snapshot(visible=False)
     expect_error(
