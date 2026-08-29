@@ -87,8 +87,9 @@ typed-row count. Absence is accepted only through the distinct exact-zero opener
 positive count control, visible comment row, or expander; one exact YAML-owned `Comment` control before
 activation; and one empty ready same-card editor afterward. The extracted source binds the zero opener's
 element digest, so a positive-count opener receipt cannot be borrowed.
-The current LinkedIn feed-card contract maps original/repost bodies at structural paths `[0,9,0]` and
-`[0,12,0]`, with their exact comment-count controls at `[0,12]` and `[0,15]`. Body bytes come from the complete AT-SPI node text before any shallow mapped
+The current LinkedIn feed-card contract maps original/repost bodies at structural paths `[0,8,0]`,
+`[0,9,0]`, and `[0,12,0]`. A zero-comment document card with body `[0,8,0]` may expose its exact `Comment`
+opener at `[0,14]`; the compact `[0,8,0]` card retains `[0,12]`. Body bytes come from the complete AT-SPI node text before any shallow mapped
 text projection; a changed role, state, path, or empty body stops preparation before drafting.
 
 The private selection repeats the public preparation `transaction_sha256` inside its own signed bytes. A
