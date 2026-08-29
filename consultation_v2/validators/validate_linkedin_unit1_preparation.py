@@ -1304,6 +1304,51 @@ def main() -> int:
         and navigation_postcondition['category_exact'] is True,
         'Notifications activation did not prove exact route and All category',
     )
+    navigation_samples = [stream, stream]
+    navigation_clock = Clock()
+    original_build_snapshot = manual.build_snapshot
+    original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
+    original_monotonic = manual.time.monotonic
+    original_sleep = manual.time.sleep
+
+    def build_navigation_sample(_platform: str):
+        return object(), object(), navigation_samples.pop(0)
+
+    def forbid_recursive_navigation_refresh():
+        raise AssertionError(
+            'Notifications navigation used recursive Firefox invalidation'
+        )
+
+    manual.build_snapshot = build_navigation_sample
+    manual._invalidate_linkedin_firefox_subtree = (
+        forbid_recursive_navigation_refresh
+    )
+    manual.time.monotonic = navigation_clock.monotonic
+    manual.time.sleep = navigation_clock.sleep
+    try:
+        _navigation_snapshot, navigation_barrier = (
+            manual.stable_post_action_observation(
+                manual.NOTIFICATIONS_NAVIGATION,
+                'activate',
+                5.0,
+            )
+        )
+    finally:
+        manual.build_snapshot = original_build_snapshot
+        manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
+        manual.time.monotonic = original_monotonic
+        manual.time.sleep = original_sleep
+    require(
+        navigation_barrier['result'] == 'PASS'
+        and navigation_barrier['stable_cycles_observed'] == 2
+        and not navigation_samples
+        and all(
+            sample['firefox_cache_invalidation']
+            == 'build_snapshot_invalidate_reacquire'
+            for sample in navigation_barrier['samples']
+        ),
+        'Notifications navigation did not preserve its proven bounded refresh path',
+    )
     try:
         manual.verify_post_action(
             missing_categories,
