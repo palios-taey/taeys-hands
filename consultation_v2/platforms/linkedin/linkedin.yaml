@@ -275,8 +275,7 @@ workflow:
         element_key_prefix: selected_post_activity_
         root:
           role: list item
-          states_include:
-            - showing
+          structural_order: first_feed_post
           exact_match_count: 1
         heading:
           index_path:
@@ -300,7 +299,7 @@ workflow:
               - 0
           role: section
           states_include:
-            - showing
+            - enabled
           content_digest: sha256_utf8
         operation:
           effect_class: observation
@@ -378,7 +377,7 @@ workflow:
               refresh_policy: invalidate_reacquire
               stable_cycles: 2
               interval_ms: 200
-              timeout_ms: 10000
+              timeout_ms: 45000
         action:
           effect_class: page
           primitives:
@@ -396,7 +395,7 @@ workflow:
             refresh_policy: invalidate_reacquire
             stable_cycles: 2
             interval_ms: 200
-            timeout_ms: 10000
+            timeout_ms: 45000
         postcondition: exact_selected_activity_visible_comment_controls
       observation_barrier:
         refresh_policy: invalidate_reacquire

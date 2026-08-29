@@ -197,7 +197,7 @@ def _manual_notification_contract() -> dict[str, Any]:
             'element_key_prefix': SELECTED_POST_PREFIX,
             'root': {
                 'role': 'list item',
-                'states_include': ['showing'],
+                'structural_order': 'first_feed_post',
                 'exact_match_count': 1,
             },
             'heading': {
@@ -208,7 +208,7 @@ def _manual_notification_contract() -> dict[str, Any]:
             'body': {
                 'index_paths': [[0, 8, 0], [0, 9, 0], [0, 12, 0]],
                 'role': 'section',
-                'states_include': ['showing'],
+                'states_include': ['enabled'],
                 'content_digest': 'sha256_utf8',
             },
             'operation': {
@@ -267,7 +267,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                         'refresh_policy': 'invalidate_reacquire',
                         'stable_cycles': 2,
                         'interval_ms': 200,
-                        'timeout_ms': 10000,
+                        'timeout_ms': 45000,
                     },
                 },
             },
@@ -285,7 +285,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                     'refresh_policy': 'invalidate_reacquire',
                     'stable_cycles': 2,
                     'interval_ms': 200,
-                    'timeout_ms': 10000,
+                    'timeout_ms': 45000,
                 },
             },
             'postcondition': 'exact_selected_activity_visible_comment_controls',
@@ -682,46 +682,73 @@ def _selected_post_root_and_body(
     body_contract = observation['body']
     elements = _all_elements(snapshot)
     elements_by_identity = {id(element.atspi_obj): element for element in elements}
-    roots: list[tuple[Any, Any, str]] = []
+    roots_by_path: dict[tuple[int, ...], Any] = {}
     for element in elements:
-        if (
-            element.role != root_contract['role']
-            or not set(root_contract['states_include']).issubset(element.states)
-        ):
-            continue
-        heading = _node_at_index_path(
-            element.atspi_obj,
-            heading_contract['index_path'],
-        )
-        if (
-            heading is None
-            or _node_role(heading) != heading_contract['role']
-            or _node_name(heading) != heading_contract['name']
-        ):
-            continue
-        bodies: list[tuple[Any, Any, str]] = []
-        for index_path in body_contract['index_paths']:
-            body = _node_at_index_path(element.atspi_obj, index_path)
-            if body is None or _node_role(body) != body_contract['role']:
-                continue
-            body_element = elements_by_identity.get(id(body))
-            if (
-                body_element is None
-                or not set(body_contract['states_include']).issubset(
-                    body_element.states
+        node = element.atspi_obj
+        for _depth in range(64):
+            if node is None:
+                break
+            if _node_role(node) == root_contract['role']:
+                heading = _node_at_index_path(
+                    node,
+                    heading_contract['index_path'],
                 )
-            ):
-                continue
-            text = _node_text(body) or body_element.text
-            if text:
-                bodies.append((body, body_element, text))
-        if len(bodies) != 1:
-            continue
-        _body, body_element, text = bodies[0]
-        roots.append((element, body_element, text))
-    if len(roots) != root_contract['exact_match_count']:
+                if (
+                    heading is not None
+                    and _node_role(heading) == heading_contract['role']
+                    and _node_name(heading) == heading_contract['name']
+                ):
+                    roots_by_path[_structural_index_path(node)] = node
+                    break
+            try:
+                node = node.get_parent()
+            except Exception:
+                break
+    if root_contract['structural_order'] != 'first_feed_post':
+        raise ValueError('LinkedIn selected-post structural order is not declared')
+    ordered_roots = [roots_by_path[path] for path in sorted(roots_by_path)]
+    selected_roots = ordered_roots[:1]
+    if len(selected_roots) != root_contract['exact_match_count']:
         return None, None, None
-    return roots[0]
+    root_node = selected_roots[0]
+    bodies: list[tuple[Any, Any, str]] = []
+    for index_path in body_contract['index_paths']:
+        body_node = _node_at_index_path(root_node, index_path)
+        if (
+            body_node is None
+            or _node_role(body_node) != body_contract['role']
+            or not _node_has_states(body_node, body_contract['states_include'])
+        ):
+            continue
+        body_element = elements_by_identity.get(id(body_node)) or ElementRef(
+            key=None,
+            name=_node_name(body_node),
+            role=_node_role(body_node),
+            x=None,
+            y=None,
+            states=list(body_contract['states_include']),
+            text=None,
+            atspi_obj=body_node,
+            raw={},
+        )
+        text = _node_text(body_node) or body_element.text
+        if text:
+            bodies.append((body_node, body_element, text))
+    if len(bodies) != 1:
+        return None, None, None
+    root_element = elements_by_identity.get(id(root_node)) or ElementRef(
+        key=None,
+        name=_node_name(root_node),
+        role=_node_role(root_node),
+        x=None,
+        y=None,
+        states=[],
+        text=None,
+        atspi_obj=root_node,
+        raw={},
+    )
+    _body_node, body_element, text = bodies[0]
+    return root_element, body_element, text
 
 
 def _selected_post_descendants(
