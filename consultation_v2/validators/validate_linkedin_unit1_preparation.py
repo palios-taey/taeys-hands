@@ -583,7 +583,11 @@ def with_thread_opener(snapshot: Snapshot, count: int = 2) -> Snapshot:
     return snapshot
 
 
-def with_zero_thread_opener(snapshot: Snapshot) -> Snapshot:
+def with_zero_thread_opener(
+    snapshot: Snapshot,
+    *,
+    media_variant: bool = False,
+) -> Snapshot:
     post_root = next(
         item.atspi_obj
         for item in snapshot.unknown
@@ -593,10 +597,15 @@ def with_zero_thread_opener(snapshot: Snapshot) -> Snapshot:
     post_card.add(
         Node('generic'),
         Node('generic'),
+        *(Node('generic') for _index in range(1 if media_variant else 0)),
         Node(
             'push button',
             'Comment',
-            states=['showing', 'enabled', 'focusable'],
+            states=(
+                ['enabled', 'focusable']
+                if media_variant
+                else ['showing', 'enabled', 'focusable']
+            ),
         ),
         Node('push button', 'Repost', states=['enabled', 'focusable']),
         Node('link', 'Send', states=['enabled', 'focusable']),
@@ -1842,6 +1851,29 @@ def main() -> int:
             manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
         ),
         'exact zero thread did not compile its distinct opener',
+    )
+    media_zero_snapshot = manual.augment_snapshot(with_zero_thread_opener(
+        selected_snapshot(count=0, body_index=12),
+        media_variant=True,
+    ))
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'error': 'live_extent_outside_display',
+    }
+    try:
+        media_zero_card = compile_preparation_step(
+            media_zero_snapshot,
+            REVISION,
+            selected_envelope,
+            candidate_receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        media_zero_card['phase'] == 'thread_scroll'
+        and media_zero_card['element'].startswith(
+            manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
+        ),
+        'off-screen media zero thread did not compile one exact scroll',
     )
     disabled_expander = manual.augment_snapshot(with_thread_expander(
         with_zero_thread_opener(selected_snapshot(count=0)),
