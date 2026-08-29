@@ -121,6 +121,15 @@ def main() -> int:
         },
         'LinkedIn selected-thread expansion transition drifted',
     )
+    _require(
+        selection.get('observation_barrier') == {
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 45000,
+        },
+        'LinkedIn selected-surface observation window drifted',
+    )
 
     operation_source = _function_source(MANUAL_PATH, 'element_operation')
     for required in (
