@@ -1033,7 +1033,10 @@ def compile_preparation_step(
                 != inventory.artifact['decision_inventory_sha256']
             ):
                 raise LinkedInUnit1PreparationError(
-                    'private exclusions do not bind the current exact candidates'
+                    'private exclusions do not bind the current exact candidates; '
+                    f'frozen={decision["decision_inventory_sha256"]}; '
+                    'current='
+                    f'{inventory.artifact["decision_inventory_sha256"]}'
                 )
             expected_activities = [
                 row['activity']

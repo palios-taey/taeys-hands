@@ -104,6 +104,9 @@ def exclusion_decision(readiness: dict, transaction_sha256: str) -> dict:
     )
     inventory = readiness['input']['notification_inventory']
     unsigned = {
+        'decision_inventory_sha256': inventory[
+            'decision_inventory_sha256'
+        ],
         'excluded_candidates': [
             {
                 'activity': row['activity'],
@@ -1281,14 +1284,29 @@ def main() -> int:
         ),
         'second virtualized continuation hid exact-route candidate keys',
     )
+    presentation_drift_continuation = compile_preparation_step(
+        second_continuation_surface,
+        REVISION,
+        first_excluded_envelope,
+        continuation_receipts,
+    )
+    require(
+        presentation_drift_continuation['phase']
+        == 'notifications_continuation',
+        'nonactionable presentation drift invalidated exact candidate exclusions',
+    )
+    changed_candidate_surface = with_continuation(inventory_snapshot(
+        notification_text='Unread notification. Alice changed the exact update.',
+        include_categories=True,
+    ))
     expect_error(
         lambda: compile_preparation_step(
-            second_continuation_surface,
+            changed_candidate_surface,
             REVISION,
             first_excluded_envelope,
             continuation_receipts,
         ),
-        'stale exclusions authorized a changed mounted inventory',
+        'stale exclusions authorized changed exact candidate content',
     )
     second_continuation_readiness = compile_preparation_step(
         second_continuation_surface,
@@ -1462,17 +1480,29 @@ def main() -> int:
             ),
             f'changed {changed_field} retained stale selection authority',
         )
-        expect_error(
-            lambda changed_continuation_surface=changed_continuation_surface: (
-                compile_preparation_step(
-                    changed_continuation_surface,
-                    REVISION_B,
-                    first_excluded_envelope,
-                    receipts,
-                )
-            ),
-            f'changed {changed_field} retained stale exclusion authority',
-        )
+        if changed_field in {'age', 'ordinal', 'structural_path'}:
+            equivalent_exclusion = compile_preparation_step(
+                changed_continuation_surface,
+                REVISION_B,
+                first_excluded_envelope,
+                receipts,
+            )
+            require(
+                equivalent_exclusion['phase'] == 'notifications_continuation',
+                f'changed {changed_field} invalidated exact candidate exclusions',
+            )
+        else:
+            expect_error(
+                lambda changed_continuation_surface=changed_continuation_surface: (
+                    compile_preparation_step(
+                        changed_continuation_surface,
+                        REVISION_B,
+                        first_excluded_envelope,
+                        receipts,
+                    )
+                ),
+                f'changed {changed_field} retained stale exclusion authority',
+            )
     candidate = compile_preparation_step(
         stream_without_categories,
         REVISION,
