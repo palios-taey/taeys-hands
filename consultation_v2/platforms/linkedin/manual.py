@@ -284,6 +284,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                 },
                 'postcondition': 'exact_selected_thread_growth',
                 'scroll_into_view': {
+                    'phase': 'thread_expand_scroll',
                     'effect_class': 'viewport',
                     'primitives': ['scroll_into_view'],
                     'allowed_now': ['scroll_into_view'],
@@ -307,12 +308,14 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'allowed_now': ['mapped_pointer_activate'],
             },
             'scroll_into_view': {
+                'phase': 'thread_scroll',
                 'effect_class': 'viewport',
                 'primitives': ['scroll_into_view'],
                 'allowed_now': ['scroll_into_view'],
-                'scroll_target': 'selected_post_root',
-                'scroll_target_source': 'mapped_context',
+                'scroll_target': 'selected_thread_opener',
+                'scroll_target_source': 'self',
                 'scroll_alignment': 'top_edge',
+                'min_downward_clearance_px': 500,
                 'postcondition': 'exact_selected_thread_opener_in_viewport',
                 'observation_barrier': {
                     'refresh_policy': 'invalidate_reacquire',
@@ -2012,7 +2015,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                 raw={
                     **dict(comment_counts[0].raw),
                     'atspi_obj': comment_counts[0].atspi_obj,
-                    'scroll_target_atspi_obj': root.atspi_obj,
+                    'scroll_target_atspi_obj': comment_counts[0].atspi_obj,
                     'selected_post_root_atspi_obj': root.atspi_obj,
                     'selected_post_body_atspi_obj': body.atspi_obj,
                     'selected_post_body_showing': _node_has_states(
@@ -2044,7 +2047,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     raw={
                         **dict(zero_opener.raw),
                         'atspi_obj': zero_opener.atspi_obj,
-                        'scroll_target_atspi_obj': root.atspi_obj,
+                        'scroll_target_atspi_obj': zero_opener.atspi_obj,
                         'selected_post_root_atspi_obj': root.atspi_obj,
                         'selected_post_body_atspi_obj': body.atspi_obj,
                         'selected_post_body_showing': _node_has_states(
@@ -2393,10 +2396,16 @@ def element_operation(
         geometry = _selected_thread_open_geometry(selected_context)
         root_viewport = geometry['selected_post_root']
         opener_viewport = geometry['thread_opener']
+        scroll_action = _manual_notification_contract()[
+            'selected_thread'
+        ]['scroll_into_view']
+        minimum_clearance = scroll_action['min_downward_clearance_px']
         if (
-            root_viewport.get('live_extent_in_viewport') is True
-            and geometry['selected_post_body_showing'] is True
+            root_viewport.get('intersects_viewport') is True
             and opener_viewport.get('live_extent_in_viewport') is True
+            and isinstance(opener_viewport.get('available_below_px'), int)
+            and not isinstance(opener_viewport.get('available_below_px'), bool)
+            and opener_viewport['available_below_px'] >= minimum_clearance
         ):
             declared_action = _manual_notification_contract()[
                 'selected_thread'
@@ -2404,18 +2413,20 @@ def element_operation(
         elif (
             root_viewport.get('error') == 'live_extent_outside_display'
             or opener_viewport.get('error') == 'live_extent_outside_display'
-            or geometry['selected_post_body_showing'] is not True
+            or root_viewport.get('intersects_viewport') is not True
+            or opener_viewport.get('live_extent_in_viewport') is not True
+            or not isinstance(opener_viewport.get('available_below_px'), int)
+            or isinstance(opener_viewport.get('available_below_px'), bool)
+            or opener_viewport.get('available_below_px', 0) < minimum_clearance
         ):
-            declared_action = _manual_notification_contract()[
-                'selected_thread'
-            ]['scroll_into_view']
+            declared_action = scroll_action
         else:
             raise ValueError(
                 'LinkedIn selected-thread root/opener viewport state is unavailable: '
                 f"root={root_viewport.get('error') or 'unknown'}; "
                 f"opener={opener_viewport.get('error') or 'unknown'}; "
-                'body_showing='
-                f"{geometry['selected_post_body_showing']}"
+                'opener_available_below_px='
+                f"{opener_viewport.get('available_below_px')}"
             )
     elif selected_thread_expand_match is not None:
         viewport = _selected_thread_viewport_state(dict(context or {}))
@@ -2460,11 +2471,21 @@ def element_operation(
         'allowed_now': allowed_now,
         **(
             {
+                'phase': declared_action['phase'],
                 'scroll_target': declared_action['scroll_target'],
                 'scroll_target_source': declared_action[
                     'scroll_target_source'
                 ],
                 'scroll_alignment': declared_action['scroll_alignment'],
+                **(
+                    {
+                        'min_downward_clearance_px': declared_action[
+                            'min_downward_clearance_px'
+                        ],
+                    }
+                    if 'min_downward_clearance_px' in declared_action
+                    else {}
+                ),
             }
             if declared_primitive == 'scroll_into_view'
             else {}
@@ -3027,6 +3048,19 @@ def stable_scroll_post_action_observation(
         if selected_thread_expand_match is not None
         else selected_thread_contract['scroll_into_view']
     )
+    declared_minimum_clearance = (
+        scroll_contract['min_downward_clearance_px']
+        if selected_open_match is not None
+        else 0
+    )
+    if (
+        isinstance(declared_minimum_clearance, bool)
+        or not isinstance(declared_minimum_clearance, int)
+        or declared_minimum_clearance < 0
+    ):
+        raise ValueError(
+            'LinkedIn scroll post-action minimum clearance is invalid'
+        )
     barrier = scroll_contract['observation_barrier']
     stable_cycles_required = barrier['stable_cycles']
     interval = barrier['interval_ms'] / 1000.0
@@ -3072,7 +3106,8 @@ def stable_scroll_post_action_observation(
                     )
                     scroll_target_exact = bool(
                         target_raw.get('scroll_target_atspi_obj')
-                        is root.atspi_obj
+                        is target.atspi_obj
+                        and target_raw.get('atspi_obj') is target.atspi_obj
                         and target_raw.get('selected_post_root_atspi_obj')
                         is root.atspi_obj
                         and target_raw.get('selected_post_body_atspi_obj')
@@ -3088,16 +3123,22 @@ def stable_scroll_post_action_observation(
                         body.atspi_obj,
                         ['showing'],
                     )
+            opener_clearance = opener_viewport.get('available_below_px')
+            selected_open_geometry_exact = bool(
+                selected_open_match is not None
+                and root_viewport.get('intersects_viewport') is True
+                and selected_post_identity_exact
+                and scroll_target_exact
+                and opener_viewport.get('live_extent_in_viewport') is True
+                and isinstance(opener_clearance, int)
+                and not isinstance(opener_clearance, bool)
+                and opener_clearance >= declared_minimum_clearance
+            )
             if (
-                opener_viewport.get('live_extent_in_viewport') is True
-                and (
+                selected_open_geometry_exact
+                or (
                     selected_open_match is None
-                    or (
-                        selected_post_identity_exact
-                        and scroll_target_exact
-                        and root_viewport.get('live_extent_in_viewport') is True
-                        and body_showing
-                    )
+                    and opener_viewport.get('live_extent_in_viewport') is True
                 )
             ):
                 declared = element_operation(
@@ -3130,6 +3171,9 @@ def stable_scroll_post_action_observation(
             'selected_post_root_live_extent_in_viewport': bool(
                 root_viewport.get('live_extent_in_viewport')
             ),
+            'selected_post_root_intersects_viewport': bool(
+                root_viewport.get('intersects_viewport')
+            ),
             'selected_post_body_live_extent_in_viewport': bool(
                 body_viewport.get('live_extent_in_viewport')
             ),
@@ -3137,6 +3181,12 @@ def stable_scroll_post_action_observation(
             'thread_opener_live_extent_in_viewport': bool(
                 opener_viewport.get('live_extent_in_viewport')
             ),
+            'thread_opener_available_below_px': int(
+                opener_viewport.get('available_below_px') or 0
+            ),
+            'min_downward_clearance_px': declared_minimum_clearance,
+            'selected_post_root_viewport': root_viewport,
+            'thread_opener_viewport': opener_viewport,
             'firefox_cache_invalidation': cache_invalidation,
             **(
                 {'viewport_error': str(opener_viewport['error'])}
@@ -3169,11 +3219,20 @@ def stable_scroll_post_action_observation(
                     'scroll_target_source'
                 ],
                 'scroll_alignment': scroll_contract['scroll_alignment'],
+                'phase': scroll_contract['phase'],
                 **(
                     {
-                        'selected_post_root_live_extent_in_viewport': True,
-                        'selected_post_body_showing': True,
+                        'selected_post_root_intersects_viewport': True,
+                        'scroll_target_exact': True,
                         'thread_opener_live_extent_in_viewport': True,
+                        'thread_opener_available_below_px': int(
+                            opener_viewport['available_below_px']
+                        ),
+                        'min_downward_clearance_px': (
+                            declared_minimum_clearance
+                        ),
+                        'selected_post_root_viewport': root_viewport,
+                        'thread_opener_viewport': opener_viewport,
                     }
                     if selected_open_match is not None
                     else {}

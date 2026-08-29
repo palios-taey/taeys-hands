@@ -118,9 +118,18 @@ def barrier(card: dict, private: dict) -> dict:
             'scroll_target': card['scroll_target'],
             'scroll_target_source': card['scroll_target_source'],
             'scroll_alignment': card['scroll_alignment'],
-            'selected_post_root_live_extent_in_viewport': True,
-            'selected_post_body_showing': True,
+            'phase': card['phase'],
+            'min_downward_clearance_px': card[
+                'min_downward_clearance_px'
+            ],
+            'activity_exact': True,
+            'body_sha256_exact': True,
+            'scroll_target_exact': True,
+            'selected_post_root_intersects_viewport': True,
             'thread_opener_live_extent_in_viewport': True,
+            'thread_opener_available_below_px': card[
+                'min_downward_clearance_px'
+            ],
         })
     return {
         'result': 'PASS',
@@ -207,9 +216,10 @@ def main() -> int:
         'valid non-scroll action card failed its public schema',
     )
     for field, value in (
-        ('scroll_target', 'selected_post_root'),
-        ('scroll_target_source', 'mapped_context'),
+        ('scroll_target', 'selected_thread_opener'),
+        ('scroll_target_source', 'self'),
         ('scroll_alignment', 'top_edge'),
+        ('min_downward_clearance_px', 500),
     ):
         require(
             list(card_validator.iter_errors({**navigation, field: value})),
@@ -239,12 +249,13 @@ def main() -> int:
             'selected_post_body_sha256': BODY_SHA256,
         },
     )
+    thread_opener_object = object()
     thread = element(
         thread_key,
         states=['enabled', 'focusable'],
         raw={
-            'atspi_obj': object(),
-            'scroll_target_atspi_obj': object(),
+            'atspi_obj': thread_opener_object,
+            'scroll_target_atspi_obj': thread_opener_object,
             'selected_post_root_atspi_obj': object(),
             'selected_post_body_atspi_obj': object(),
             'selected_post_body_showing': True,
@@ -267,6 +278,7 @@ def main() -> int:
         manual._selected_thread_viewport_state = original_viewport
     require(
         thread_scroll_card['phase'] == 'thread_scroll'
+        and thread_scroll_card['min_downward_clearance_px'] == 500
         and not list(card_validator.iter_errors(thread_scroll_card)),
         'valid selected-root scroll card failed its public schema',
     )
@@ -274,6 +286,7 @@ def main() -> int:
         'scroll_target',
         'scroll_target_source',
         'scroll_alignment',
+        'min_downward_clearance_px',
     ):
         missing_scroll_field = dict(thread_scroll_card)
         missing_scroll_field.pop(field)
@@ -282,7 +295,9 @@ def main() -> int:
             f'scroll action card accepted missing {field}',
         )
     manual._selected_thread_viewport_state = lambda _raw: {
+        'intersects_viewport': True,
         'live_extent_in_viewport': True,
+        'available_below_px': 500,
     }
     try:
         thread_card = compile_unit1_step(
@@ -297,12 +312,13 @@ def main() -> int:
     zero_thread_key = (
         f'{manual.SELECTED_THREAD_ZERO_OPEN_PREFIX}{ACTIVITY}_body_{BODY_SHA256}'
     )
+    zero_thread_opener_object = object()
     zero_thread = element(
         zero_thread_key,
         states=['showing', 'enabled', 'focusable'],
         raw={
-            'atspi_obj': object(),
-            'scroll_target_atspi_obj': object(),
+            'atspi_obj': zero_thread_opener_object,
+            'scroll_target_atspi_obj': zero_thread_opener_object,
             'selected_post_root_atspi_obj': object(),
             'selected_post_body_atspi_obj': object(),
             'selected_post_body_showing': True,
@@ -313,7 +329,9 @@ def main() -> int:
         },
     )
     manual._selected_thread_viewport_state = lambda _raw: {
+        'intersects_viewport': True,
         'live_extent_in_viewport': True,
+        'available_below_px': 500,
     }
     try:
         zero_thread_card = compile_unit1_step(

@@ -33,6 +33,7 @@
     "scroll_target": {"type": "string", "minLength": 1},
     "scroll_target_source": {"enum": ["self", "mapped_context"]},
     "scroll_alignment": {"enum": ["anywhere", "top_edge"]},
+    "min_downward_clearance_px": {"type": "integer", "minimum": 0},
     "card_sha256": {"$ref": "#/$defs/sha256"}
   },
   "allOf": [
@@ -57,6 +58,14 @@
           ]
         }
       }
+    },
+    {
+      "if": {
+        "properties": {"phase": {"const": "thread_scroll"}},
+        "required": ["phase"]
+      },
+      "then": {"required": ["min_downward_clearance_px"]},
+      "else": {"not": {"required": ["min_downward_clearance_px"]}}
     }
   ],
   "$defs": {

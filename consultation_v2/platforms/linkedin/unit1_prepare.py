@@ -126,6 +126,9 @@ _SCROLL_CARD_KEYS = _CARD_KEYS | frozenset({
     'scroll_target',
     'scroll_target_source',
 })
+_THREAD_SCROLL_CARD_KEYS = _SCROLL_CARD_KEYS | frozenset({
+    'min_downward_clearance_px',
+})
 _RECEIPT_KEYS = frozenset({
     'card_sha256',
     'category_authority_sha256',
@@ -1018,6 +1021,10 @@ def _preparation_card(
         ),
     }
     if method == 'scroll_into_view':
+        if declared.get('phase') != phase:
+            raise LinkedInUnit1PreparationError(
+                f'{element_key} scroll declaration phase is not exact'
+            )
         for field in (
             'scroll_target',
             'scroll_target_source',
@@ -1029,6 +1036,17 @@ def _preparation_card(
                     f'{element_key} has no exact {field}'
                 )
             card[field] = value
+        if phase == 'thread_scroll':
+            minimum_clearance = declared.get('min_downward_clearance_px')
+            if (
+                isinstance(minimum_clearance, bool)
+                or not isinstance(minimum_clearance, int)
+                or minimum_clearance < 0
+            ):
+                raise LinkedInUnit1PreparationError(
+                    f'{element_key} has no exact minimum downward clearance'
+                )
+            card['min_downward_clearance_px'] = minimum_clearance
     card['card_sha256'] = _preparation_card_authority_sha256(card)
     return card
 
@@ -1389,7 +1407,10 @@ def accept_preparation_step(
     previous_receipt_sha256: str | None,
 ) -> dict[str, Any]:
     expected_card_keys = (
-        _SCROLL_CARD_KEYS
+        _THREAD_SCROLL_CARD_KEYS
+        if isinstance(card, Mapping)
+        and card.get('phase') == 'thread_scroll'
+        else _SCROLL_CARD_KEYS
         if isinstance(card, Mapping)
         and card.get('method') == 'scroll_into_view'
         else _CARD_KEYS
@@ -1454,20 +1475,41 @@ def accept_preparation_step(
         raise LinkedInUnit1PreparationError(
             'preparation scroll receipt lost its target or alignment'
         )
+    if phase in {'thread_scroll', 'thread_expand_scroll'} and (
+        postcondition.get('phase') != phase
+    ):
+        raise LinkedInUnit1PreparationError(
+            'preparation scroll receipt lost its declared phase'
+        )
     if phase == 'thread_scroll' and (
-        card.get('scroll_target') != 'selected_post_root'
-        or card.get('scroll_target_source') != 'mapped_context'
+        card.get('scroll_target') != 'selected_thread_opener'
+        or card.get('scroll_target_source') != 'self'
         or card.get('scroll_alignment') != 'top_edge'
+        or isinstance(card.get('min_downward_clearance_px'), bool)
+        or not isinstance(card.get('min_downward_clearance_px'), int)
+        or card.get('min_downward_clearance_px', -1) < 0
+        or postcondition.get('min_downward_clearance_px')
+        != card.get('min_downward_clearance_px')
+        or postcondition.get('activity_exact') is not True
+        or postcondition.get('body_sha256_exact') is not True
+        or postcondition.get('scroll_target_exact') is not True
         or postcondition.get(
-            'selected_post_root_live_extent_in_viewport'
+            'selected_post_root_intersects_viewport'
         ) is not True
-        or postcondition.get('selected_post_body_showing') is not True
         or postcondition.get(
             'thread_opener_live_extent_in_viewport'
         ) is not True
+        or isinstance(postcondition.get('thread_opener_available_below_px'), bool)
+        or not isinstance(
+            postcondition.get('thread_opener_available_below_px'),
+            int,
+        )
+        or postcondition.get('thread_opener_available_below_px', -1)
+        < card.get('min_downward_clearance_px', 0)
     ):
         raise LinkedInUnit1PreparationError(
-            'thread scroll did not prove the selected root/body/opener geometry'
+            'thread scroll did not prove selected identity, root intersection, '
+            'opener containment, and downward clearance'
         )
     if phase == 'notifications_navigation':
         if (
