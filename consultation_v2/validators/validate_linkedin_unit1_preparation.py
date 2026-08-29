@@ -797,6 +797,7 @@ def validate_initial_observation_barrier() -> None:
     clock = Clock()
     original_build_snapshot = manual.build_snapshot
     original_notifications_target = manual._notifications_target
+    original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
     original_monotonic = manual.time.monotonic
     original_sleep = manual.time.sleep
 
@@ -811,6 +812,7 @@ def validate_initial_observation_barrier() -> None:
 
     manual.build_snapshot = build_sequence
     manual._notifications_target = mapped_target
+    manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
     manual.time.monotonic = clock.monotonic
     manual.time.sleep = clock.sleep
     try:
@@ -818,6 +820,7 @@ def validate_initial_observation_barrier() -> None:
     finally:
         manual.build_snapshot = original_build_snapshot
         manual._notifications_target = original_notifications_target
+        manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
         manual.time.monotonic = original_monotonic
         manual.time.sleep = original_sleep
     require(
@@ -840,6 +843,10 @@ def validate_initial_observation_barrier() -> None:
         [sample['notifications_target_match_count'] for sample in receipt['samples']]
         == [0, 1, 1]
         and all(
+            sample['firefox_cache_invalidation'] == 'recursive_success'
+            for sample in receipt['samples']
+        )
+        and all(
             sample['allowed_now'] == ['activate']
             for sample in receipt['samples'][1:]
         ),
@@ -853,6 +860,7 @@ def validate_initial_observation_barrier() -> None:
         Snapshot(platform='linkedin', url=exact.url),
     )
     manual._notifications_target = mapped_target
+    manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
     manual.time.monotonic = clock.monotonic
     manual.time.sleep = clock.sleep
     try:
@@ -860,6 +868,7 @@ def validate_initial_observation_barrier() -> None:
     finally:
         manual.build_snapshot = original_build_snapshot
         manual._notifications_target = original_notifications_target
+        manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
         manual.time.monotonic = original_monotonic
         manual.time.sleep = original_sleep
     require(
