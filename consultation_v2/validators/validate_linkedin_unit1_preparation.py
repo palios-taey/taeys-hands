@@ -54,6 +54,7 @@ from consultation_v2.platforms.linkedin import manual  # noqa: E402
 from consultation_v2.platforms.linkedin.unit1_prepare import (  # noqa: E402
     LinkedInUnit1PreparationError,
     NOTIFICATION_EXCLUSIONS_SCHEMA,
+    PRIVATE_SELECTION_DECISION_SCHEMA,
     _category_authority_sha256,
     accept_preparation_step,
     compile_preparation_step,
@@ -128,6 +129,59 @@ def exclusion_decision(readiness: dict, transaction_sha256: str) -> dict:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def require_decision_input(readiness: dict) -> dict:
+    selection_input = readiness['input']
+    inventory = selection_input['notification_inventory']
+    decision = selection_input['decision_input']
+    expected_candidates = []
+    for link in inventory['actionable_links']:
+        row = inventory['rows'][link['ordinal'] - 1]
+        expected_candidates.append({
+            'activity': link['activity'],
+            'notification_text': row['notification_text'],
+            'notification_text_sha256': row['notification_text_sha256'],
+            'age_seconds': row['age_seconds'],
+            'age_token': row['age_token'],
+            'ordinal': link['ordinal'],
+            'element': link['element'],
+            'element_sha256': link['element_sha256'],
+            'uri': link['uri'],
+            'uri_sha256': link['uri_sha256'],
+        })
+    require(
+        set(decision) == {
+            'schema',
+            'policy_sha256',
+            'transaction_sha256',
+            'continuation_available',
+            'decision_inventory_sha256',
+            'inventory_sha256',
+            'mounted_article_count',
+            'actionable_candidates',
+        }
+        and decision['schema']
+        == PRIVATE_SELECTION_DECISION_SCHEMA
+        and decision['policy_sha256'] == selection_input['policy_sha256']
+        and decision['transaction_sha256']
+        == selection_input['transaction_sha256']
+        and decision['continuation_available']
+        == selection_input['continuation_available']
+        and decision['decision_inventory_sha256']
+        == inventory['decision_inventory_sha256']
+        and decision['inventory_sha256'] == inventory['inventory_sha256']
+        and decision['mounted_article_count']
+        == inventory['mounted_article_count']
+        and decision['actionable_candidates'] == expected_candidates
+        and len(expected_candidates) == len(inventory['actionable_links'])
+        and all(
+            inventory['rows'][link['ordinal'] - 1]['actionable'] is True
+            for link in inventory['actionable_links']
+        ),
+        'private selection decision input is not the exact actionable projection',
+    )
+    return decision
 
 
 class Hyperlink:
@@ -1273,6 +1327,7 @@ def main() -> int:
         and first_continuation_readiness['input']['continuation_available'] is True,
         'continuation bypassed the mounted candidate inventory',
     )
+    require_decision_input(first_continuation_readiness)
     first_exclusions = exclusion_decision(
         first_continuation_readiness,
         transaction_sha256,
@@ -1457,6 +1512,7 @@ def main() -> int:
         ready_selection['state'] == 'ready_for_private_selection',
         'complete stream did not produce private selection input',
     )
+    require_decision_input(ready_selection)
     require(
         ready_selection['input']['continuation_available'] is False,
         'complete stream incorrectly exposed continuation authority',

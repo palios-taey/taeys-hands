@@ -46,6 +46,9 @@ NOTIFICATION_INVENTORY_SCHEMA = 'linkedin_notification_inventory_v1'
 NOTIFICATION_DECISION_INVENTORY_SCHEMA = (
     'linkedin_notification_decision_inventory_v1'
 )
+PRIVATE_SELECTION_DECISION_SCHEMA = (
+    'linkedin_unit1_private_selection_decision_v1'
+)
 NOTIFICATION_EXCLUSIONS_SCHEMA = 'linkedin_notification_inventory_exclusions_v1'
 SELECTED_SOURCE_SCHEMA = 'linkedin_selected_post_thread_source_v1'
 _SHA256 = re.compile(r'^[0-9a-f]{64}$')
@@ -636,6 +639,81 @@ def project_notification_inventory(
     return NotificationInventoryProjection(artifact=artifact, targets=targets)
 
 
+def _private_selection_input(
+    inventory: Mapping[str, Any],
+    *,
+    policy_sha256: str,
+    transaction_sha256: str,
+    continuation_available: bool,
+) -> dict[str, Any]:
+    rows = inventory['rows']
+    actionable_links = inventory['actionable_links']
+    actionable_candidates: list[dict[str, Any]] = []
+    decision_candidates: list[dict[str, str]] = []
+    for link in actionable_links:
+        ordinal = link['ordinal']
+        if (
+            isinstance(ordinal, bool)
+            or not isinstance(ordinal, int)
+            or not 1 <= ordinal <= len(rows)
+        ):
+            raise LinkedInUnit1PreparationError(
+                'actionable decision link has an invalid mounted ordinal'
+            )
+        row = rows[ordinal - 1]
+        if (
+            row['actionable'] is not True
+            or row['activity'] != link['activity']
+            or row['ordinal'] != ordinal
+            or row['age_seconds'] != link['age_seconds']
+        ):
+            raise LinkedInUnit1PreparationError(
+                'actionable decision link does not bind its exact mounted row'
+            )
+        actionable_candidates.append({
+            'activity': link['activity'],
+            'notification_text': row['notification_text'],
+            'notification_text_sha256': row['notification_text_sha256'],
+            'age_seconds': row['age_seconds'],
+            'age_token': row['age_token'],
+            'ordinal': ordinal,
+            'element': link['element'],
+            'element_sha256': link['element_sha256'],
+            'uri': link['uri'],
+            'uri_sha256': link['uri_sha256'],
+        })
+        decision_candidates.append({
+            'activity': link['activity'],
+            'notification_text_sha256': row['notification_text_sha256'],
+            'uri_sha256': link['uri_sha256'],
+        })
+    if _sha256({
+        'schema': NOTIFICATION_DECISION_INVENTORY_SCHEMA,
+        'candidates': decision_candidates,
+    }) != inventory['decision_inventory_sha256']:
+        raise LinkedInUnit1PreparationError(
+            'actionable decision projection does not bind the exact inventory'
+        )
+    decision_input = {
+        'schema': PRIVATE_SELECTION_DECISION_SCHEMA,
+        'policy_sha256': policy_sha256,
+        'transaction_sha256': transaction_sha256,
+        'continuation_available': continuation_available,
+        'decision_inventory_sha256': inventory['decision_inventory_sha256'],
+        'inventory_sha256': inventory['inventory_sha256'],
+        'mounted_article_count': inventory['mounted_article_count'],
+        'actionable_candidates': actionable_candidates,
+    }
+    return {
+        'schema': 'linkedin_unit1_private_selection_input_v1',
+        'policy_sha256': policy_sha256,
+        'transaction_sha256': transaction_sha256,
+        'notification_inventory': dict(inventory),
+        'decision_input': decision_input,
+        'continuation_available': continuation_available,
+    }
+
+
 def _comment_count(name: str) -> int:
     if name == '1 comment':
         return 1
@@ -1033,13 +1111,12 @@ def compile_preparation_step(
                 transaction_sha256=transaction_sha256,
                 previous_receipt_sha256=previous_receipt_sha256,
                 snapshot_revision=snapshot_revision,
-                input_payload={
-                    'schema': 'linkedin_unit1_private_selection_input_v1',
-                    'policy_sha256': frozen['policy_sha256'],
-                    'transaction_sha256': transaction_sha256,
-                    'notification_inventory': inventory.artifact,
-                    'continuation_available': bool(continuation_keys),
-                },
+                input_payload=_private_selection_input(
+                    inventory.artifact,
+                    policy_sha256=frozen['policy_sha256'],
+                    transaction_sha256=transaction_sha256,
+                    continuation_available=bool(continuation_keys),
+                ),
             )
         if decision.get('schema') == NOTIFICATION_EXCLUSIONS_SCHEMA:
             expected_activities = [
