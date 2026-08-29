@@ -67,6 +67,9 @@ After Notifications activation has produced the transaction-bound exact-route an
 candidate projection continues on the exact `notifications_all` route even if LinkedIn virtualizes the category
 radio controls. Navigation verification still requires the live All-category controls; their later unmount does
 not erase the established receipt or hide exact URI-, state-, activity-, and age-qualified candidates.
+Each LinkedIn post-action sample recursively invalidates the bound Firefox accessibility subtree before the
+existing canonical snapshot builder reacquires the document. A refresh failure halts; it cannot become a null-URL
+fallback. A null-URL sample never authorizes another mutation.
 The initial Notifications target remains a two-sample read-only barrier. Its LinkedIn-local 45-second budget
 covers two measured full AT-SPI traversals on the production display; it does not add a sleep, action retry, or
 mutation authority.
