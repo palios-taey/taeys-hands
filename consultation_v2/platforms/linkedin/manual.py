@@ -294,7 +294,7 @@ def _manual_notification_contract() -> dict[str, Any]:
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
-            'timeout_ms': 10000,
+            'timeout_ms': 45000,
         },
     }
     if contract != expected:
