@@ -19,13 +19,24 @@ _SPEC = RouteSpec(
     ),
 )
 
+_DOCUMENT_SPEC = RouteSpec(
+    platform='linkedin',
+    url_patterns=(
+        'linkedin.com/jobs/',
+        'linkedin.com/jobs/view/',
+        'linkedin.com/notifications',
+        'linkedin.com/feed/',
+        'linkedin.com/posts/',
+    ),
+)
+
 
 def url_matches(url: str | None) -> bool:
     return _url_matches(_SPEC, url)
 
 
 def get_document(firefox):
-    return _get_document(_SPEC, firefox)
+    return _get_document(_DOCUMENT_SPEC, firefox)
 
 
 def route_display() -> str | None:

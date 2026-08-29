@@ -2201,11 +2201,7 @@ def element_operation(
     normalized_states = {
         str(state).strip().lower().replace('_', ' ') for state in states
     }
-    required_states = (
-        {'showing', 'enabled'}
-        if element_key == NOTIFICATIONS_NAVIGATION
-        else {'focusable', 'enabled'}
-    )
+    required_states = {'focusable', 'enabled'}
     selected_open_match = (
         selected_thread_open_match or selected_zero_thread_open_match
     )
@@ -3214,16 +3210,26 @@ def stable_initial_preparation_observation(
         cache_invalidation = _invalidate_linkedin_firefox_subtree()
         _firefox, _document, snapshot = build_snapshot('linkedin')
         target, match_count = _notifications_target(snapshot)
-        augmented = augment_snapshot(snapshot)
-        augmented_matches = list(
-            augmented.mapped.get(NOTIFICATIONS_NAVIGATION) or []
+        projected_mapped = {
+            key: list(elements)
+            for key, elements in snapshot.mapped.items()
+            if key != NOTIFICATIONS_NAVIGATION
+        }
+        projected_mapped[NOTIFICATIONS_NAVIGATION] = (
+            [replace(target, key=NOTIFICATIONS_NAVIGATION)]
+            if target is not None
+            else []
+        )
+        projected = replace(snapshot, mapped=projected_mapped)
+        projected_matches = list(
+            projected.mapped.get(NOTIFICATIONS_NAVIGATION) or []
         )
         declared: dict[str, Any] | None = None
-        if len(augmented_matches) == 1:
+        if len(projected_matches) == 1:
             declared = element_operation(
                 NOTIFICATIONS_NAVIGATION,
-                list(augmented_matches[0].states),
-                dict(augmented_matches[0].raw or {}),
+                list(projected_matches[0].states),
+                dict(projected_matches[0].raw or {}),
             )
         state_digest = (
             _notifications_target_state_digest(snapshot, target, match_count)
@@ -3232,7 +3238,7 @@ def stable_initial_preparation_observation(
         )
         exact = (
             match_count == 1
-            and len(augmented_matches) == 1
+            and len(projected_matches) == 1
             and isinstance(declared, dict)
             and declared.get('allowed_now') == ['activate']
             and state_digest is not None
@@ -3247,13 +3253,13 @@ def stable_initial_preparation_observation(
         else:
             stable_cycles_observed = 0
             previous_state_digest = None
-        last_snapshot = augmented
+        last_snapshot = projected
         samples.append({
             'sample': len(samples) + 1,
             'elapsed_ms': round((time.monotonic() - started_at) * 1000),
             'observed_url': snapshot.url,
             'notifications_target_match_count': match_count,
-            'augmented_match_count': len(augmented_matches),
+            'augmented_match_count': len(projected_matches),
             'declared_method': declared.get('method') if declared else None,
             'allowed_now': declared.get('allowed_now') if declared else None,
             'target_state_digest': state_digest,
@@ -3261,7 +3267,7 @@ def stable_initial_preparation_observation(
             'firefox_cache_invalidation': cache_invalidation,
         })
         if stable_cycles_observed >= stable_cycles_required:
-            return augmented, {
+            return projected, {
                 'result': 'PASS',
                 'compile_authorized': True,
                 'next_mutation_authorized': False,

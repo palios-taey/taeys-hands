@@ -15,6 +15,8 @@ import yaml
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
 
+from consultation_v2.platforms.linkedin import routing as linkedin_routing
+
 PLATFORM_ROOT = REPO_ROOT / 'consultation_v2' / 'platforms' / 'linkedin'
 DRIVER = PLATFORM_ROOT / 'driver.py'
 RUNNER = REPO_ROOT / 'scripts' / 'run_linkedin_jobs.py'
@@ -174,8 +176,8 @@ def _validate_yaml() -> list[str]:
             'exact_query': {'_bprMode': 'vanilla'},
         },
         'role': 'link',
-        'states_required': ['enabled', 'focusable', 'showing'],
-        'allowed_optional_states': ['focused'],
+        'states_required': ['enabled', 'focusable'],
+        'allowed_optional_states': ['focused', 'showing'],
         'uri': {
             'scheme': 'https',
             'host': 'www.linkedin.com',
@@ -199,7 +201,7 @@ def _validate_yaml() -> list[str]:
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
-            'timeout_ms': 45000,
+            'timeout_ms': 90000,
         },
     }:
         errors.append(f'{YAML_PATH}: manual Notifications route barrier drifted')
@@ -207,7 +209,7 @@ def _validate_yaml() -> list[str]:
         (
             navigation.get('initial_observation_barrier'),
             'exact_notifications_navigation',
-            45000,
+            120000,
         ),
         (
             navigation.get('observation_barrier'),
@@ -1277,6 +1279,23 @@ def _validate_restore_projection() -> list[str]:
     ):
         errors.append('queryless preload Notifications authority was not exact')
 
+    queryless_without_showing = snapshot(
+        notifications(
+            current_name,
+            queryless_uri,
+            preload_url,
+            states=('enabled', 'focusable'),
+        ),
+        notifications(current_name, queryless_uri, return_url),
+    )
+    hidden_state_target, hidden_state_count = _notifications_target(
+        queryless_without_showing
+    )
+    if hidden_state_target is None or hidden_state_count != 1:
+        errors.append(
+            'onscreen preload Notifications authority required volatile showing state'
+        )
+
     focused = snapshot(
         notifications(
             current_name,
@@ -1614,8 +1633,28 @@ def _validate_runtime_source() -> list[str]:
     ):
         errors.append(f'{DRIVER}: engagement sink lacks persisted-byte digest proof')
     routing_source = (PLATFORM_ROOT / 'routing.py').read_text(encoding='utf-8')
-    if 'linkedin.com/feed/' in routing_source or 'linkedin.com/posts/' in routing_source:
-        errors.append(f'{PLATFORM_ROOT / "routing.py"}: candidate URIs entered routing authority')
+    if linkedin_routing._SPEC.url_patterns != (
+        'linkedin.com/jobs/',
+        'linkedin.com/jobs/view/',
+        'linkedin.com/notifications',
+    ) or linkedin_routing.url_matches('https://www.linkedin.com/feed/'):
+        errors.append(
+            f'{PLATFORM_ROOT / "routing.py"}: candidate URIs entered route authority'
+        )
+    if (
+        linkedin_routing._DOCUMENT_SPEC.url_patterns
+        != (
+            'linkedin.com/jobs/',
+            'linkedin.com/jobs/view/',
+            'linkedin.com/notifications',
+            'linkedin.com/feed/',
+            'linkedin.com/posts/',
+        )
+        or 'return _get_document(_DOCUMENT_SPEC, firefox)' not in routing_source
+    ):
+        errors.append(
+            f'{PLATFORM_ROOT / "routing.py"}: selected-post document scope drifted'
+        )
     if (
         'operation: str | None = None' not in runner_source
         or 'if operation is None:\n            raise' not in runner_source
