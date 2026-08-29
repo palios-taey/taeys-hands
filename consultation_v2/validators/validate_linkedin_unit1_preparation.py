@@ -630,10 +630,20 @@ def with_thread_opener(snapshot: Snapshot, count: int = 2) -> Snapshot:
     key = (
         f'{manual.SELECTED_THREAD_OPEN_PREFIX}{ACTIVITY_A}_body_{BODY_SHA256}'
     )
+    root, body, _body_text = manual._selected_post_root_and_body(
+        snapshot,
+        manual._manual_notification_contract(),
+    )
+    require(root is not None and body is not None, 'thread fixture lost its post root')
     snapshot.mapped[key] = [ref(
         count_element.atspi_obj,
         key=key,
         raw={
+            'atspi_obj': count_element.atspi_obj,
+            'scroll_target_atspi_obj': root.atspi_obj,
+            'selected_post_root_atspi_obj': root.atspi_obj,
+            'selected_post_body_atspi_obj': body.atspi_obj,
+            'selected_post_body_showing': True,
             'selected_activity': ACTIVITY_A,
             'selected_post_body_sha256': BODY_SHA256,
         },
@@ -716,6 +726,18 @@ def barrier(card: dict) -> dict:
         postcondition.update({
             'route_exact': True,
             'category_exact': True,
+        })
+    if card['method'] == 'scroll_into_view':
+        postcondition.update({
+            'scroll_target': card['scroll_target'],
+            'scroll_target_source': card['scroll_target_source'],
+            'scroll_alignment': card['scroll_alignment'],
+        })
+    if card['phase'] == 'thread_scroll':
+        postcondition.update({
+            'selected_post_root_live_extent_in_viewport': True,
+            'selected_post_body_showing': True,
+            'thread_opener_live_extent_in_viewport': True,
         })
     return {
         'result': 'PASS',
@@ -1835,7 +1857,24 @@ def main() -> int:
     original_build_snapshot = manual.build_snapshot
     original_viewport = manual._selected_thread_viewport_state
     original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
-    manual.build_snapshot = lambda _platform: (None, None, virtualized)
+    settled_virtualized = virtualized_selected_snapshot()
+    _settled_root, settled_body, _settled_text = (
+        manual._selected_post_root_and_body(
+            settled_virtualized,
+            manual._manual_notification_contract(),
+        )
+    )
+    require(
+        settled_body is not None,
+        'settled selected body fixture did not resolve',
+    )
+    settled_body.states = ['showing', 'enabled']
+    settled_body.atspi_obj.states = ['showing', 'enabled']
+    manual.build_snapshot = lambda _platform: (
+        None,
+        None,
+        settled_virtualized,
+    )
     manual._selected_thread_viewport_state = lambda _raw: {
         'live_extent_in_viewport': True,
     }
@@ -1857,6 +1896,11 @@ def main() -> int:
         and all(
             sample['exact_element_key_count'] == 1
             and sample['firefox_cache_invalidation'] == 'recursive_success'
+            and sample['selected_post_identity_exact'] is True
+            and sample['scroll_target_exact'] is True
+            and sample['selected_post_root_live_extent_in_viewport'] is True
+            and sample['selected_post_body_showing'] is True
+            and sample['thread_opener_live_extent_in_viewport'] is True
             for sample in virtualized_barrier['samples']
         ),
         'virtualized selected root did not retain exact identity for two samples',
@@ -1914,6 +1958,10 @@ def main() -> int:
     require(
         first_expand_scroll['phase'] == 'thread_expand_scroll'
         and first_expand_scroll['method'] == 'scroll_into_view'
+        and first_expand_scroll['scroll_target']
+        == 'selected_thread_expander'
+        and first_expand_scroll['scroll_target_source'] == 'self'
+        and first_expand_scroll['scroll_alignment'] == 'anywhere'
         and '_total_9_visible_2_more_6' in first_expand_scroll['element'],
         'off-screen selected thread expansion did not compile one exact scroll',
     )
@@ -2289,6 +2337,9 @@ def main() -> int:
         manual._selected_thread_viewport_state = original_viewport
     require(
         media_zero_card['phase'] == 'thread_scroll'
+        and media_zero_card['scroll_target'] == 'selected_post_root'
+        and media_zero_card['scroll_target_source'] == 'mapped_context'
+        and media_zero_card['scroll_alignment'] == 'top_edge'
         and media_zero_card['element'].startswith(
             manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
         ),

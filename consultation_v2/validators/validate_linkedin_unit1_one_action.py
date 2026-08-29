@@ -111,6 +111,15 @@ def barrier(card: dict, private: dict) -> dict:
             'comment_text_chars': len(private['text']),
             'observed_url': 'https://www.linkedin.com/feed/update/example/',
         })
+    if card['method'] == 'scroll_into_view':
+        postcondition.update({
+            'scroll_target': card['scroll_target'],
+            'scroll_target_source': card['scroll_target_source'],
+            'scroll_alignment': card['scroll_alignment'],
+            'selected_post_root_live_extent_in_viewport': True,
+            'selected_post_body_showing': True,
+            'thread_opener_live_extent_in_viewport': True,
+        })
     return {
         'result': 'PASS',
         'next_mutation_authorized': not terminal,
@@ -217,6 +226,11 @@ def main() -> int:
         thread_key,
         states=['enabled', 'focusable'],
         raw={
+            'atspi_obj': object(),
+            'scroll_target_atspi_obj': object(),
+            'selected_post_root_atspi_obj': object(),
+            'selected_post_body_atspi_obj': object(),
+            'selected_post_body_showing': True,
             'selected_activity': ACTIVITY,
             'selected_post_body_sha256': BODY_SHA256,
         },
@@ -242,6 +256,11 @@ def main() -> int:
         zero_thread_key,
         states=['showing', 'enabled', 'focusable'],
         raw={
+            'atspi_obj': object(),
+            'scroll_target_atspi_obj': object(),
+            'selected_post_root_atspi_obj': object(),
+            'selected_post_body_atspi_obj': object(),
+            'selected_post_body_showing': True,
             'selected_activity': ACTIVITY,
             'selected_post_body_sha256': BODY_SHA256,
             'selected_thread_expected_count': 0,

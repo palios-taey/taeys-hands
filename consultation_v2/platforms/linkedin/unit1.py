@@ -76,6 +76,11 @@ _CARD_KEYS = frozenset({
     'transaction_sha256',
     'verification_operation',
 })
+_SCROLL_CARD_KEYS = _CARD_KEYS | frozenset({
+    'scroll_alignment',
+    'scroll_target',
+    'scroll_target_source',
+})
 _RECEIPT_KEYS = frozenset({
     'card_sha256',
     'effect_class',
@@ -344,6 +349,18 @@ def _declared_card(
             else postcondition['kind']
         ),
     }
+    if method == 'scroll_into_view':
+        for field in (
+            'scroll_target',
+            'scroll_target_source',
+            'scroll_alignment',
+        ):
+            value = declared.get(field)
+            if not isinstance(value, str) or not value:
+                raise LinkedInUnit1Error(
+                    f'{element_key} has no exact {field}'
+                )
+            card[field] = value
     card['card_sha256'] = _sha256(card)
     return card
 
@@ -560,7 +577,13 @@ def accept_unit1_step(
 ) -> dict[str, Any]:
     private = validate_private_input(private_input)
     transaction_sha256 = _sha256(private)
-    if not isinstance(card, Mapping) or frozenset(card) != _CARD_KEYS:
+    expected_card_keys = (
+        _SCROLL_CARD_KEYS
+        if isinstance(card, Mapping)
+        and card.get('method') == 'scroll_into_view'
+        else _CARD_KEYS
+    )
+    if not isinstance(card, Mapping) or frozenset(card) != expected_card_keys:
         raise LinkedInUnit1Error('action card fields are incomplete or unknown')
     card_payload = dict(card)
     card_digest = card_payload.pop('card_sha256', None)
@@ -611,6 +634,29 @@ def accept_unit1_step(
         raise LinkedInUnit1Error('exact postcondition barrier did not authorize the step')
     if postcondition.get('effect_class') != card_payload.get('effect_class'):
         raise LinkedInUnit1Error('postcondition effect class does not match the action card')
+    if phase == 'thread_scroll' and (
+        card_payload.get('scroll_target') != 'selected_post_root'
+        or card_payload.get('scroll_target_source') != 'mapped_context'
+        or card_payload.get('scroll_alignment') != 'top_edge'
+        or any(
+            postcondition.get(field) != card_payload.get(field)
+            for field in (
+                'scroll_alignment',
+                'scroll_target',
+                'scroll_target_source',
+            )
+        )
+        or postcondition.get(
+            'selected_post_root_live_extent_in_viewport'
+        ) is not True
+        or postcondition.get('selected_post_body_showing') is not True
+        or postcondition.get(
+            'thread_opener_live_extent_in_viewport'
+        ) is not True
+    ):
+        raise LinkedInUnit1Error(
+            'thread scroll did not prove the selected root/body/opener geometry'
+        )
     if terminal:
         submit_match = _SUBMIT.fullmatch(element)
         expected_postcondition_keys = {

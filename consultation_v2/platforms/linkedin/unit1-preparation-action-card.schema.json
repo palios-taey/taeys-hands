@@ -30,6 +30,9 @@
     "verification_operation": {"enum": ["activate", "scroll_into_view"]},
     "effect_class": {"type": "string", "minLength": 1},
     "postcondition_kind": {"type": "string", "minLength": 1},
+    "scroll_target": {"type": "string", "minLength": 1},
+    "scroll_target_source": {"enum": ["self", "mapped_context"]},
+    "scroll_alignment": {"enum": ["anywhere", "top_edge"]},
     "card_sha256": {"$ref": "#/$defs/sha256"}
   },
   "$defs": {

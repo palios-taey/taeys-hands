@@ -686,9 +686,15 @@ class ConsultationRuntime:
         except Exception:
             return 960, 540
 
-    def scroll_element_into_view(self, element: Optional[Any] = None) -> bool:
-        """Scroll a SPECIFIC element into view via its AT-SPI Component
-        (ScrollType.ANYWHERE). Required before action-clicking a copy button
+    def scroll_element_into_view(
+        self,
+        element: Optional[Any] = None,
+        *,
+        alignment: str = 'anywhere',
+    ) -> bool:
+        """Scroll a SPECIFIC element into view via its AT-SPI Component.
+        The default preserves ScrollType.ANYWHERE for existing callers.
+        Required before action-clicking a copy button
         that may be off-screen — Perplexity's DR 'Copy contents' / Copy returns
         an EMPTY clipboard when clicked while not scrolled into view. Unlike
         scroll_to_bottom (which scrolls the page), this targets the button
@@ -700,10 +706,17 @@ class ConsultationRuntime:
             import gi
             gi.require_version('Atspi', '2.0')
             from gi.repository import Atspi as _Atspi
+            scroll_types = {
+                'anywhere': _Atspi.ScrollType.ANYWHERE,
+                'top_edge': _Atspi.ScrollType.TOP_EDGE,
+            }
+            scroll_type = scroll_types.get(alignment)
+            if scroll_type is None:
+                return False
             comp = element.atspi_obj.get_component_iface()
             if comp is None:
                 return False
-            return bool(comp.scroll_to(_Atspi.ScrollType.ANYWHERE))
+            return bool(comp.scroll_to(scroll_type))
         except Exception:
             return False
 

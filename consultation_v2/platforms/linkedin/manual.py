@@ -287,6 +287,9 @@ def _manual_notification_contract() -> dict[str, Any]:
                     'effect_class': 'viewport',
                     'primitives': ['scroll_into_view'],
                     'allowed_now': ['scroll_into_view'],
+                    'scroll_target': 'selected_thread_expander',
+                    'scroll_target_source': 'self',
+                    'scroll_alignment': 'anywhere',
                     'postcondition': (
                         'exact_selected_thread_expander_in_viewport'
                     ),
@@ -307,6 +310,9 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'effect_class': 'viewport',
                 'primitives': ['scroll_into_view'],
                 'allowed_now': ['scroll_into_view'],
+                'scroll_target': 'selected_post_root',
+                'scroll_target_source': 'mapped_context',
+                'scroll_alignment': 'top_edge',
                 'postcondition': 'exact_selected_thread_opener_in_viewport',
                 'observation_barrier': {
                     'refresh_policy': 'invalidate_reacquire',
@@ -2005,6 +2011,14 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                 ),
                 raw={
                     **dict(comment_counts[0].raw),
+                    'atspi_obj': comment_counts[0].atspi_obj,
+                    'scroll_target_atspi_obj': root.atspi_obj,
+                    'selected_post_root_atspi_obj': root.atspi_obj,
+                    'selected_post_body_atspi_obj': body.atspi_obj,
+                    'selected_post_body_showing': _node_has_states(
+                        body.atspi_obj,
+                        ['showing'],
+                    ),
                     'selected_activity': selected_activity,
                     'selected_post_body_sha256': body_digest,
                 },
@@ -2029,6 +2043,14 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     ),
                     raw={
                         **dict(zero_opener.raw),
+                        'atspi_obj': zero_opener.atspi_obj,
+                        'scroll_target_atspi_obj': root.atspi_obj,
+                        'selected_post_root_atspi_obj': root.atspi_obj,
+                        'selected_post_body_atspi_obj': body.atspi_obj,
+                        'selected_post_body_showing': _node_has_states(
+                            body.atspi_obj,
+                            ['showing'],
+                        ),
                         'selected_activity': selected_activity,
                         'selected_post_body_sha256': body_digest,
                         'selected_thread_expected_count': 0,
@@ -2087,6 +2109,21 @@ def _selected_thread_viewport_state(element: dict[str, Any]) -> dict[str, object
     from consultation_v2.interact import atspi_element_viewport_state
 
     return atspi_element_viewport_state(element)
+
+
+def _selected_thread_open_geometry(context: dict[str, Any]) -> dict[str, Any]:
+    return {
+        'selected_post_root': _selected_thread_viewport_state({
+            'atspi_obj': context.get('selected_post_root_atspi_obj'),
+        }),
+        'selected_post_body': _selected_thread_viewport_state({
+            'atspi_obj': context.get('selected_post_body_atspi_obj'),
+        }),
+        'selected_post_body_showing': (
+            context.get('selected_post_body_showing') is True
+        ),
+        'thread_opener': _selected_thread_viewport_state(context),
+    }
 
 
 def element_operation(
@@ -2353,19 +2390,32 @@ def element_operation(
         selected_thread_open_match or selected_zero_thread_open_match
     )
     if selected_open_match is not None:
-        viewport = _selected_thread_viewport_state(dict(context or {}))
-        if viewport.get('live_extent_in_viewport') is True:
+        geometry = _selected_thread_open_geometry(selected_context)
+        root_viewport = geometry['selected_post_root']
+        opener_viewport = geometry['thread_opener']
+        if (
+            root_viewport.get('live_extent_in_viewport') is True
+            and geometry['selected_post_body_showing'] is True
+            and opener_viewport.get('live_extent_in_viewport') is True
+        ):
             declared_action = _manual_notification_contract()[
                 'selected_thread'
             ]['action']
-        elif viewport.get('error') == 'live_extent_outside_display':
+        elif (
+            root_viewport.get('error') == 'live_extent_outside_display'
+            or opener_viewport.get('error') == 'live_extent_outside_display'
+            or geometry['selected_post_body_showing'] is not True
+        ):
             declared_action = _manual_notification_contract()[
                 'selected_thread'
             ]['scroll_into_view']
         else:
             raise ValueError(
-                'LinkedIn selected-thread opener viewport state is unavailable: '
-                f"{viewport.get('error') or 'unknown'}"
+                'LinkedIn selected-thread root/opener viewport state is unavailable: '
+                f"root={root_viewport.get('error') or 'unknown'}; "
+                f"opener={opener_viewport.get('error') or 'unknown'}; "
+                'body_showing='
+                f"{geometry['selected_post_body_showing']}"
             )
     elif selected_thread_expand_match is not None:
         viewport = _selected_thread_viewport_state(dict(context or {}))
@@ -2408,6 +2458,17 @@ def element_operation(
         'effect_class': declared_action['effect_class'],
         'primitives': declared_action['primitives'],
         'allowed_now': allowed_now,
+        **(
+            {
+                'scroll_target': declared_action['scroll_target'],
+                'scroll_target_source': declared_action[
+                    'scroll_target_source'
+                ],
+                'scroll_alignment': declared_action['scroll_alignment'],
+            }
+            if declared_primitive == 'scroll_into_view'
+            else {}
+        ),
         'forbidden': [
             primitive
             for primitive in [
@@ -2944,6 +3005,9 @@ def stable_scroll_post_action_observation(
     selected_thread_expand_match = _SELECTED_THREAD_EXPAND_KEY.fullmatch(
         element_key
     )
+    selected_open_match = (
+        selected_thread_open_match or selected_zero_thread_open_match
+    )
     if (
         selected_thread_open_match is None
         and selected_zero_thread_open_match is None
@@ -2956,7 +3020,8 @@ def stable_scroll_post_action_observation(
     if isinstance(deadline_at, bool) or not isinstance(deadline_at, (int, float)):
         raise ValueError('LinkedIn scroll post-action deadline must be monotonic seconds')
 
-    selected_thread_contract = _manual_notification_contract()['selected_thread']
+    notification_contract = _manual_notification_contract()
+    selected_thread_contract = notification_contract['selected_thread']
     scroll_contract = (
         selected_thread_contract['expand']['scroll_into_view']
         if selected_thread_expand_match is not None
@@ -2980,16 +3045,65 @@ def stable_scroll_post_action_observation(
         snapshot = augment_snapshot(base_snapshot)
         last_snapshot = snapshot
         matches = list(snapshot.mapped.get(element_key) or [])
-        viewport: dict[str, Any] = {}
+        opener_viewport: dict[str, Any] = {}
+        root_viewport: dict[str, Any] = {}
+        body_viewport: dict[str, Any] = {}
+        body_showing = False
+        selected_post_identity_exact = False
+        scroll_target_exact = False
         exact = False
         if len(matches) == 1:
             target = matches[0]
-            viewport = _selected_thread_viewport_state(dict(target.raw or {}))
-            if viewport.get('live_extent_in_viewport') is True:
+            target_raw = dict(target.raw or {})
+            opener_viewport = _selected_thread_viewport_state(target_raw)
+            if selected_open_match is not None:
+                root, body, body_text = _selected_post_root_and_body(
+                    snapshot,
+                    notification_contract,
+                )
+                if root is not None and body is not None and body_text is not None:
+                    expected_activity = selected_open_match.group('activity')
+                    expected_body_sha256 = selected_open_match.group('body')
+                    selected_post_identity_exact = bool(
+                        target_raw.get('selected_activity') == expected_activity
+                        and hashlib.sha256(
+                            body_text.encode('utf-8')
+                        ).hexdigest() == expected_body_sha256
+                    )
+                    scroll_target_exact = bool(
+                        target_raw.get('scroll_target_atspi_obj')
+                        is root.atspi_obj
+                        and target_raw.get('selected_post_root_atspi_obj')
+                        is root.atspi_obj
+                        and target_raw.get('selected_post_body_atspi_obj')
+                        is body.atspi_obj
+                    )
+                    root_viewport = _selected_thread_viewport_state({
+                        'atspi_obj': root.atspi_obj,
+                    })
+                    body_viewport = _selected_thread_viewport_state({
+                        'atspi_obj': body.atspi_obj,
+                    })
+                    body_showing = _node_has_states(
+                        body.atspi_obj,
+                        ['showing'],
+                    )
+            if (
+                opener_viewport.get('live_extent_in_viewport') is True
+                and (
+                    selected_open_match is None
+                    or (
+                        selected_post_identity_exact
+                        and scroll_target_exact
+                        and root_viewport.get('live_extent_in_viewport') is True
+                        and body_showing
+                    )
+                )
+            ):
                 declared = element_operation(
                     element_key,
                     list(target.states),
-                    dict(target.raw or {}),
+                    target_raw,
                 )
                 exact = bool(
                     declared
@@ -3002,17 +3116,40 @@ def stable_scroll_post_action_observation(
             'sample': len(samples) + 1,
             'elapsed_ms': round((time.monotonic() - started_at) * 1000),
             'exact_element_key_count': len(matches),
-            'live_extent_resolved': bool(viewport.get('live_extent_resolved')),
+            'live_extent_resolved': bool(
+                opener_viewport.get('live_extent_resolved')
+            ),
             'display_geometry_resolved': bool(
-                viewport.get('display_geometry_resolved')
+                opener_viewport.get('display_geometry_resolved')
             ),
             'live_extent_in_viewport': bool(
-                viewport.get('live_extent_in_viewport')
+                opener_viewport.get('live_extent_in_viewport')
+            ),
+            'selected_post_identity_exact': selected_post_identity_exact,
+            'scroll_target_exact': scroll_target_exact,
+            'selected_post_root_live_extent_in_viewport': bool(
+                root_viewport.get('live_extent_in_viewport')
+            ),
+            'selected_post_body_live_extent_in_viewport': bool(
+                body_viewport.get('live_extent_in_viewport')
+            ),
+            'selected_post_body_showing': body_showing,
+            'thread_opener_live_extent_in_viewport': bool(
+                opener_viewport.get('live_extent_in_viewport')
             ),
             'firefox_cache_invalidation': cache_invalidation,
             **(
-                {'viewport_error': str(viewport['error'])}
-                if viewport.get('error')
+                {'viewport_error': str(opener_viewport['error'])}
+                if opener_viewport.get('error')
+                else {}
+            ),
+            **(
+                {
+                    'selected_post_root_viewport_error': str(
+                        root_viewport['error']
+                    )
+                }
+                if root_viewport.get('error')
                 else {}
             ),
         })
@@ -3027,6 +3164,20 @@ def stable_scroll_post_action_observation(
                 'activity_exact': True,
                 'body_sha256_exact': True,
                 'live_extent_in_viewport': True,
+                'scroll_target': scroll_contract['scroll_target'],
+                'scroll_target_source': scroll_contract[
+                    'scroll_target_source'
+                ],
+                'scroll_alignment': scroll_contract['scroll_alignment'],
+                **(
+                    {
+                        'selected_post_root_live_extent_in_viewport': True,
+                        'selected_post_body_showing': True,
+                        'thread_opener_live_extent_in_viewport': True,
+                    }
+                    if selected_open_match is not None
+                    else {}
+                ),
                 **(
                     {
                         'expansion_identity_exact': True,
