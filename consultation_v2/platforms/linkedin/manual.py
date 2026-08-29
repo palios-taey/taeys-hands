@@ -1004,6 +1004,153 @@ def _selected_thread_controls(
     return comment_counts, visible_comments
 
 
+def _selected_thread_failure_evidence(
+    snapshot: Snapshot,
+    expected_activity: str,
+    expected_body_sha256: str,
+) -> dict[str, Any]:
+    contract = _manual_notification_contract()
+    activity, activity_sources = _selected_activity_identity(snapshot, contract)
+    root, _body, body_text = _selected_post_root_and_body(snapshot, contract)
+    evidence: dict[str, Any] = {
+        'expected_activity': expected_activity,
+        'observed_activity': activity,
+        'activity_exact': activity == expected_activity,
+        'activity_sources': list(activity_sources),
+        'expected_body_sha256': expected_body_sha256,
+        'selected_post_root_found': root is not None,
+        'selected_post_body_found': body_text is not None,
+    }
+    if root is None or body_text is None:
+        return evidence
+
+    observed_body_sha256 = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
+    selected_thread = contract['selected_thread']
+    count_contract = selected_thread['comment_count']
+    visible_contract = selected_thread['visible_comment']
+    zero_contract = selected_thread['zero_open']
+    expand_contract = selected_thread['expand']
+    comment_contract = _manual_comment_contract()
+    editor_contract = comment_contract['editor']
+    submit_contract = comment_contract['submit']
+    mapped_keys_by_identity: dict[int, list[str]] = {}
+    for key, matches in snapshot.mapped.items():
+        for match in matches:
+            if match.atspi_obj is not None:
+                mapped_keys_by_identity.setdefault(id(match.atspi_obj), []).append(key)
+
+    candidates: list[dict[str, Any]] = []
+    for element, relative_depth in _selected_post_descendants(snapshot, root):
+        name = element.name or ''
+        if 'comment' not in name.lower():
+            continue
+        candidate = {
+            'relative_depth': relative_depth,
+            'structural_path': list(_structural_index_path(element.atspi_obj)),
+            'role': element.role,
+            'states': sorted(element.states),
+            'x': element.x,
+            'y': element.y,
+            'name_sha256': hashlib.sha256(name.encode('utf-8')).hexdigest(),
+            'name_chars': len(name),
+            'mapped_keys': sorted(mapped_keys_by_identity.get(id(element.atspi_obj), [])),
+            'name_has_comment_token': True,
+            'matches_visible_comment_shape': bool(
+                element.role == visible_contract['role']
+                and name.startswith(visible_contract['name_prefix'])
+                and name.endswith(visible_contract['name_suffix'])
+            ),
+            'matches_count_role': element.role == count_contract['role'],
+            'matches_zero_open_shape': bool(
+                element.role == zero_contract['role']
+                and name == zero_contract['name']
+            ),
+            'matches_editor_shape': bool(
+                relative_depth == editor_contract['relative_depth']
+                and element.role == editor_contract['role']
+                and name == editor_contract['name']
+            ),
+            'matches_submit_shape': bool(
+                relative_depth == submit_contract['relative_depth']
+                and element.role == submit_contract['role']
+                and name == submit_contract['name']
+            ),
+            'matches_expand_shape': bool(
+                relative_depth == expand_contract['relative_depth']
+                and element.role == expand_contract['role']
+                and name.startswith(expand_contract['name_prefix'])
+                and any(name.endswith(suffix) for suffix in expand_contract['name_suffixes'])
+            ),
+            'viewport': _selected_thread_viewport_state({
+                'atspi_obj': element.atspi_obj,
+            }),
+        }
+        candidates.append(candidate)
+
+    count_paths: list[dict[str, Any]] = []
+    elements_by_identity = {
+        id(element.atspi_obj): element for element in _all_elements(snapshot)
+    }
+    required_count_states = set(count_contract['states_include'])
+    for index_path in count_contract['index_paths']:
+        count_node = _node_at_index_path(root.atspi_obj, index_path)
+        count_element = elements_by_identity.get(id(count_node))
+        row: dict[str, Any] = {
+            'index_path': list(index_path),
+            'node_found': count_node is not None,
+            'canonically_mapped': count_element is not None,
+        }
+        if count_element is not None:
+            count_name = count_element.name or ''
+            count_token = (
+                count_name.removesuffix(' comments').replace(',', '')
+                if count_name.endswith(' comments')
+                else '1' if count_name == '1 comment' else ''
+            )
+            row.update({
+                'role': count_element.role,
+                'states': sorted(count_element.states),
+                'name_sha256': hashlib.sha256(
+                    count_name.encode('utf-8')
+                ).hexdigest(),
+                'name_chars': len(count_name),
+                'count_token': int(count_token) if count_token.isdigit() else None,
+                'role_exact': count_element.role == count_contract['role'],
+                'states_exact': required_count_states.issubset(
+                    count_element.states
+                ),
+                'viewport': _selected_thread_viewport_state({
+                    'atspi_obj': count_element.atspi_obj,
+                }),
+            })
+        count_paths.append(row)
+
+    candidates_sha256 = hashlib.sha256(json.dumps(
+        candidates,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(',', ':'),
+    ).encode('utf-8')).hexdigest()
+    evidence.update({
+        'observed_body_sha256': observed_body_sha256,
+        'body_exact': observed_body_sha256 == expected_body_sha256,
+        'selected_post_structural_path': list(
+            _structural_index_path(root.atspi_obj)
+        ),
+        'selected_post_viewport': _selected_thread_viewport_state({
+            'atspi_obj': root.atspi_obj,
+        }),
+        'selected_post_descendant_count': len(
+            _selected_post_descendants(snapshot, root)
+        ),
+        'comment_named_candidate_count': len(candidates),
+        'comment_named_candidates_sha256': candidates_sha256,
+        'comment_named_candidates': candidates,
+        'comment_count_paths': count_paths,
+    })
+    return evidence
+
+
 def _selected_thread_zero_is_exact(
     snapshot: Snapshot,
     root: Any,
@@ -3132,6 +3279,19 @@ def stable_post_action_observation(
             sample.update(continuation_measurement)
         if verification_error is not None:
             sample['verification_error'] = verification_error
+            if selected_thread_open_match is not None:
+                try:
+                    sample['selected_thread_failure_evidence'] = (
+                        _selected_thread_failure_evidence(
+                            snapshot,
+                            selected_thread_open_match.group('activity'),
+                            selected_thread_open_match.group('body'),
+                        )
+                    )
+                except Exception as exc:
+                    sample['selected_thread_failure_evidence_error'] = (
+                        f'{type(exc).__name__}:{exc}'
+                    )
         if exact_receipt is not None:
             sample['postcondition'] = exact_receipt['postcondition']
             if 'activity_sources' in exact_receipt:
