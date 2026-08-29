@@ -8,6 +8,8 @@ import sys
 import types
 from urllib.parse import quote
 
+from jsonschema import Draft202012Validator
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -1123,6 +1125,13 @@ def main() -> int:
         envelope,
         receipts,
     )
+    action_card_schema = json.loads((
+        REPO_ROOT
+        / 'consultation_v2/platforms/linkedin'
+        / 'unit1-preparation-action-card.schema.json'
+    ).read_text(encoding='utf-8'))
+    Draft202012Validator.check_schema(action_card_schema)
+    action_card_validator = Draft202012Validator(action_card_schema)
     require(
         navigation['phase'] == 'notifications_navigation',
         'preparation did not begin from Notifications',
@@ -1132,6 +1141,19 @@ def main() -> int:
         == set(navigation),
         'preparation action-card schema drifted',
     )
+    require(
+        not list(action_card_validator.iter_errors(navigation)),
+        'valid non-scroll preparation card failed its public schema',
+    )
+    for field, value in (
+        ('scroll_target', 'selected_post_root'),
+        ('scroll_target_source', 'mapped_context'),
+        ('scroll_alignment', 'top_edge'),
+    ):
+        require(
+            list(action_card_validator.iter_errors({**navigation, field: value})),
+            f'non-scroll preparation card accepted forbidden {field}',
+        )
     missing_navigation_category = barrier(navigation)
     missing_navigation_category['postcondition_receipt'].pop('category_exact')
     expect_error(
@@ -1965,6 +1987,21 @@ def main() -> int:
         and '_total_9_visible_2_more_6' in first_expand_scroll['element'],
         'off-screen selected thread expansion did not compile one exact scroll',
     )
+    require(
+        not list(action_card_validator.iter_errors(first_expand_scroll)),
+        'valid self-targeted preparation scroll failed its public schema',
+    )
+    for field in (
+        'scroll_target',
+        'scroll_target_source',
+        'scroll_alignment',
+    ):
+        missing_scroll_field = dict(first_expand_scroll)
+        missing_scroll_field.pop(field)
+        require(
+            list(action_card_validator.iter_errors(missing_scroll_field)),
+            f'preparation scroll card accepted missing {field}',
+        )
     original_build_snapshot = manual.build_snapshot
     original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
     manual.build_snapshot = lambda _platform: (None, None, partial_thread)
@@ -2344,6 +2381,10 @@ def main() -> int:
             manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
         ),
         'off-screen media zero thread did not compile one exact scroll',
+    )
+    require(
+        not list(action_card_validator.iter_errors(media_zero_card)),
+        'valid selected-root preparation scroll failed its public schema',
     )
     disabled_expander = manual.augment_snapshot(with_thread_expander(
         with_zero_thread_opener(selected_snapshot(count=0)),

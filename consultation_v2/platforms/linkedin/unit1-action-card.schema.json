@@ -62,5 +62,29 @@
     "scroll_target_source": {"enum": ["self", "mapped_context"]},
     "scroll_alignment": {"enum": ["anywhere", "top_edge"]},
     "card_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
-  }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"method": {"const": "scroll_into_view"}},
+        "required": ["method"]
+      },
+      "then": {
+        "required": [
+          "scroll_target",
+          "scroll_target_source",
+          "scroll_alignment"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {"required": ["scroll_target"]},
+            {"required": ["scroll_target_source"]},
+            {"required": ["scroll_alignment"]}
+          ]
+        }
+      }
+    }
+  ]
 }

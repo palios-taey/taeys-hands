@@ -7,6 +7,8 @@ from pathlib import Path
 import sys
 import types
 
+from jsonschema import Draft202012Validator
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -194,10 +196,25 @@ def main() -> int:
         (REPO_ROOT / 'consultation_v2/platforms/linkedin/unit1-action-card.schema.json')
         .read_text(encoding='utf-8')
     )
+    Draft202012Validator.check_schema(card_schema)
+    card_validator = Draft202012Validator(card_schema)
     require(
         set(card_schema['required']) == set(navigation),
         'action card schema drifted from the compiler output',
     )
+    require(
+        not list(card_validator.iter_errors(navigation)),
+        'valid non-scroll action card failed its public schema',
+    )
+    for field, value in (
+        ('scroll_target', 'selected_post_root'),
+        ('scroll_target_source', 'mapped_context'),
+        ('scroll_alignment', 'top_edge'),
+    ):
+        require(
+            list(card_validator.iter_errors({**navigation, field: value})),
+            f'non-scroll action card accepted forbidden {field}',
+        )
     receipts.append(accept_unit1_step(navigation, barrier(navigation, private), None, private))
 
     candidate_card = compile_unit1_step(stream_snapshot, REVISION, private, receipts)
@@ -236,6 +253,34 @@ def main() -> int:
         },
     )
     original_viewport = manual._selected_thread_viewport_state
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'error': 'live_extent_outside_display',
+    }
+    try:
+        thread_scroll_card = compile_unit1_step(
+            snapshot({selected_post_key: [selected], thread_key: [thread]}),
+            REVISION,
+            private,
+            receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        thread_scroll_card['phase'] == 'thread_scroll'
+        and not list(card_validator.iter_errors(thread_scroll_card)),
+        'valid selected-root scroll card failed its public schema',
+    )
+    for field in (
+        'scroll_target',
+        'scroll_target_source',
+        'scroll_alignment',
+    ):
+        missing_scroll_field = dict(thread_scroll_card)
+        missing_scroll_field.pop(field)
+        require(
+            list(card_validator.iter_errors(missing_scroll_field)),
+            f'scroll action card accepted missing {field}',
+        )
     manual._selected_thread_viewport_state = lambda _raw: {
         'live_extent_in_viewport': True,
     }
