@@ -414,7 +414,7 @@ def selected_snapshot(
     post_root = Node('list item', states=['showing'])
     post_card = Node('generic')
     heading = Node('heading', 'Feed post')
-    body = Node('section', text=BODY, states=['showing'])
+    body = Node('section', text=BODY, states=['showing', 'enabled'])
     body_wrapper = Node('generic').add(body)
     effective_body_index = 12 if repost else body_index
     fillers = [Node('generic') for _index in range(effective_body_index - 1)]
@@ -482,6 +482,61 @@ def selected_snapshot(
         mapped={selected_key: [selected]},
         unknown=refs,
     )
+
+
+def virtualized_selected_snapshot() -> Snapshot:
+    snapshot = selected_snapshot(visible=False, body_index=12)
+    selected_root = next(
+        item.atspi_obj
+        for item in snapshot.unknown
+        if item.role == 'list item'
+    )
+    selected_body = _node_at_path(selected_root, [0, 12, 0])
+    selected_root.states = []
+    selected_body.states = ['enabled']
+    snapshot.mapped = {}
+    snapshot.unknown = [
+        item
+        for item in snapshot.unknown
+        if id(item.atspi_obj) not in {id(selected_root), id(selected_body)}
+    ]
+
+    later_root = Node('list item', states=['showing'])
+    later_card = Node('generic')
+    later_heading = Node('heading', 'Feed post')
+    later_body = Node(
+        'section',
+        text='Unrelated later visible post.',
+        states=['showing', 'enabled'],
+    )
+    later_count = Node(
+        'push button',
+        '3 comments',
+        states=['showing', 'enabled', 'focusable'],
+    )
+    later_card.add(
+        later_heading,
+        *(Node('generic') for _index in range(11)),
+        Node('generic').add(later_body),
+        Node('generic'),
+        Node('generic'),
+        later_count,
+    )
+    later_root.add(later_card)
+    selected_root.get_parent().add(later_root)
+    snapshot.unknown.extend([
+        ref(later_root),
+        ref(later_body, text=later_body.text),
+        ref(later_count),
+    ])
+    return snapshot
+
+
+def _node_at_path(node: Node, path: list[int]) -> Node:
+    current = node
+    for index in path:
+        current = current.get_child_at_index(index)
+    return current
 
 
 def with_thread_expander(
@@ -1444,6 +1499,51 @@ def main() -> int:
             len(comment_counts) == 1 and comment_counts[0].name == '2 comments',
             f'selected thread count variant {body_index + 3} was not mapped exactly',
         )
+
+    virtualized = virtualized_selected_snapshot()
+    virtualized_augmented = manual.augment_snapshot(virtualized)
+    virtualized_selected_key = f'{manual.SELECTED_POST_PREFIX}{ACTIVITY_A}'
+    virtualized_thread_key = (
+        f'{manual.SELECTED_THREAD_OPEN_PREFIX}{ACTIVITY_A}_body_{BODY_SHA256}'
+    )
+    require(
+        len(virtualized_augmented.mapped.get(virtualized_selected_key) or []) == 1
+        and virtualized_augmented.mapped[virtualized_selected_key][0].raw[
+            'selected_post_body_sha256'
+        ] == BODY_SHA256,
+        'virtualized selected root rebound to a later visible post body',
+    )
+    require(
+        len(virtualized_augmented.mapped.get(virtualized_thread_key) or []) == 1
+        and virtualized_augmented.mapped[virtualized_thread_key][0].name
+        == '2 comments',
+        'virtualized selected root lost its exact same-card thread opener',
+    )
+    original_build_snapshot = manual.build_snapshot
+    original_viewport = manual._selected_thread_viewport_state
+    manual.build_snapshot = lambda _platform: (None, None, virtualized)
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'live_extent_in_viewport': True,
+    }
+    try:
+        _virtualized_snapshot, virtualized_barrier = (
+            manual.stable_scroll_post_action_observation(
+                virtualized_thread_key,
+                manual.time.monotonic() + 5,
+            )
+        )
+    finally:
+        manual.build_snapshot = original_build_snapshot
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        virtualized_barrier['result'] == 'PASS'
+        and virtualized_barrier['stable_cycles_observed'] == 2
+        and all(
+            sample['exact_element_key_count'] == 1
+            for sample in virtualized_barrier['samples']
+        ),
+        'virtualized selected root did not retain exact identity for two samples',
+    )
 
     missing_thread = selected_snapshot(visible=False)
     expect_error(
