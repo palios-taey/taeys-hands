@@ -1770,10 +1770,12 @@ def main() -> int:
     )
     original_build_snapshot = manual.build_snapshot
     original_viewport = manual._selected_thread_viewport_state
+    original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
     manual.build_snapshot = lambda _platform: (None, None, virtualized)
     manual._selected_thread_viewport_state = lambda _raw: {
         'live_extent_in_viewport': True,
     }
+    manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
     try:
         _virtualized_snapshot, virtualized_barrier = (
             manual.stable_scroll_post_action_observation(
@@ -1784,11 +1786,13 @@ def main() -> int:
     finally:
         manual.build_snapshot = original_build_snapshot
         manual._selected_thread_viewport_state = original_viewport
+        manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
     require(
         virtualized_barrier['result'] == 'PASS'
         and virtualized_barrier['stable_cycles_observed'] == 2
         and all(
             sample['exact_element_key_count'] == 1
+            and sample['firefox_cache_invalidation'] == 'recursive_success'
             for sample in virtualized_barrier['samples']
         ),
         'virtualized selected root did not retain exact identity for two samples',
@@ -1850,10 +1854,12 @@ def main() -> int:
         'off-screen selected thread expansion did not compile one exact scroll',
     )
     original_build_snapshot = manual.build_snapshot
+    original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
     manual.build_snapshot = lambda _platform: (None, None, partial_thread)
     manual._selected_thread_viewport_state = lambda _raw: {
         'live_extent_in_viewport': True,
     }
+    manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
     try:
         _scroll_snapshot, expand_scroll_barrier = (
             manual.stable_scroll_post_action_observation(
@@ -1864,9 +1870,14 @@ def main() -> int:
     finally:
         manual.build_snapshot = original_build_snapshot
         manual._selected_thread_viewport_state = original_viewport
+        manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
     require(
         expand_scroll_barrier['result'] == 'PASS'
         and expand_scroll_barrier['stable_cycles_observed'] == 2
+        and all(
+            sample['firefox_cache_invalidation'] == 'recursive_success'
+            for sample in expand_scroll_barrier['samples']
+        )
         and expand_scroll_barrier['postcondition_receipt'][
             'expansion_identity_exact'
         ] is True

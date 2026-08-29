@@ -2832,6 +2832,7 @@ def stable_scroll_post_action_observation(
     samples: list[dict[str, Any]] = []
 
     while time.monotonic() < barrier_deadline:
+        cache_invalidation = _invalidate_linkedin_firefox_subtree()
         _firefox, _document, base_snapshot = build_snapshot('linkedin')
         snapshot = augment_snapshot(base_snapshot)
         last_snapshot = snapshot
@@ -2865,6 +2866,7 @@ def stable_scroll_post_action_observation(
             'live_extent_in_viewport': bool(
                 viewport.get('live_extent_in_viewport')
             ),
+            'firefox_cache_invalidation': cache_invalidation,
             **(
                 {'viewport_error': str(viewport['error'])}
                 if viewport.get('error')
