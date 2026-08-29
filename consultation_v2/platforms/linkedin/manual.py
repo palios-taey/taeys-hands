@@ -16,6 +16,7 @@ from consultation_v2.platforms.linkedin.driver import (
     _notifications_target,
     _notifications_target_state_digest,
 )
+from consultation_v2.platforms import routing as platform_routing
 from consultation_v2.snapshot import build_snapshot
 from consultation_v2.types import ElementRef, Snapshot
 from consultation_v2.yaml_contract import load_platform_yaml
@@ -2915,6 +2916,21 @@ def stable_scroll_post_action_observation(
     }
 
 
+def _invalidate_linkedin_firefox_subtree() -> str:
+    firefox = platform_routing.find_firefox_for_platform('linkedin')
+    if firefox is None:
+        raise ValueError(
+            'LinkedIn post-action refresh found no exact Firefox application'
+        )
+    try:
+        firefox.clear_cache()
+    except Exception as exc:
+        raise ValueError(
+            'LinkedIn post-action recursive Firefox cache invalidation failed'
+        ) from exc
+    return 'recursive_success'
+
+
 def stable_post_action_observation(
     element_key: str,
     operation: str,
@@ -3053,6 +3069,7 @@ def stable_post_action_observation(
     samples: list[dict[str, Any]] = []
 
     while time.monotonic() < barrier_deadline:
+        cache_invalidation = _invalidate_linkedin_firefox_subtree()
         _firefox, _document, snapshot = build_snapshot('linkedin')
         last_snapshot = snapshot
         continuation_measurement = (
@@ -3096,6 +3113,7 @@ def stable_post_action_observation(
                 exact_receipt and exact_receipt.get('document_url_exact')
             ),
             'observed_url': snapshot.url,
+            'firefox_cache_invalidation': cache_invalidation,
         }
         if continuation_measurement is not None:
             sample.update(continuation_measurement)

@@ -376,8 +376,10 @@ def main() -> int:
     )
 
     original_build_snapshot = manual.build_snapshot
+    original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
     authorize_runtime(before)
     manual.build_snapshot = lambda _platform: (None, None, after)
+    manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
     try:
         _snapshot, barrier = manual.stable_post_action_observation(
             manual.NOTIFICATIONS_CONTINUATION,
@@ -386,6 +388,7 @@ def main() -> int:
         )
     finally:
         manual.build_snapshot = original_build_snapshot
+        manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
     required_sample_fields = {
         'candidate_projection_exact',
         'observed_candidate_count',
@@ -398,6 +401,7 @@ def main() -> int:
         'prior_raw_notification_count',
         'raw_notification_inventory_novelty_exact',
         'route_exact',
+        'firefox_cache_invalidation',
     }
     require(
         barrier['result'] == 'PASS'
@@ -417,6 +421,7 @@ def main() -> int:
 
     authorize_runtime(before)
     manual.build_snapshot = lambda _platform: (None, None, before)
+    manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
     try:
         _snapshot, timeout = manual.stable_post_action_observation(
             manual.NOTIFICATIONS_CONTINUATION,
@@ -425,6 +430,7 @@ def main() -> int:
         )
     finally:
         manual.build_snapshot = original_build_snapshot
+        manual._invalidate_linkedin_firefox_subtree = original_cache_invalidator
     require(
         timeout['result'] == 'TIMEOUT'
         and timeout['next_mutation_authorized'] is False
