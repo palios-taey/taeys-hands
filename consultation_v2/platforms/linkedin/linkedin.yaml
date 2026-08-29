@@ -175,7 +175,7 @@ workflow:
         refresh_policy: invalidate_reacquire
         stable_cycles: 2
         interval_ms: 200
-        timeout_ms: 45000
+        timeout_ms: 120000
       observation_barrier:
         projection: exact_route_and_my_posts_state
         refresh_policy: invalidate_reacquire

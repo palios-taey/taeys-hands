@@ -120,7 +120,7 @@ def _initial_preparation_observation_contract() -> dict[str, Any]:
         'refresh_policy': 'invalidate_reacquire',
         'stable_cycles': 2,
         'interval_ms': 200,
-        'timeout_ms': 45000,
+        'timeout_ms': 120000,
     }
     if contract != expected:
         raise RuntimeError(
