@@ -1119,6 +1119,36 @@ def main() -> int:
         'exact Notifications URL skipped mandatory Notifications activation',
     )
 
+    partial_selected_navigation = navigation_snapshot()
+    partial_selected_navigation.url = activity_uri(ACTIVITY_A)
+    partial_navigation_target = partial_selected_navigation.mapped[
+        manual.NOTIFICATIONS_NAVIGATION
+    ][0]
+    original_notifications_target = manual._notifications_target
+    manual._notifications_target = lambda _snapshot: (
+        partial_navigation_target,
+        1,
+    )
+    try:
+        partial_selected_augmented = manual.augment_snapshot(
+            partial_selected_navigation
+        )
+    finally:
+        manual._notifications_target = original_notifications_target
+    require(
+        compile_preparation_step(
+            partial_selected_augmented,
+            REVISION,
+            envelope,
+            [],
+        )['element'] == manual.NOTIFICATIONS_NAVIGATION
+        and not any(
+            key.startswith(manual.SELECTED_POST_PREFIX)
+            for key in partial_selected_augmented.mapped
+        ),
+        'partial selected-post rendering blocked mandatory Notifications navigation',
+    )
+
     missing_categories = without_visible_categories(
         inventory_snapshot(include_categories=True)
     )

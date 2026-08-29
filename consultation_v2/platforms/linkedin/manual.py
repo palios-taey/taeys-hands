@@ -1707,9 +1707,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
     if selected_activity is not None:
         root, body, body_text = _selected_post_root_and_body(snapshot, contract)
         if root is None or body is None or body_text is None:
-            raise ValueError(
-                'LinkedIn selected activity lacks one exact declared post body'
-            )
+            return replace(snapshot, mapped=mapped)
         body_digest = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
         comment_contract = _manual_comment_contract()
         comment_controls = _selected_comment_controls(
