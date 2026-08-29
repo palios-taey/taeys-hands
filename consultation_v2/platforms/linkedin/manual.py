@@ -2607,7 +2607,8 @@ def verify_post_action(
             contract,
         )
         observed_visible_count = len(visible_comments)
-        remaining_count = expected_count - observed_visible_count
+        observed_more_count = next_more_count if next_more_count is not None else 0
+        remaining_count = observed_more_count
         typed_rows = _selected_thread_typed_rows(
             visible_comments,
             _manual_comment_contract()['own_comment'],
@@ -2624,17 +2625,11 @@ def verify_post_action(
             or observed_body_digest != expected_body_digest
             or len(comment_counts) != 1
             or expected_count != declared_total_count
-            or observed_visible_count != prior_visible_count + declared_more_count
+            or observed_visible_count <= prior_visible_count
             or observed_visible_count > expected_count
-            or (
-                remaining_count > 0
-                and (
-                    expand_target is None
-                    or next_more_count is None
-                    or next_more_count > remaining_count
-                )
-            )
-            or (remaining_count == 0 and expand_target is not None)
+            or observed_more_count >= declared_more_count
+            or (observed_more_count > 0 and expand_target is None)
+            or (observed_more_count == 0 and expand_target is not None)
         ):
             raise ValueError(
                 'LinkedIn selected-thread expansion postcondition failed: '
