@@ -43,6 +43,9 @@ NOTIFICATIONS_ALL_CATEGORY_AUTHORITY_SCHEMA = (
     'linkedin_notifications_all_category_authority_v1'
 )
 NOTIFICATION_INVENTORY_SCHEMA = 'linkedin_notification_inventory_v1'
+NOTIFICATION_DECISION_INVENTORY_SCHEMA = (
+    'linkedin_notification_decision_inventory_v1'
+)
 NOTIFICATION_EXCLUSIONS_SCHEMA = 'linkedin_notification_inventory_exclusions_v1'
 SELECTED_SOURCE_SCHEMA = 'linkedin_selected_post_thread_source_v1'
 _SHA256 = re.compile(r'^[0-9a-f]{64}$')
@@ -82,6 +85,7 @@ _SELECTION_KEYS = frozenset({
     'transaction_sha256',
 })
 _EXCLUSIONS_KEYS = frozenset({
+    'decision_inventory_sha256',
     'excluded_candidates',
     'exclusions_sha256',
     'notification_inventory_sha256',
@@ -250,6 +254,7 @@ def _validate_selection(value: Any) -> dict[str, Any] | None:
                 'private exclusions schema is invalid'
             )
         for field in (
+            'decision_inventory_sha256',
             'exclusions_sha256',
             'notification_inventory_sha256',
             'policy_sha256',
@@ -592,6 +597,19 @@ def project_notification_inventory(
         'rows': rows,
         'actionable_links': actionable_links,
     }
+    artifact['decision_inventory_sha256'] = _sha256({
+        'schema': NOTIFICATION_DECISION_INVENTORY_SCHEMA,
+        'candidates': [
+            {
+                'activity': link['activity'],
+                'notification_text_sha256': rows[link['ordinal'] - 1][
+                    'notification_text_sha256'
+                ],
+                'uri_sha256': link['uri_sha256'],
+            }
+            for link in actionable_links
+        ],
+    })
     artifact['inventory_sha256'] = _sha256({
         'schema': artifact['schema'],
         'platform': artifact['platform'],
@@ -1011,11 +1029,11 @@ def compile_preparation_step(
             )
         if decision.get('schema') == NOTIFICATION_EXCLUSIONS_SCHEMA:
             if (
-                decision['notification_inventory_sha256']
-                != inventory.artifact['inventory_sha256']
+                decision['decision_inventory_sha256']
+                != inventory.artifact['decision_inventory_sha256']
             ):
                 raise LinkedInUnit1PreparationError(
-                    'private exclusions do not bind the current exact inventory'
+                    'private exclusions do not bind the current exact candidates'
                 )
             expected_activities = [
                 row['activity']
