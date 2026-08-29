@@ -329,12 +329,17 @@ def main() -> int:
         )
 
     invalid_candidate = expanded_snapshot()
-    invalid_candidate_link = next(
-        item
-        for item in invalid_candidate.unknown
-        if item.role == 'link' and item.name.startswith('Unread notification.')
+    invalid_candidate_root = next(
+        item for item in invalid_candidate.unknown if item.role == 'article'
+    ).atspi_obj.get_parent()
+    duplicate_article, duplicate_references = notification_article(
+        'Notification',
+        'Read duplicate activity notification.',
+        '1d',
+        uri=activity_uri(ACTIVITY_A),
     )
-    invalid_candidate_link.atspi_obj.uri = 'https://www.linkedin.com/feed/'
+    invalid_candidate_root.add(duplicate_article)
+    invalid_candidate.unknown.extend(duplicate_references)
     authorize_runtime(before)
     require_refused(
         lambda: manual.verify_post_action(
