@@ -2158,6 +2158,28 @@ def main() -> int:
         ),
         'compact zero thread did not compile one exact opener',
     )
+    document_zero_snapshot = manual.augment_snapshot(with_zero_thread_opener(
+        selected_snapshot(count=0, body_index=8),
+    ))
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'live_extent_in_viewport': True,
+    }
+    try:
+        document_zero_card = compile_preparation_step(
+            document_zero_snapshot,
+            REVISION,
+            selected_envelope,
+            candidate_receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        document_zero_card['phase'] == 'thread_open'
+        and document_zero_card['element'].startswith(
+            manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
+        ),
+        'document zero thread did not compile one exact opener',
+    )
     media_zero_snapshot = manual.augment_snapshot(with_zero_thread_opener(
         selected_snapshot(count=0, body_index=12),
         media_variant=True,

@@ -73,6 +73,10 @@ def main() -> int:
                     'index_path': [0, 12],
                 },
                 {
+                    'body_index_path': [0, 8, 0],
+                    'index_path': [0, 14],
+                },
+                {
                     'body_index_path': [0, 9, 0],
                     'index_path': [0, 15],
                 },
