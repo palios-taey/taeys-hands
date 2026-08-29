@@ -2147,6 +2147,32 @@ def main() -> int:
         and expand_scroll_barrier['postcondition_receipt']['more_count'] == 6,
         'selected thread expansion scroll barrier lost exact key identity',
     )
+    expander_with_threshold = json.loads(json.dumps(expand_scroll_barrier))
+    expander_with_threshold['postcondition_receipt'][
+        'min_downward_clearance_px'
+    ] = 0
+    expect_error(
+        lambda: accept_preparation_step(
+            first_expand_scroll,
+            expander_with_threshold,
+            receipts[-1]['receipt_sha256'],
+        ),
+        'expander receipt accepted opener-only clearance authority',
+    )
+    expander_with_negative_clearance = json.loads(
+        json.dumps(expand_scroll_barrier)
+    )
+    expander_with_negative_clearance['postcondition_receipt'][
+        'available_below_px'
+    ] = -1
+    expect_error(
+        lambda: accept_preparation_step(
+            first_expand_scroll,
+            expander_with_negative_clearance,
+            receipts[-1]['receipt_sha256'],
+        ),
+        'expander receipt accepted negative generic clearance',
+    )
     receipts.append(accept_preparation_step(
         first_expand_scroll,
         expand_scroll_barrier,

@@ -1493,6 +1493,13 @@ def accept_preparation_step(
         raise LinkedInUnit1PreparationError(
             'preparation scroll receipt lost generic target geometry proof'
         )
+    if (
+        phase == 'thread_expand_scroll'
+        and 'min_downward_clearance_px' in postcondition
+    ):
+        raise LinkedInUnit1PreparationError(
+            'preparation expander scroll gained opener-only clearance authority'
+        )
     if phase == 'thread_scroll' and (
         card.get('scroll_target') != 'selected_thread_opener'
         or card.get('scroll_target_source') != 'self'
