@@ -586,6 +586,7 @@ def with_thread_opener(snapshot: Snapshot, count: int = 2) -> Snapshot:
 def with_zero_thread_opener(
     snapshot: Snapshot,
     *,
+    compact_variant: bool = False,
     media_variant: bool = False,
 ) -> Snapshot:
     post_root = next(
@@ -595,9 +596,9 @@ def with_zero_thread_opener(
     )
     post_card = post_root.get_child_at_index(0)
     post_card.add(
-        Node('generic'),
-        Node('generic'),
-        *(Node('generic') for _index in range(1 if media_variant else 0)),
+        *(Node('generic') for _index in range(
+            0 if compact_variant else 3 if media_variant else 2
+        )),
         Node(
             'push button',
             'Comment',
@@ -1509,6 +1510,37 @@ def main() -> int:
             f'selected thread count variant {body_index + 3} was not mapped exactly',
         )
 
+    overlapping_body = selected_snapshot(body_index=8)
+    overlapping_root = next(
+        item.atspi_obj
+        for item in overlapping_body.unknown
+        if item.role == 'list item'
+    )
+    overlapping_control_section = Node(
+        'section',
+        text='Controls',
+        states=['enabled'],
+    )
+    overlapping_card = overlapping_root.get_child_at_index(0)
+    overlapping_control_wrapper = Node('generic').add(
+        overlapping_control_section,
+    )
+    overlapping_card.add(overlapping_control_wrapper)
+    overlapping_body.unknown.extend([
+        ref(overlapping_control_wrapper),
+        ref(overlapping_control_section, text='Controls'),
+    ])
+    _overlap_root, _overlap_body, overlap_text = (
+        manual._selected_post_root_and_body(
+            overlapping_body,
+            manual._manual_notification_contract(),
+        )
+    )
+    require(
+        overlap_text == BODY,
+        'later matching control section displaced first exact body path',
+    )
+
     virtualized = virtualized_selected_snapshot()
     virtualized_augmented = manual.augment_snapshot(virtualized)
     virtualized_selected_key = f'{manual.SELECTED_POST_PREFIX}{ACTIVITY_A}'
@@ -1851,6 +1883,50 @@ def main() -> int:
             manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
         ),
         'exact zero thread did not compile its distinct opener',
+    )
+    compact_zero_source = selected_snapshot(count=0, body_index=8)
+    compact_zero_root = next(
+        item.atspi_obj
+        for item in compact_zero_source.unknown
+        if item.role == 'list item'
+    )
+    compact_zero_card_root = compact_zero_root.get_child_at_index(0)
+    reactions_menu = Node(
+        'push button',
+        'Open reactions menu',
+        states=['enabled', 'focusable'],
+    )
+    displaced_control = compact_zero_card_root.children[11]
+    compact_zero_card_root.children[11] = reactions_menu
+    reactions_menu.parent = compact_zero_card_root
+    compact_zero_source.unknown = [
+        item
+        for item in compact_zero_source.unknown
+        if id(item.atspi_obj) != id(displaced_control)
+    ]
+    compact_zero_source.unknown.append(ref(reactions_menu))
+    compact_zero_snapshot = manual.augment_snapshot(with_zero_thread_opener(
+        compact_zero_source,
+        compact_variant=True,
+    ))
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'live_extent_in_viewport': True,
+    }
+    try:
+        compact_zero_card = compile_preparation_step(
+            compact_zero_snapshot,
+            REVISION,
+            selected_envelope,
+            candidate_receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        compact_zero_card['phase'] == 'thread_open'
+        and compact_zero_card['element'].startswith(
+            manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
+        ),
+        'compact zero thread did not compile one exact opener',
     )
     media_zero_snapshot = manual.augment_snapshot(with_zero_thread_opener(
         selected_snapshot(count=0, body_index=12),

@@ -206,6 +206,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'name': 'Feed post',
             },
             'body': {
+                'index_path_authority': 'first_exact_declared',
                 'index_paths': [[0, 8, 0], [0, 9, 0], [0, 12, 0]],
                 'role': 'section',
                 'states_include': ['enabled'],
@@ -233,6 +234,10 @@ def _manual_notification_contract() -> dict[str, Any]:
             },
             'zero_open': {
                 'structural_variants': [
+                    {
+                        'body_index_path': [0, 8, 0],
+                        'index_path': [0, 12],
+                    },
                     {
                         'body_index_path': [0, 9, 0],
                         'index_path': [0, 15],
@@ -719,6 +724,8 @@ def _selected_post_root_and_body(
     if len(selected_roots) != root_contract['exact_match_count']:
         return None, None, None
     root_node = selected_roots[0]
+    if body_contract['index_path_authority'] != 'first_exact_declared':
+        raise ValueError('LinkedIn selected-post body path authority is invalid')
     bodies: list[tuple[Any, Any, str]] = []
     for index_path in body_contract['index_paths']:
         body_node = _node_at_index_path(root_node, index_path)
@@ -742,6 +749,7 @@ def _selected_post_root_and_body(
         text = _node_text(body_node) or body_element.text
         if text:
             bodies.append((body_node, body_element, text))
+            break
     if len(bodies) != 1:
         return None, None, None
     root_element = elements_by_identity.get(id(root_node)) or ElementRef(
@@ -1027,8 +1035,18 @@ def _selected_thread_zero_is_exact(
         count_element = elements_by_identity.get(id(count_node))
         if count_element is None or id(count_node) == id(zero_node):
             continue
+        count_name = count_element.name
+        count_token = (
+            count_name.removesuffix(' comments').replace(',', '')
+            if count_name.endswith(' comments')
+            else '1' if count_name == '1 comment' else ''
+        )
         if (
-            count_element.role == selected_thread['comment_count']['role']
+            (
+                count_element.role == selected_thread['comment_count']['role']
+                and count_token.isdigit()
+                and int(count_token) > 0
+            )
             or 'comment' in count_element.name.lower()
         ):
             return False
@@ -1684,7 +1702,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
         root, body, body_text = _selected_post_root_and_body(snapshot, contract)
         if root is None or body is None or body_text is None:
             raise ValueError(
-                'LinkedIn selected activity lacks one exact showing post body'
+                'LinkedIn selected activity lacks one exact declared post body'
             )
         body_digest = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
         comment_contract = _manual_comment_contract()
