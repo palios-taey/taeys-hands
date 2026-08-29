@@ -102,7 +102,7 @@ def _manual_post_action_contract() -> dict[str, Any]:
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
-            'timeout_ms': 45000,
+            'timeout_ms': 90000,
         },
     }
     if contract != expected:
