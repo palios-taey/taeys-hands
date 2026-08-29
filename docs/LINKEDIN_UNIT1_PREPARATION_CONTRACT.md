@@ -99,6 +99,11 @@ The private selection repeats the public preparation `transaction_sha256` inside
 selection from another cycle, transaction, display, or policy envelope is rejected even when its inventory and
 activity happen to match.
 
+Candidate eligibility is independent of LinkedIn's read/unread presentation state. The exact notification
+article structure, mapped content link, LinkedIn `/feed` activity URI, role, states, and relative age establish
+the candidate. Reading a notification may remove the `Unread notification.` text prefix; that presentation
+change cannot make the same current post disappear from the ordered candidate inventory.
+
 Private exclusions repeat the transaction, policy, and notification-inventory digests inside their own signed
 bytes. Missing, partial, duplicate, reordered, stale, or unknown-reason exclusions cannot authorize Show more.
 

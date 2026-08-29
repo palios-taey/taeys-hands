@@ -147,7 +147,6 @@ def _manual_notification_contract() -> dict[str, Any]:
             'content_link_direct_child_index': 1,
         },
         'candidate': {
-            'name_prefix': 'Unread notification.',
             'role': 'link',
             'states_include': ['enabled', 'focusable'],
             'post_action_observation_barrier': {
@@ -1258,28 +1257,40 @@ def _notification_candidates(
     contract: dict[str, Any],
 ) -> list[tuple[Any, str, str]]:
     candidate_contract = contract['candidate']
-    raw_candidates = [
+    elements = _all_elements(snapshot)
+    elements_by_identity = {
+        id(element.atspi_obj): element
+        for element in elements
+        if element.atspi_obj is not None
+    }
+    articles = [
         element
-        for element in _all_elements(snapshot)
-        if (
-            element.role == candidate_contract['role']
-            and element.name.startswith(candidate_contract['name_prefix'])
-            and set(candidate_contract['states_include']).issubset(element.states)
-        )
+        for element in elements
+        if element.role == 'article' and element.name in contract['article_names']
     ]
+    articles.sort(key=lambda element: _structural_index_path(element.atspi_obj))
     candidates: list[tuple[Any, str, str]] = []
-    for element in raw_candidates:
-        uri = _element_uri(element)
-        if not isinstance(uri, str):
-            raise ValueError('LinkedIn mounted notification lacks one exact URI')
+    for article in articles:
+        element, uri = _notification_article_content_link(
+            article,
+            elements_by_identity,
+            contract,
+        )
         activity = _notification_activity(uri, contract)
         age = _notification_relative_age(element, contract)
-        if activity is None or age is None:
+        if age is None:
             raise ValueError(
-                'LinkedIn mounted notification lacks exact activity or relative age'
+                'LinkedIn mounted notification lacks one exact relative age'
             )
+        if (
+            activity is None
+            or element.role != candidate_contract['role']
+            or not set(candidate_contract['states_include']).issubset(
+                element.states
+            )
+        ):
+            continue
         candidates.append((element, activity, age))
-    candidates.sort(key=lambda row: _structural_index_path(row[0].atspi_obj))
     activities = [activity for _element, activity, _age in candidates]
     if len(activities) != len(set(activities)):
         raise ValueError('LinkedIn mounted notification activity identities are duplicated')

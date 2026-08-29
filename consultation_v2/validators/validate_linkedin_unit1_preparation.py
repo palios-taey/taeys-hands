@@ -305,11 +305,12 @@ def notification_article(
 def inventory_snapshot(
     *,
     notification_text: str = 'Unread notification. Alice posted an exact update.',
+    candidate_article_name: str = 'Unread notification.',
     include_categories: bool = False,
 ) -> Snapshot:
     root = Node('document web', 'LinkedIn Notifications')
     article_a, refs_a = notification_article(
-        'Unread notification.',
+        candidate_article_name,
         notification_text,
         '2h',
         uri=activity_uri(ACTIVITY_A),
@@ -318,7 +319,7 @@ def inventory_snapshot(
         'Notification',
         'Bob posted another exact update.',
         '1d',
-        uri=activity_uri(ACTIVITY_B),
+        uri='https://www.linkedin.com/company/exact-company/',
     )
     article_c, refs_c = notification_article(
         'Notification.',
@@ -881,6 +882,21 @@ def main() -> int:
         artifact['rows'][0]['notification_text']
         == 'Unread notification. Alice posted an exact update.',
         'raw notification text was not preserved',
+    )
+    read_inventory = project_notification_inventory(
+        inventory_snapshot(
+            notification_text='Alice posted an exact update.',
+            candidate_article_name='Notification',
+            include_categories=True,
+        ),
+        REVISION,
+    ).artifact
+    require(
+        len(read_inventory['actionable_links']) == 1
+        and read_inventory['actionable_links'][0]['activity'] == ACTIVITY_A
+        and read_inventory['rows'][0]['notification_text']
+        == 'Alice posted an exact update.',
+        'read post notification with exact activity URI was not actionable',
     )
     offset_surface = inventory_snapshot(include_categories=True)
     offset_root = next(

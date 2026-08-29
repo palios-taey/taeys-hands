@@ -216,7 +216,6 @@ workflow:
           - section
         content_link_direct_child_index: 1
       candidate:
-        name_prefix: Unread notification.
         role: link
         states_include:
           - enabled

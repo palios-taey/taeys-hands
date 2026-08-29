@@ -544,9 +544,6 @@ def project_notification_inventory(
         actionable = (
             activity is not None
             and content_link.role == contract['candidate']['role']
-            and notification_text.startswith(
-                contract['candidate']['name_prefix']
-            )
             and required_states.issubset(content_link.states)
         )
         row = {
