@@ -3211,6 +3211,7 @@ def stable_initial_preparation_observation(
     samples: list[dict[str, Any]] = []
 
     while time.monotonic() < barrier_deadline:
+        cache_invalidation = _invalidate_linkedin_firefox_subtree()
         _firefox, _document, snapshot = build_snapshot('linkedin')
         target, match_count = _notifications_target(snapshot)
         augmented = augment_snapshot(snapshot)
@@ -3257,6 +3258,7 @@ def stable_initial_preparation_observation(
             'allowed_now': declared.get('allowed_now') if declared else None,
             'target_state_digest': state_digest,
             'exact': exact,
+            'firefox_cache_invalidation': cache_invalidation,
         })
         if stable_cycles_observed >= stable_cycles_required:
             return augmented, {
