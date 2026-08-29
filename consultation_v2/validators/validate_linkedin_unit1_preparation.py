@@ -727,7 +727,7 @@ def validate_initial_observation_barrier() -> None:
     require(
         manual._manual_post_action_contract()['observation_barrier'][
             'timeout_ms'
-        ] == 45000,
+        ] == 90000,
         'post-action barrier does not cover two measured LinkedIn tree traversals',
     )
     exact = navigation_snapshot()
