@@ -249,6 +249,10 @@ def _manual_notification_contract() -> dict[str, Any]:
                         'index_path': [0, 15],
                     },
                     {
+                        'body_index_path': [0, 9, 0],
+                        'index_path': [0, 16],
+                    },
+                    {
                         'body_index_path': [0, 12, 0],
                         'index_path': [0, 19],
                     },
