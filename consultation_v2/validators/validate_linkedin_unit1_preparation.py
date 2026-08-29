@@ -730,6 +730,12 @@ def validate_initial_observation_barrier() -> None:
         ] == 90000,
         'post-action barrier does not cover two measured LinkedIn tree traversals',
     )
+    require(
+        manual._manual_notification_contract()['candidate'][
+            'post_action_observation_barrier'
+        ]['timeout_ms'] == 180000,
+        'candidate barrier does not cover transition plus two measured tree traversals',
+    )
     exact = navigation_snapshot()
     missing = Snapshot(platform='linkedin', url=exact.url)
     sequence = [missing, exact, exact]
