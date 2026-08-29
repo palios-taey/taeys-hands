@@ -675,7 +675,13 @@ def accept_unit1_step(
         != card_payload.get('min_downward_clearance_px')
         or postcondition.get('activity_exact') is not True
         or postcondition.get('body_sha256_exact') is not True
+        or postcondition.get('scroll_context_intersects_viewport') is not True
         or postcondition.get('scroll_target_exact') is not True
+        or postcondition.get('live_extent_in_viewport') is not True
+        or isinstance(postcondition.get('available_below_px'), bool)
+        or not isinstance(postcondition.get('available_below_px'), int)
+        or postcondition.get('available_below_px', -1)
+        < card_payload.get('min_downward_clearance_px', 0)
         or postcondition.get(
             'selected_post_root_intersects_viewport'
         ) is not True
@@ -689,6 +695,8 @@ def accept_unit1_step(
         )
         or postcondition.get('thread_opener_available_below_px', -1)
         < card_payload.get('min_downward_clearance_px', 0)
+        or postcondition.get('available_below_px')
+        != postcondition.get('thread_opener_available_below_px')
     ):
         raise LinkedInUnit1Error(
             'thread scroll did not prove selected identity, root intersection, '

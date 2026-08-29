@@ -268,6 +268,8 @@ def main() -> int:
         "len(matches) == 1",
         "declared.get('method') == 'mapped_pointer_activate'",
         "'live_extent_in_viewport': True",
+        "'scroll_context_intersects_viewport': True",
+        "'available_below_px': int(",
         "root_viewport.get('intersects_viewport') is True",
         'selected_post_identity_exact',
         'and scroll_target_exact',

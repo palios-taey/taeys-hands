@@ -3090,6 +3090,7 @@ def stable_scroll_post_action_observation(
             target = matches[0]
             target_raw = dict(target.raw or {})
             opener_viewport = _selected_thread_viewport_state(target_raw)
+            scroll_target_exact = target.atspi_obj is not None
             if selected_open_match is not None:
                 root, body, body_text = _selected_post_root_and_body(
                     snapshot,
@@ -3105,7 +3106,8 @@ def stable_scroll_post_action_observation(
                         ).hexdigest() == expected_body_sha256
                     )
                     scroll_target_exact = bool(
-                        target_raw.get('scroll_target_atspi_obj')
+                        scroll_target_exact
+                        and target_raw.get('scroll_target_atspi_obj')
                         is target.atspi_obj
                         and target_raw.get('atspi_obj') is target.atspi_obj
                         and target_raw.get('selected_post_root_atspi_obj')
@@ -3138,6 +3140,7 @@ def stable_scroll_post_action_observation(
                 selected_open_geometry_exact
                 or (
                     selected_open_match is None
+                    and scroll_target_exact
                     and opener_viewport.get('live_extent_in_viewport') is True
                 )
             ):
@@ -3166,6 +3169,14 @@ def stable_scroll_post_action_observation(
             'live_extent_in_viewport': bool(
                 opener_viewport.get('live_extent_in_viewport')
             ),
+            'scroll_context_intersects_viewport': bool(
+                root_viewport.get('intersects_viewport')
+                if selected_open_match is not None
+                else opener_viewport.get('intersects_viewport')
+            ),
+            'available_below_px': int(
+                opener_viewport.get('available_below_px') or 0
+            ),
             'selected_post_identity_exact': selected_post_identity_exact,
             'scroll_target_exact': scroll_target_exact,
             'selected_post_root_live_extent_in_viewport': bool(
@@ -3184,7 +3195,13 @@ def stable_scroll_post_action_observation(
             'thread_opener_available_below_px': int(
                 opener_viewport.get('available_below_px') or 0
             ),
-            'min_downward_clearance_px': declared_minimum_clearance,
+            **(
+                {
+                    'min_downward_clearance_px': declared_minimum_clearance,
+                }
+                if selected_open_match is not None
+                else {}
+            ),
             'selected_post_root_viewport': root_viewport,
             'thread_opener_viewport': opener_viewport,
             'firefox_cache_invalidation': cache_invalidation,
@@ -3214,6 +3231,11 @@ def stable_scroll_post_action_observation(
                 'activity_exact': True,
                 'body_sha256_exact': True,
                 'live_extent_in_viewport': True,
+                'scroll_context_intersects_viewport': True,
+                'scroll_target_exact': True,
+                'available_below_px': int(
+                    opener_viewport['available_below_px']
+                ),
                 'scroll_target': scroll_contract['scroll_target'],
                 'scroll_target_source': scroll_contract[
                     'scroll_target_source'
@@ -3223,7 +3245,6 @@ def stable_scroll_post_action_observation(
                 **(
                     {
                         'selected_post_root_intersects_viewport': True,
-                        'scroll_target_exact': True,
                         'thread_opener_live_extent_in_viewport': True,
                         'thread_opener_available_below_px': int(
                             opener_viewport['available_below_px']

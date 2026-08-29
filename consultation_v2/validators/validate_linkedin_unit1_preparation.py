@@ -824,6 +824,13 @@ def barrier(card: dict) -> dict:
             'scroll_target_source': card['scroll_target_source'],
             'scroll_alignment': card['scroll_alignment'],
             'phase': card['phase'],
+            'scroll_context_intersects_viewport': True,
+            'scroll_target_exact': True,
+            'live_extent_in_viewport': True,
+            'available_below_px': card.get(
+                'min_downward_clearance_px',
+                0,
+            ),
         })
     if card['phase'] == 'thread_scroll':
         postcondition.update({
@@ -832,7 +839,6 @@ def barrier(card: dict) -> dict:
             ],
             'activity_exact': True,
             'body_sha256_exact': True,
-            'scroll_target_exact': True,
             'selected_post_root_intersects_viewport': True,
             'thread_opener_live_extent_in_viewport': True,
             'thread_opener_available_below_px': card[
@@ -2017,7 +2023,10 @@ def main() -> int:
             sample['exact_element_key_count'] == 1
             and sample['firefox_cache_invalidation'] == 'recursive_success'
             and sample['selected_post_identity_exact'] is True
+            and sample['scroll_context_intersects_viewport'] is True
             and sample['scroll_target_exact'] is True
+            and sample['live_extent_in_viewport'] is True
+            and sample['available_below_px'] == 500
             and sample['selected_post_root_intersects_viewport'] is True
             and sample['thread_opener_live_extent_in_viewport'] is True
             and sample['thread_opener_available_below_px'] == 500
@@ -2485,6 +2494,24 @@ def main() -> int:
     require(
         list(action_card_validator.iter_errors(missing_clearance)),
         'selected-root preparation scroll accepted missing clearance',
+    )
+    media_scroll_barrier = barrier(media_zero_card)
+    accept_preparation_step(
+        media_zero_card,
+        media_scroll_barrier,
+        candidate_receipts[-1]['receipt_sha256'],
+    )
+    divergent_media_scroll = json.loads(json.dumps(media_scroll_barrier))
+    divergent_media_scroll['postcondition_receipt'][
+        'available_below_px'
+    ] = 501
+    expect_error(
+        lambda: accept_preparation_step(
+            media_zero_card,
+            divergent_media_scroll,
+            candidate_receipts[-1]['receipt_sha256'],
+        ),
+        'preparation scroll accepted divergent clearance evidence',
     )
     disabled_expander = manual.augment_snapshot(with_thread_expander(
         with_zero_thread_opener(selected_snapshot(count=0)),

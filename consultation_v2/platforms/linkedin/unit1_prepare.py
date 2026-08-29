@@ -1481,6 +1481,18 @@ def accept_preparation_step(
         raise LinkedInUnit1PreparationError(
             'preparation scroll receipt lost its declared phase'
         )
+    if phase in {'thread_scroll', 'thread_expand_scroll'} and (
+        postcondition.get('scroll_context_intersects_viewport') is not True
+        or postcondition.get('scroll_target_exact') is not True
+        or postcondition.get('live_extent_in_viewport') is not True
+        or isinstance(postcondition.get('available_below_px'), bool)
+        or not isinstance(postcondition.get('available_below_px'), int)
+        or postcondition.get('available_below_px', -1)
+        < card.get('min_downward_clearance_px', 0)
+    ):
+        raise LinkedInUnit1PreparationError(
+            'preparation scroll receipt lost generic target geometry proof'
+        )
     if phase == 'thread_scroll' and (
         card.get('scroll_target') != 'selected_thread_opener'
         or card.get('scroll_target_source') != 'self'
@@ -1506,6 +1518,8 @@ def accept_preparation_step(
         )
         or postcondition.get('thread_opener_available_below_px', -1)
         < card.get('min_downward_clearance_px', 0)
+        or postcondition.get('available_below_px')
+        != postcondition.get('thread_opener_available_below_px')
     ):
         raise LinkedInUnit1PreparationError(
             'thread scroll did not prove selected identity, root intersection, '

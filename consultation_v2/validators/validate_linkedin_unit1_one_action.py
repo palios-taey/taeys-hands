@@ -119,12 +119,21 @@ def barrier(card: dict, private: dict) -> dict:
             'scroll_target_source': card['scroll_target_source'],
             'scroll_alignment': card['scroll_alignment'],
             'phase': card['phase'],
+            'scroll_context_intersects_viewport': True,
+            'scroll_target_exact': True,
+            'live_extent_in_viewport': True,
+            'available_below_px': card.get(
+                'min_downward_clearance_px',
+                0,
+            ),
+        })
+    if card['phase'] == 'thread_scroll':
+        postcondition.update({
             'min_downward_clearance_px': card[
                 'min_downward_clearance_px'
             ],
             'activity_exact': True,
             'body_sha256_exact': True,
-            'scroll_target_exact': True,
             'selected_post_root_intersects_viewport': True,
             'thread_opener_live_extent_in_viewport': True,
             'thread_opener_available_below_px': card[
@@ -294,6 +303,28 @@ def main() -> int:
             list(card_validator.iter_errors(missing_scroll_field)),
             f'scroll action card accepted missing {field}',
         )
+    thread_scroll_barrier = barrier(thread_scroll_card, private)
+    accept_unit1_step(
+        thread_scroll_card,
+        thread_scroll_barrier,
+        receipts[-1]['receipt_sha256'],
+        private,
+    )
+    divergent_scroll_barrier = json.loads(json.dumps(thread_scroll_barrier))
+    divergent_scroll_barrier['postcondition_receipt'][
+        'available_below_px'
+    ] = 501
+    try:
+        accept_unit1_step(
+            thread_scroll_card,
+            divergent_scroll_barrier,
+            receipts[-1]['receipt_sha256'],
+            private,
+        )
+    except LinkedInUnit1Error:
+        pass
+    else:
+        raise AssertionError('thread scroll accepted divergent clearance evidence')
     manual._selected_thread_viewport_state = lambda _raw: {
         'intersects_viewport': True,
         'live_extent_in_viewport': True,
