@@ -112,7 +112,7 @@ validated YAML contract, one exact Firefox object, and the exact configured
 Firefox PID to the shared native-dialog walker. It does not implement another
 tree traversal.
 
-## Environment contract
+## Runtime contract
 
 Every invocation requires explicit values:
 
@@ -120,14 +120,17 @@ Every invocation requires explicit values:
 DISPLAY
 AT_SPI_BUS_ADDRESS
 ATS_FIREFOX_PID
-ATS_ONE_ACTION_LEASE_SECRET
+ATS_ONE_ACTION_LEASE_SECRET_FD
 ATS_ONE_ACTION_RECEIPT_ROOT
 ATS_HANDS_COMMIT
 ATS_PRESENCE_INCARNATION_ID
 ATS_HANDS_INCARNATION_ID
 ```
 
-`ATS_ONE_ACTION_LEASE_SECRET` is 64 lowercase hexadecimal characters.
+`ATS_ONE_ACTION_LEASE_SECRET_FD` is an inherited descriptor for one
+worker-owned regular file, mode `0400`, containing exactly 64 lowercase
+hexadecimal characters. The runner reads and closes the descriptor immediately.
+Secret-valued environment variables are refused.
 `ATS_ONE_ACTION_RECEIPT_ROOT` is an existing worker-owned directory with mode
 `0700`, outside every public repository. The frozen transaction is an absolute
 worker-owned regular JSON file with mode `0400` or `0600`, also outside the
