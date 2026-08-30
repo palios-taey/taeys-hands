@@ -35,6 +35,7 @@ operation is a **separate reviewed authority design**, never an extension smuggl
 Implementation (Observed, merged on `main`): `consultation_v2/supervised_ui_seat.py`,
 `supervised_ui_contract.py`, `supervised_ui_receipts.py`, per-platform
 `consultation_v2/platforms/<p>/supervised_ui.yaml`, runner `scripts/run_supervised_ui_seat.py`,
+capture supervisor `scripts/run_supervised_ui_capture.py`,
 design-rule gate `consultation_v2/validators/validate_supervised_ui_design_rules.py`. The current documentation
 surface and authority order are indexed by [`DOCUMENTATION_MAP.md`](DOCUMENTATION_MAP.md). The immutable state
 machine, request, approval, execution, and receipt contract is [`SUPERVISED_UI_PROTOCOL.md`](SUPERVISED_UI_PROTOCOL.md).
