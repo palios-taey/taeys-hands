@@ -298,7 +298,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                         'refresh_policy': 'invalidate_reacquire',
                         'stable_cycles': 2,
                         'interval_ms': 200,
-                        'timeout_ms': 45000,
+                        'timeout_ms': 180000,
                     },
                 },
             },
@@ -321,7 +321,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                     'refresh_policy': 'invalidate_reacquire',
                     'stable_cycles': 2,
                     'interval_ms': 200,
-                    'timeout_ms': 120000,
+                    'timeout_ms': 180000,
                 },
             },
             'postcondition': 'exact_selected_activity_visible_comment_controls',
@@ -330,7 +330,7 @@ def _manual_notification_contract() -> dict[str, Any]:
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
-            'timeout_ms': 45000,
+            'timeout_ms': 180000,
         },
     }
     if contract != expected:
@@ -415,7 +415,7 @@ def _manual_comment_contract() -> dict[str, Any]:
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
-            'timeout_ms': 10000,
+            'timeout_ms': 180000,
         },
     }
     if contract != expected:

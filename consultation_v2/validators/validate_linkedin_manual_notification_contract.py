@@ -115,11 +115,11 @@ def main() -> int:
             'scroll_alignment': 'top_edge',
             'min_downward_clearance_px': 0,
             'postcondition': 'exact_selected_thread_opener_in_viewport',
-            'observation_barrier': {
-                'refresh_policy': 'invalidate_reacquire',
-                'stable_cycles': 2,
-                'interval_ms': 200,
-                'timeout_ms': 120000,
+                'observation_barrier': {
+                    'refresh_policy': 'invalidate_reacquire',
+                    'stable_cycles': 2,
+                    'interval_ms': 200,
+                    'timeout_ms': 180000,
             },
         },
         'LinkedIn selected-thread viewport transition drifted',
@@ -150,7 +150,7 @@ def main() -> int:
                     'refresh_policy': 'invalidate_reacquire',
                     'stable_cycles': 2,
                     'interval_ms': 200,
-                    'timeout_ms': 45000,
+                    'timeout_ms': 180000,
                 },
             },
         },
@@ -161,9 +161,9 @@ def main() -> int:
             'refresh_policy': 'invalidate_reacquire',
             'stable_cycles': 2,
             'interval_ms': 200,
-            'timeout_ms': 45000,
+            'timeout_ms': 180000,
         },
-        'LinkedIn selected-surface observation window drifted',
+        'LinkedIn selected-surface two-sample observation budget drifted',
     )
 
     operation_source = _function_source(MANUAL_PATH, 'element_operation')
