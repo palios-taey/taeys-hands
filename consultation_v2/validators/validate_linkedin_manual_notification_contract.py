@@ -173,7 +173,6 @@ def main() -> int:
         '_selected_thread_open_geometry(selected_context)',
         "root_viewport.get('intersects_viewport') is True",
         "opener_viewport.get('live_extent_in_viewport') is True",
-        "opener_viewport['available_below_px'] >= minimum_clearance",
         "root_viewport.get('error') == 'live_extent_outside_display'",
         "opener_viewport.get('error') == 'live_extent_outside_display'",
         "'scroll_target'",
@@ -196,6 +195,11 @@ def main() -> int:
             required in operation_source,
             f'LinkedIn selected-thread operation missing {required!r}',
         )
+    _require(
+        "opener_viewport['available_below_px'] >= minimum_clearance"
+        not in operation_source,
+        'LinkedIn visible selected-thread opener retained a clearance gate',
+    )
 
     verification_source = _function_source(MANUAL_PATH, 'verify_post_action')
     for required in (
