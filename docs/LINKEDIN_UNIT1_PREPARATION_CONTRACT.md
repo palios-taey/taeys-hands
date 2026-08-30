@@ -70,6 +70,9 @@ not erase the established receipt or hide exact URI-, state-, activity-, and age
 Each LinkedIn post-action sample recursively invalidates the bound Firefox accessibility subtree before the
 existing canonical snapshot builder reacquires the document. A refresh failure halts; it cannot become a null-URL
 fallback. A null-URL sample never authorizes another mutation.
+Candidate selection treats an incomplete AT-SPI remount as settling only while the document URL still encodes
+the frozen activity. The incomplete read remains receipted, does not reset the exact-identity streak, and never
+counts as either required full proof.
 The initial Notifications target remains a two-sample read-only barrier. Its LinkedIn-local 45-second budget
 covers two measured full AT-SPI traversals on the production display; it does not add a sleep, action retry, or
 mutation authority.
