@@ -419,7 +419,7 @@ workflow:
               refresh_policy: invalidate_reacquire
               stable_cycles: 2
               interval_ms: 200
-              timeout_ms: 45000
+              timeout_ms: 180000
         action:
           effect_class: page
           primitives:
@@ -442,13 +442,13 @@ workflow:
             refresh_policy: invalidate_reacquire
             stable_cycles: 2
             interval_ms: 200
-            timeout_ms: 120000
+            timeout_ms: 180000
         postcondition: exact_selected_activity_visible_comment_controls
       observation_barrier:
         refresh_policy: invalidate_reacquire
         stable_cycles: 2
         interval_ms: 200
-        timeout_ms: 45000
+        timeout_ms: 180000
     manual_comment_composition:
       selected_post_identity:
         activity_source: exact_selected_activity
@@ -539,7 +539,7 @@ workflow:
         refresh_policy: invalidate_reacquire
         stable_cycles: 2
         interval_ms: 200
-        timeout_ms: 10000
+        timeout_ms: 180000
     observation_barrier:
       projection: exact_route_marker_and_candidate_set
       refresh_policy: invalidate_reacquire

@@ -32,6 +32,15 @@ def main() -> int:
         editor.get('relative_depth') == 6,
         'LinkedIn comment editor depth drifted from the observed selected post',
     )
+    _require(
+        contract.get('observation_barrier') == {
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 180000,
+        },
+        'LinkedIn comment two-sample observation budget drifted',
+    )
     activity = '1234567890'
     body_sha256 = hashlib.sha256(b'public post body').hexdigest()
     element_key = (
