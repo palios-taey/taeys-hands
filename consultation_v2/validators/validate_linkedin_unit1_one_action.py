@@ -228,8 +228,8 @@ def main() -> int:
         'valid non-scroll action card failed its public schema',
     )
     for field, value in (
-        ('scroll_target', 'selected_thread_opener'),
-        ('scroll_target_source', 'self'),
+        ('scroll_target', 'selected_post_body'),
+        ('scroll_target_source', 'mapped_context'),
         ('scroll_alignment', 'top_edge'),
         ('min_downward_clearance_px', 0),
     ):
@@ -270,7 +270,7 @@ def main() -> int:
         states=['enabled', 'focusable'],
         raw={
             'atspi_obj': thread_opener_object,
-            'scroll_target_atspi_obj': thread_opener_object,
+            'scroll_target_atspi_obj': selected_post_body_object,
             'selected_post_document_atspi_obj': selected_post_document_object,
             'selected_post_root_atspi_obj': selected_post_root_object,
             'selected_post_body_atspi_obj': selected_post_body_object,
@@ -383,9 +383,9 @@ def main() -> int:
         states=['showing', 'enabled', 'focusable'],
         raw={
             'atspi_obj': zero_thread_opener_object,
-            'scroll_target_atspi_obj': zero_thread_opener_object,
+            'scroll_target_atspi_obj': selected_post_body_object,
             'selected_post_root_atspi_obj': object(),
-            'selected_post_body_atspi_obj': object(),
+            'selected_post_body_atspi_obj': selected_post_body_object,
             'selected_post_body_showing': True,
             'selected_activity': ACTIVITY,
             'selected_post_body_sha256': BODY_SHA256,
