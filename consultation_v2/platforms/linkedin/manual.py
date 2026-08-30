@@ -312,8 +312,8 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'effect_class': 'viewport',
                 'primitives': ['scroll_into_view'],
                 'allowed_now': ['scroll_into_view'],
-                'scroll_target': 'selected_thread_opener',
-                'scroll_target_source': 'self',
+                'scroll_target': 'selected_post_root',
+                'scroll_target_source': 'mapped_context',
                 'scroll_alignment': 'top_edge',
                 'min_downward_clearance_px': 500,
                 'postcondition': 'exact_selected_thread_opener_in_viewport',
@@ -2015,7 +2015,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                 raw={
                     **dict(comment_counts[0].raw),
                     'atspi_obj': comment_counts[0].atspi_obj,
-                    'scroll_target_atspi_obj': comment_counts[0].atspi_obj,
+                    'scroll_target_atspi_obj': root.atspi_obj,
                     'selected_post_root_atspi_obj': root.atspi_obj,
                     'selected_post_body_atspi_obj': body.atspi_obj,
                     'selected_post_body_showing': _node_has_states(
@@ -2047,7 +2047,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     raw={
                         **dict(zero_opener.raw),
                         'atspi_obj': zero_opener.atspi_obj,
-                        'scroll_target_atspi_obj': zero_opener.atspi_obj,
+                        'scroll_target_atspi_obj': root.atspi_obj,
                         'selected_post_root_atspi_obj': root.atspi_obj,
                         'selected_post_body_atspi_obj': body.atspi_obj,
                         'selected_post_body_showing': _node_has_states(
@@ -3107,9 +3107,9 @@ def stable_scroll_post_action_observation(
                     )
                     scroll_target_exact = bool(
                         scroll_target_exact
-                        and target_raw.get('scroll_target_atspi_obj')
-                        is target.atspi_obj
                         and target_raw.get('atspi_obj') is target.atspi_obj
+                        and target_raw.get('scroll_target_atspi_obj')
+                        is root.atspi_obj
                         and target_raw.get('selected_post_root_atspi_obj')
                         is root.atspi_obj
                         and target_raw.get('selected_post_body_atspi_obj')
