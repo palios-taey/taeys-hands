@@ -694,12 +694,50 @@ def _validate_submit_precondition(value: Any) -> dict[str, Any]:
 
 
 def _lease_secret() -> bytes:
-    raw = str(os.environ.get('ATS_ONE_ACTION_LEASE_SECRET') or '').strip()
-    if len(raw) != 64 or any(character not in _SHA256 for character in raw):
+    if os.environ.pop('ATS_ONE_ACTION_LEASE_SECRET', None) is not None:
         raise GreenhouseOneActionError(
-            'ATS_ONE_ACTION_LEASE_SECRET must be exactly 64 lowercase hex characters'
+            'secret-valued ATS_ONE_ACTION_LEASE_SECRET environment is refused'
         )
-    return bytes.fromhex(raw)
+    raw_descriptor = str(
+        os.environ.pop('ATS_ONE_ACTION_LEASE_SECRET_FD', '')
+    ).strip()
+    if not raw_descriptor.isdigit() or int(raw_descriptor) < 3:
+        raise GreenhouseOneActionError(
+            'ATS_ONE_ACTION_LEASE_SECRET_FD must be one inherited descriptor'
+        )
+    descriptor = int(raw_descriptor)
+    try:
+        metadata = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or stat.S_IMODE(metadata.st_mode) != 0o400
+            or metadata.st_uid != os.geteuid()
+            or metadata.st_size != 64
+        ):
+            raise GreenhouseOneActionError(
+                'lease secret descriptor must be owner-controlled mode 0400'
+            )
+        raw = os.pread(descriptor, 65, 0)
+    except OSError as exc:
+        raise GreenhouseOneActionError(
+            'lease secret descriptor could not be read'
+        ) from exc
+    finally:
+        try:
+            os.close(descriptor)
+        except OSError:
+            pass
+    try:
+        encoded = raw.decode('ascii')
+    except UnicodeDecodeError as exc:
+        raise GreenhouseOneActionError(
+            'lease secret descriptor is not lowercase hexadecimal'
+        ) from exc
+    if len(encoded) != 64 or any(character not in _SHA256 for character in encoded):
+        raise GreenhouseOneActionError(
+            'lease secret descriptor must contain exactly 64 lowercase hex characters'
+        )
+    return bytes.fromhex(encoded)
 
 
 def _firefox_pid() -> int:

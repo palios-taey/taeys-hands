@@ -1258,12 +1258,73 @@ def _assert_fd_only_frozen_action_boundary() -> None:
             os.close(descriptor)
 
 
+def _assert_lease_secret_fd_boundary() -> None:
+    with mock.patch.dict(
+        os.environ,
+        {'ATS_ONE_ACTION_LEASE_SECRET': '5' * 64},
+        clear=True,
+    ):
+        try:
+            greenhouse._lease_secret()
+        except GreenhouseOneActionError:
+            pass
+        else:
+            raise RuntimeError('Greenhouse accepted a secret-valued environment')
+
+    with tempfile.TemporaryDirectory(prefix='ats-greenhouse-secret-fd-') as temp:
+        secret_path = Path(temp) / 'lease-secret'
+        secret_path.write_bytes(b'5' * 64)
+        secret_path.chmod(0o400)
+        descriptor = os.open(
+            secret_path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        with mock.patch.dict(
+            os.environ,
+            {'ATS_ONE_ACTION_LEASE_SECRET_FD': str(descriptor)},
+            clear=True,
+        ):
+            secret = greenhouse._lease_secret()
+        if secret != bytes.fromhex('5' * 64):
+            raise RuntimeError('Greenhouse changed the descriptor-bound secret')
+        try:
+            os.fstat(descriptor)
+        except OSError:
+            pass
+        else:
+            raise RuntimeError('Greenhouse retained the lease secret descriptor')
+
+        secret_path.chmod(0o600)
+        descriptor = os.open(
+            secret_path,
+            os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC,
+        )
+        with mock.patch.dict(
+            os.environ,
+            {'ATS_ONE_ACTION_LEASE_SECRET_FD': str(descriptor)},
+            clear=True,
+        ):
+            try:
+                greenhouse._lease_secret()
+            except GreenhouseOneActionError:
+                pass
+            else:
+                raise RuntimeError('Greenhouse accepted a mode-0600 lease secret')
+        try:
+            os.fstat(descriptor)
+        except OSError:
+            pass
+        else:
+            raise RuntimeError('Greenhouse leaked a refused lease descriptor')
+
+
 def main() -> int:
     _assert_one_action_static_contract()
     _assert_greenhouse_surface()
     _assert_combo_owned_options_surface()
     _assert_native_text_redaction()
     _assert_fd_only_frozen_action_boundary()
+    _assert_lease_secret_fd_boundary()
     _assert_public_native_walker()
     _assert_confirmation_capsule_receipt_order()
     print('ATS_GREENHOUSE_ONE_ACTION_OK')
