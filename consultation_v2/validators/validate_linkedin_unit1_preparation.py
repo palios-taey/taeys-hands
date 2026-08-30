@@ -1292,8 +1292,8 @@ def main() -> int:
         'valid non-scroll preparation card failed its public schema',
     )
     for field, value in (
-        ('scroll_target', 'selected_post_root'),
-        ('scroll_target_source', 'mapped_context'),
+        ('scroll_target', 'selected_thread_opener'),
+        ('scroll_target_source', 'self'),
         ('scroll_alignment', 'top_edge'),
         ('min_downward_clearance_px', 0),
     ):
@@ -2607,8 +2607,8 @@ def main() -> int:
         manual._selected_thread_viewport_state = original_viewport
     require(
         media_zero_card['phase'] == 'thread_scroll'
-        and media_zero_card['scroll_target'] == 'selected_post_root'
-        and media_zero_card['scroll_target_source'] == 'mapped_context'
+        and media_zero_card['scroll_target'] == 'selected_thread_opener'
+        and media_zero_card['scroll_target_source'] == 'self'
         and media_zero_card['scroll_alignment'] == 'top_edge'
         and media_zero_card['min_downward_clearance_px'] == 0
         and media_zero_card['element'].startswith(
