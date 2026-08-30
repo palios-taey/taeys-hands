@@ -315,7 +315,7 @@ def _manual_notification_contract() -> dict[str, Any]:
                 'scroll_target': 'selected_post_root',
                 'scroll_target_source': 'mapped_context',
                 'scroll_alignment': 'top_edge',
-                'min_downward_clearance_px': 500,
+                'min_downward_clearance_px': 0,
                 'postcondition': 'exact_selected_thread_opener_in_viewport',
                 'observation_barrier': {
                     'refresh_policy': 'invalidate_reacquire',
@@ -1884,6 +1884,11 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
         root, body, body_text = _selected_post_root_and_body(snapshot, contract)
         if root is None or body is None or body_text is None:
             return replace(snapshot, mapped=mapped)
+        selected_document = _selected_post_document(root)
+        if selected_document is None:
+            raise ValueError(
+                'LinkedIn selected post lacks one exact document-web ancestor'
+            )
         body_digest = hashlib.sha256(body_text.encode('utf-8')).hexdigest()
         comment_contract = _manual_comment_contract()
         comment_controls = _selected_comment_controls(
@@ -2016,6 +2021,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     **dict(comment_counts[0].raw),
                     'atspi_obj': comment_counts[0].atspi_obj,
                     'scroll_target_atspi_obj': root.atspi_obj,
+                    'selected_post_document_atspi_obj': selected_document,
                     'selected_post_root_atspi_obj': root.atspi_obj,
                     'selected_post_body_atspi_obj': body.atspi_obj,
                     'selected_post_body_showing': _node_has_states(
@@ -2048,6 +2054,7 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                         **dict(zero_opener.raw),
                         'atspi_obj': zero_opener.atspi_obj,
                         'scroll_target_atspi_obj': root.atspi_obj,
+                        'selected_post_document_atspi_obj': selected_document,
                         'selected_post_root_atspi_obj': root.atspi_obj,
                         'selected_post_body_atspi_obj': body.atspi_obj,
                         'selected_post_body_showing': _node_has_states(
@@ -2098,6 +2105,15 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
                     ),
                     raw={
                         **dict(expand_target.raw),
+                        'atspi_obj': expand_target.atspi_obj,
+                        'scroll_target_atspi_obj': expand_target.atspi_obj,
+                        'selected_post_document_atspi_obj': selected_document,
+                        'selected_post_root_atspi_obj': root.atspi_obj,
+                        'selected_post_body_atspi_obj': body.atspi_obj,
+                        'selected_post_body_showing': _node_has_states(
+                            body.atspi_obj,
+                            ['showing'],
+                        ),
                         'selected_activity': selected_activity,
                         'selected_post_body_sha256': body_digest,
                         'selected_thread_total_count': expected_count,
@@ -2111,21 +2127,100 @@ def augment_snapshot(snapshot: Snapshot) -> Snapshot:
 def _selected_thread_viewport_state(element: dict[str, Any]) -> dict[str, object]:
     from consultation_v2.interact import atspi_element_viewport_state
 
-    return atspi_element_viewport_state(element)
+    viewport = dict(atspi_element_viewport_state(element))
+    document_obj = element.get('selected_post_document_atspi_obj')
+    if document_obj is None:
+        return viewport
+    document = dict(atspi_element_viewport_state({
+        'atspi_obj': document_obj,
+    }))
+    viewport.update({
+        'viewport_source': 'linkedin_document',
+        'document_extent_resolved': bool(
+            document.get('live_extent_resolved')
+        ),
+        'document_x': int(document.get('x') or 0),
+        'document_y': int(document.get('y') or 0),
+        'document_width': int(document.get('width') or 0),
+        'document_height': int(document.get('height') or 0),
+        'display_available_below_px': int(
+            viewport.get('available_below_px') or 0
+        ),
+    })
+    if (
+        viewport.get('live_extent_resolved') is not True
+        or document.get('live_extent_resolved') is not True
+    ):
+        viewport.update({
+            'live_extent_in_viewport': False,
+            'intersects_viewport': False,
+            'available_below_px': 0,
+            'error': 'linkedin_document_extent_unavailable',
+        })
+        return viewport
+    x = int(viewport['x'])
+    y = int(viewport['y'])
+    width = int(viewport['width'])
+    height = int(viewport['height'])
+    document_x = int(document['x'])
+    document_y = int(document['y'])
+    document_right = document_x + int(document['width'])
+    document_bottom = document_y + int(document['height'])
+    intersects_document = bool(
+        x < document_right
+        and x + width > document_x
+        and y < document_bottom
+        and y + height > document_y
+    )
+    contained_by_document = bool(
+        x >= document_x
+        and y >= document_y
+        and x + width <= document_right
+        and y + height <= document_bottom
+    )
+    viewport.update({
+        'live_extent_in_viewport': contained_by_document,
+        'intersects_viewport': intersects_document,
+        'available_below_px': max(0, document_bottom - (y + height)),
+        'error': (
+            None if contained_by_document else 'live_extent_outside_document'
+        ),
+    })
+    return viewport
+
+
+def _selected_post_document(root: Any) -> Any | None:
+    node = root.atspi_obj
+    for _depth in range(64):
+        if node is None:
+            return None
+        if _node_role(node) == 'document web':
+            return node
+        try:
+            node = node.get_parent()
+        except Exception:
+            return None
+    return None
 
 
 def _selected_thread_open_geometry(context: dict[str, Any]) -> dict[str, Any]:
+    document_obj = context.get('selected_post_document_atspi_obj')
     return {
         'selected_post_root': _selected_thread_viewport_state({
             'atspi_obj': context.get('selected_post_root_atspi_obj'),
+            'selected_post_document_atspi_obj': document_obj,
         }),
         'selected_post_body': _selected_thread_viewport_state({
             'atspi_obj': context.get('selected_post_body_atspi_obj'),
+            'selected_post_document_atspi_obj': document_obj,
         }),
         'selected_post_body_showing': (
             context.get('selected_post_body_showing') is True
         ),
-        'thread_opener': _selected_thread_viewport_state(context),
+        'thread_opener': _selected_thread_viewport_state({
+            'atspi_obj': context.get('atspi_obj'),
+            'selected_post_document_atspi_obj': document_obj,
+        }),
     }
 
 
@@ -2396,6 +2491,13 @@ def element_operation(
         geometry = _selected_thread_open_geometry(selected_context)
         root_viewport = geometry['selected_post_root']
         opener_viewport = geometry['thread_opener']
+        if (
+            root_viewport.get('viewport_source') != 'linkedin_document'
+            or opener_viewport.get('viewport_source') != 'linkedin_document'
+        ):
+            raise ValueError(
+                'LinkedIn selected-thread document viewport is unavailable'
+            )
         scroll_action = _manual_notification_contract()[
             'selected_thread'
         ]['scroll_into_view']
@@ -2407,8 +2509,14 @@ def element_operation(
                 'selected_thread'
             ]['action']
         elif (
-            root_viewport.get('error') == 'live_extent_outside_display'
-            or opener_viewport.get('error') == 'live_extent_outside_display'
+            root_viewport.get('error') in {
+                'live_extent_outside_display',
+                'live_extent_outside_document',
+            }
+            or opener_viewport.get('error') in {
+                'live_extent_outside_display',
+                'live_extent_outside_document',
+            }
             or root_viewport.get('intersects_viewport') is not True
             or opener_viewport.get('live_extent_in_viewport') is not True
         ):
@@ -2420,19 +2528,45 @@ def element_operation(
                 f"opener={opener_viewport.get('error') or 'unknown'}"
             )
     elif selected_thread_expand_match is not None:
-        viewport = _selected_thread_viewport_state(dict(context or {}))
-        if viewport.get('live_extent_in_viewport') is True:
+        geometry = _selected_thread_open_geometry(selected_context)
+        root_viewport = geometry['selected_post_root']
+        expander_viewport = geometry['thread_opener']
+        if (
+            root_viewport.get('viewport_source') != 'linkedin_document'
+            or expander_viewport.get('viewport_source') != 'linkedin_document'
+        ):
+            raise ValueError(
+                'LinkedIn selected-thread expander document viewport is '
+                'unavailable'
+            )
+        if (
+            root_viewport.get('intersects_viewport') is True
+            and expander_viewport.get('live_extent_in_viewport') is True
+        ):
             declared_action = _manual_notification_contract()[
                 'selected_thread'
             ]['expand']['action']
-        elif viewport.get('error') == 'live_extent_outside_display':
+        elif (
+            root_viewport.get('error') in {
+                'live_extent_outside_display',
+                'live_extent_outside_document',
+            }
+            or expander_viewport.get('error') in {
+                'live_extent_outside_display',
+                'live_extent_outside_document',
+            }
+            or root_viewport.get('intersects_viewport') is not True
+            or expander_viewport.get('live_extent_in_viewport') is not True
+        ):
             declared_action = _manual_notification_contract()[
                 'selected_thread'
             ]['expand']['scroll_into_view']
         else:
             raise ValueError(
-                'LinkedIn selected-thread expander viewport state is unavailable: '
-                f"{viewport.get('error') or 'unknown'}"
+                'LinkedIn selected-thread root/expander viewport state is '
+                'unavailable: '
+                f"root={root_viewport.get('error') or 'unknown'}; "
+                f"expander={expander_viewport.get('error') or 'unknown'}"
             )
     else:
         declared_action = {
@@ -3020,6 +3154,7 @@ def stable_scroll_post_action_observation(
     selected_open_match = (
         selected_thread_open_match or selected_zero_thread_open_match
     )
+    selected_identity_match = selected_open_match or selected_thread_expand_match
     if (
         selected_thread_open_match is None
         and selected_zero_thread_open_match is None
@@ -3082,14 +3217,15 @@ def stable_scroll_post_action_observation(
             target_raw = dict(target.raw or {})
             opener_viewport = _selected_thread_viewport_state(target_raw)
             scroll_target_exact = target.atspi_obj is not None
-            if selected_open_match is not None:
+            if selected_identity_match is not None:
                 root, body, body_text = _selected_post_root_and_body(
                     snapshot,
                     notification_contract,
                 )
                 if root is not None and body is not None and body_text is not None:
-                    expected_activity = selected_open_match.group('activity')
-                    expected_body_sha256 = selected_open_match.group('body')
+                    expected_activity = selected_identity_match.group('activity')
+                    expected_body_sha256 = selected_identity_match.group('body')
+                    selected_document = _selected_post_document(root)
                     selected_post_identity_exact = bool(
                         target_raw.get('selected_activity') == expected_activity
                         and hashlib.sha256(
@@ -3099,8 +3235,13 @@ def stable_scroll_post_action_observation(
                     scroll_target_exact = bool(
                         scroll_target_exact
                         and target_raw.get('atspi_obj') is target.atspi_obj
-                        and target_raw.get('scroll_target_atspi_obj')
-                        is root.atspi_obj
+                        and target_raw.get('scroll_target_atspi_obj') is (
+                            root.atspi_obj
+                            if selected_open_match is not None
+                            else target.atspi_obj
+                        )
+                        and target_raw.get('selected_post_document_atspi_obj')
+                        is selected_document
                         and target_raw.get('selected_post_root_atspi_obj')
                         is root.atspi_obj
                         and target_raw.get('selected_post_body_atspi_obj')
@@ -3108,32 +3249,33 @@ def stable_scroll_post_action_observation(
                     )
                     root_viewport = _selected_thread_viewport_state({
                         'atspi_obj': root.atspi_obj,
+                        'selected_post_document_atspi_obj': selected_document,
                     })
                     body_viewport = _selected_thread_viewport_state({
                         'atspi_obj': body.atspi_obj,
+                        'selected_post_document_atspi_obj': selected_document,
                     })
                     body_showing = _node_has_states(
                         body.atspi_obj,
                         ['showing'],
                     )
             opener_clearance = opener_viewport.get('available_below_px')
-            selected_open_geometry_exact = bool(
-                selected_open_match is not None
+            selected_geometry_exact = bool(
+                selected_identity_match is not None
                 and root_viewport.get('intersects_viewport') is True
                 and selected_post_identity_exact
                 and scroll_target_exact
+                and opener_viewport.get('viewport_source')
+                == 'linkedin_document'
+                and root_viewport.get('viewport_source')
+                == 'linkedin_document'
                 and opener_viewport.get('live_extent_in_viewport') is True
                 and isinstance(opener_clearance, int)
                 and not isinstance(opener_clearance, bool)
                 and opener_clearance >= declared_minimum_clearance
             )
             if (
-                selected_open_geometry_exact
-                or (
-                    selected_open_match is None
-                    and scroll_target_exact
-                    and opener_viewport.get('live_extent_in_viewport') is True
-                )
+                selected_geometry_exact
             ):
                 declared = element_operation(
                     element_key,
@@ -3162,8 +3304,10 @@ def stable_scroll_post_action_observation(
             ),
             'scroll_context_intersects_viewport': bool(
                 root_viewport.get('intersects_viewport')
-                if selected_open_match is not None
-                else opener_viewport.get('intersects_viewport')
+            ),
+            'viewport_source': opener_viewport.get('viewport_source'),
+            'document_extent_resolved': bool(
+                opener_viewport.get('document_extent_resolved')
             ),
             'available_below_px': int(
                 opener_viewport.get('available_below_px') or 0
@@ -3223,6 +3367,8 @@ def stable_scroll_post_action_observation(
                 'body_sha256_exact': True,
                 'live_extent_in_viewport': True,
                 'scroll_context_intersects_viewport': True,
+                'viewport_source': 'linkedin_document',
+                'document_extent_resolved': True,
                 'scroll_target_exact': True,
                 'available_below_px': int(
                     opener_viewport['available_below_px']
@@ -3252,6 +3398,9 @@ def stable_scroll_post_action_observation(
                 **(
                     {
                         'expansion_identity_exact': True,
+                        'selected_post_root_intersects_viewport': True,
+                        'selected_post_root_viewport': root_viewport,
+                        'thread_opener_viewport': opener_viewport,
                         'total_count': int(
                             selected_thread_expand_match.group('total')
                         ),

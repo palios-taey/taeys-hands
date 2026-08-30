@@ -676,6 +676,8 @@ def accept_unit1_step(
         or postcondition.get('activity_exact') is not True
         or postcondition.get('body_sha256_exact') is not True
         or postcondition.get('scroll_context_intersects_viewport') is not True
+        or postcondition.get('viewport_source') != 'linkedin_document'
+        or postcondition.get('document_extent_resolved') is not True
         or postcondition.get('scroll_target_exact') is not True
         or postcondition.get('live_extent_in_viewport') is not True
         or isinstance(postcondition.get('available_below_px'), bool)

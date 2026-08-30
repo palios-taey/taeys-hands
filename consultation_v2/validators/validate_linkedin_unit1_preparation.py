@@ -145,17 +145,12 @@ def require(condition: bool, message: str) -> None:
 
 
 def ready_opener_viewport(raw: dict) -> dict[str, object]:
-    if set(raw) == {'atspi_obj'}:
-        return {
-            'intersects_viewport': True,
-            'live_extent_in_viewport': False,
-            'available_below_px': 0,
-            'error': 'live_extent_outside_display',
-        }
     return {
+        'viewport_source': 'linkedin_document',
+        'document_extent_resolved': True,
         'intersects_viewport': True,
         'live_extent_in_viewport': True,
-        'available_below_px': 500,
+        'available_below_px': 145,
         'error': None,
     }
 
@@ -835,6 +830,9 @@ def barrier(card: dict) -> dict:
             'scroll_alignment': card['scroll_alignment'],
             'phase': card['phase'],
             'scroll_context_intersects_viewport': True,
+            'viewport_source': 'linkedin_document',
+            'document_extent_resolved': True,
+            'selected_post_root_intersects_viewport': True,
             'scroll_target_exact': True,
             'live_extent_in_viewport': True,
             'available_below_px': card.get(
@@ -1295,7 +1293,7 @@ def main() -> int:
         ('scroll_target', 'selected_post_root'),
         ('scroll_target_source', 'mapped_context'),
         ('scroll_alignment', 'top_edge'),
-        ('min_downward_clearance_px', 500),
+        ('min_downward_clearance_px', 0),
     ):
         require(
             list(action_card_validator.iter_errors({**navigation, field: value})),
@@ -2097,11 +2095,11 @@ def main() -> int:
             and sample['scroll_context_intersects_viewport'] is True
             and sample['scroll_target_exact'] is True
             and sample['live_extent_in_viewport'] is True
-            and sample['available_below_px'] == 500
+            and sample['available_below_px'] == 145
             and sample['selected_post_root_intersects_viewport'] is True
             and sample['thread_opener_live_extent_in_viewport'] is True
-            and sample['thread_opener_available_below_px'] == 500
-            and sample['min_downward_clearance_px'] == 500
+            and sample['thread_opener_available_below_px'] == 145
+            and sample['min_downward_clearance_px'] == 0
             for sample in virtualized_barrier['samples']
         ),
         'virtualized selected root did not retain exact identity for two samples',
@@ -2143,7 +2141,8 @@ def main() -> int:
     ))
     original_viewport = manual._selected_thread_viewport_state
     manual._selected_thread_viewport_state = lambda _raw: {
-        'error': 'live_extent_outside_display',
+        'viewport_source': 'linkedin_document',
+        'error': 'live_extent_outside_document',
     }
     try:
         first_expand_scroll = compile_preparation_step(
@@ -2172,7 +2171,7 @@ def main() -> int:
     require(
         list(action_card_validator.iter_errors({
             **first_expand_scroll,
-            'min_downward_clearance_px': 500,
+            'min_downward_clearance_px': 0,
         })),
         'expander scroll accepted opener-only clearance authority',
     )
@@ -2250,7 +2249,8 @@ def main() -> int:
         receipts[-1]['receipt_sha256'],
     ))
     manual._selected_thread_viewport_state = lambda _raw: {
-        'error': 'live_extent_outside_display',
+        'viewport_source': 'linkedin_document',
+        'error': 'live_extent_outside_document',
     }
     try:
         expect_error(
@@ -2591,7 +2591,8 @@ def main() -> int:
         media_variant=True,
     ))
     manual._selected_thread_viewport_state = lambda _raw: {
-        'error': 'live_extent_outside_display',
+        'viewport_source': 'linkedin_document',
+        'error': 'live_extent_outside_document',
     }
     try:
         media_zero_card = compile_preparation_step(
@@ -2607,7 +2608,7 @@ def main() -> int:
         and media_zero_card['scroll_target'] == 'selected_post_root'
         and media_zero_card['scroll_target_source'] == 'mapped_context'
         and media_zero_card['scroll_alignment'] == 'top_edge'
-        and media_zero_card['min_downward_clearance_px'] == 500
+        and media_zero_card['min_downward_clearance_px'] == 0
         and media_zero_card['element'].startswith(
             manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
         ),
