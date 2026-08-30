@@ -20,6 +20,7 @@ from consultation_v2.platforms.linkedin.manual import (
     SELECTED_THREAD_ZERO_OPEN_PREFIX,
     _manual_comment_contract,
     _manual_notification_contract,
+    _invalidate_linkedin_firefox_subtree,
     _notification_article_content_link,
     _node_at_index_path,
     _notification_activity,
@@ -147,6 +148,57 @@ _RECEIPT_KEYS = frozenset({
     'snapshot_revision',
     'transaction_sha256',
 })
+_RESULT_KEYS = frozenset({
+    'input',
+    'input_sha256',
+    'previous_receipt_sha256',
+    'result_sha256',
+    'schema',
+    'snapshot_revision',
+    'state',
+    'transaction_sha256',
+})
+_PRIVATE_SELECTION_INPUT_KEYS = frozenset({
+    'continuation_available',
+    'decision_input',
+    'notification_inventory',
+    'policy_sha256',
+    'schema',
+    'transaction_sha256',
+})
+_PRIVATE_DRAFT_INPUT_KEYS = frozenset({
+    'policy_sha256',
+    'schema',
+    'selected_notification',
+    'selection_sha256',
+    'source',
+    'transaction_sha256',
+})
+_NOTIFICATION_INVENTORY_KEYS = frozenset({
+    'actionable_links',
+    'decision_inventory_sha256',
+    'inventory_sha256',
+    'mounted_article_count',
+    'platform',
+    'route',
+    'rows',
+    'schema',
+    'snapshot_revision',
+})
+_SELECTED_SOURCE_KEYS = frozenset({
+    'notification_inventory_sha256',
+    'platform',
+    'post',
+    'schema',
+    'selected_activity',
+    'selection_sha256',
+    'snapshot_revision',
+    'source_sha256',
+    'thread',
+    'thread_open_receipt_sha256',
+    'thread_ready_receipt_sha256',
+    'transaction_sha256',
+})
 
 _PHASE_TRANSITIONS = {
     'notifications_navigation': frozenset({
@@ -217,6 +269,168 @@ def _preparation_card_authority_sha256(card: Mapping[str, Any]) -> str:
         key: value
         for key, value in card.items()
         if key not in {'card_sha256', 'snapshot_revision'}
+    })
+
+
+def preparation_compile_observation_contract() -> dict[str, Any]:
+    contract = _manual_notification_contract()['candidate'][
+        'post_action_observation_barrier'
+    ]
+    expected = {
+        'refresh_policy': 'invalidate_reacquire',
+        'stable_cycles': 2,
+        'interval_ms': 200,
+        'timeout_ms': 180000,
+    }
+    if contract != expected:
+        raise LinkedInUnit1PreparationError(
+            'LinkedIn preparation compile observation contract is invalid'
+        )
+    return dict(contract)
+
+
+def invalidate_preparation_observation_cache() -> str:
+    result = _invalidate_linkedin_firefox_subtree()
+    if result != 'recursive_success':
+        raise LinkedInUnit1PreparationError(
+            'LinkedIn preparation cache invalidation receipt is invalid'
+        )
+    return result
+
+
+def preparation_compiled_authority_sha256(value: Mapping[str, Any]) -> str:
+    if not isinstance(value, Mapping):
+        raise LinkedInUnit1PreparationError(
+            'compiled preparation value must be one mapping'
+        )
+    compiled = dict(value)
+    if compiled.get('schema') == PREPARATION_ACTION_CARD_SCHEMA:
+        expected_card_keys = (
+            _THREAD_SCROLL_CARD_KEYS
+            if compiled.get('phase') == 'thread_scroll'
+            else _SCROLL_CARD_KEYS
+            if compiled.get('method') == 'scroll_into_view'
+            else _CARD_KEYS
+        )
+        if frozenset(compiled) != expected_card_keys:
+            raise LinkedInUnit1PreparationError(
+                'compiled preparation card fields are incomplete or unknown'
+            )
+        card_sha256 = _require_sha256(
+            compiled.get('card_sha256'),
+            'card_sha256',
+        )
+        if card_sha256 != _preparation_card_authority_sha256(compiled):
+            raise LinkedInUnit1PreparationError(
+                'compiled preparation card authority is invalid'
+            )
+        return card_sha256
+
+    if (
+        compiled.get('schema') != PREPARATION_RESULT_SCHEMA
+        or frozenset(compiled) != _RESULT_KEYS
+    ):
+        raise LinkedInUnit1PreparationError(
+            'compiled preparation result fields are incomplete or unknown'
+        )
+    result_sha256 = compiled.pop('result_sha256', None)
+    if (
+        _require_sha256(result_sha256, 'result_sha256')
+        != _sha256(compiled)
+    ):
+        raise LinkedInUnit1PreparationError(
+            'compiled preparation result_sha256 is invalid'
+        )
+    snapshot_revision = _require_sha256(
+        compiled['snapshot_revision'],
+        'snapshot_revision',
+    )
+    input_payload = compiled.get('input')
+    if not isinstance(input_payload, Mapping):
+        raise LinkedInUnit1PreparationError(
+            'compiled preparation result input is invalid'
+        )
+    input_value = dict(input_payload)
+    if (
+        _require_sha256(compiled.get('input_sha256'), 'input_sha256')
+        != _sha256(input_value)
+    ):
+        raise LinkedInUnit1PreparationError(
+            'compiled preparation input_sha256 is invalid'
+        )
+    authority_input: dict[str, Any]
+    state = compiled.get('state')
+    if state == 'ready_for_private_selection':
+        if frozenset(input_value) != _PRIVATE_SELECTION_INPUT_KEYS:
+            raise LinkedInUnit1PreparationError(
+                'private selection input fields are incomplete or unknown'
+            )
+        inventory = input_value.get('notification_inventory')
+        decision_input = input_value.get('decision_input')
+        if (
+            not isinstance(inventory, Mapping)
+            or frozenset(inventory) != _NOTIFICATION_INVENTORY_KEYS
+            or inventory.get('snapshot_revision') != snapshot_revision
+            or not isinstance(decision_input, Mapping)
+        ):
+            raise LinkedInUnit1PreparationError(
+                'private selection observation provenance is invalid'
+            )
+        authority_input = {
+            'schema': input_value['schema'],
+            'policy_sha256': input_value['policy_sha256'],
+            'transaction_sha256': input_value['transaction_sha256'],
+            'continuation_available': input_value['continuation_available'],
+            'decision_input': dict(decision_input),
+            'notification_inventory': {
+                'schema': inventory['schema'],
+                'platform': inventory['platform'],
+                'route': inventory['route'],
+                'mounted_article_count': inventory['mounted_article_count'],
+                'decision_inventory_sha256': inventory[
+                    'decision_inventory_sha256'
+                ],
+                'inventory_sha256': inventory['inventory_sha256'],
+            },
+        }
+    elif state == 'ready_for_private_draft':
+        if frozenset(input_value) != _PRIVATE_DRAFT_INPUT_KEYS:
+            raise LinkedInUnit1PreparationError(
+                'private draft input fields are incomplete or unknown'
+            )
+        source = input_value.get('source')
+        if (
+            not isinstance(source, Mapping)
+            or frozenset(source) != _SELECTED_SOURCE_KEYS
+            or source.get('snapshot_revision') != snapshot_revision
+        ):
+            raise LinkedInUnit1PreparationError(
+                'private draft observation provenance is invalid'
+            )
+        source_value = dict(source)
+        source_sha256 = source_value.pop('source_sha256', None)
+        if (
+            _require_sha256(source_sha256, 'source_sha256')
+            != _sha256(source_value)
+        ):
+            raise LinkedInUnit1PreparationError(
+                'private draft source_sha256 is invalid'
+            )
+        source_value.pop('snapshot_revision')
+        authority_input = {
+            **input_value,
+            'source': source_value,
+        }
+    else:
+        raise LinkedInUnit1PreparationError(
+            'compiled preparation result state is unknown'
+        )
+    return _sha256({
+        'schema': compiled['schema'],
+        'state': state,
+        'transaction_sha256': compiled['transaction_sha256'],
+        'previous_receipt_sha256': compiled['previous_receipt_sha256'],
+        'input': authority_input,
     })
 
 
