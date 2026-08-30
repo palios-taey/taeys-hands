@@ -287,6 +287,9 @@ def main() -> int:
     )
     for required in (
         "snapshot.mapped.get(element_key)",
+        "sample_budget_seconds = (",
+        "max(0.0, barrier_deadline - started_at) / stable_cycles_required",
+        "barrier_deadline - time.monotonic() < sample_budget_seconds",
         "len(matches) == 1",
         "declared.get('method') == 'mapped_pointer_activate'",
         "'live_extent_in_viewport': True",
@@ -315,6 +318,20 @@ def main() -> int:
         '_SELECTED_THREAD_EXPAND_KEY.fullmatch(',
     ):
         _require(required in barrier_source, f'scroll barrier missing {required!r}')
+
+    post_action_barrier_source = _function_source(
+        MANUAL_PATH,
+        'stable_post_action_observation',
+    )
+    for required in (
+        "sample_budget_seconds = (",
+        "max(0.0, barrier_deadline - started_at) / stable_cycles_required",
+        "barrier_deadline - time.monotonic() < sample_budget_seconds",
+    ):
+        _require(
+            required in post_action_barrier_source,
+            f'post-action barrier missing sample-budget preflight {required!r}',
+        )
 
     runtime_source = RUNTIME_PATH.read_text(encoding='utf-8')
     runtime_tree = ast.parse(runtime_source)

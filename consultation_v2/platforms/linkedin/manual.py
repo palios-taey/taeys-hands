@@ -3195,11 +3195,16 @@ def stable_scroll_post_action_observation(
         float(deadline_at),
         started_at + (barrier['timeout_ms'] / 1000.0),
     )
+    sample_budget_seconds = (
+        max(0.0, barrier_deadline - started_at) / stable_cycles_required
+    )
     stable_cycles_observed = 0
     last_snapshot: Snapshot | None = None
     samples: list[dict[str, Any]] = []
 
     while time.monotonic() < barrier_deadline:
+        if barrier_deadline - time.monotonic() < sample_budget_seconds:
+            break
         cache_invalidation = _invalidate_linkedin_firefox_subtree()
         _firefox, _document, base_snapshot = build_snapshot('linkedin')
         snapshot = augment_snapshot(base_snapshot)
@@ -3591,11 +3596,16 @@ def stable_post_action_observation(
         float(deadline_at),
         started_at + (barrier['timeout_ms'] / 1000.0),
     )
+    sample_budget_seconds = (
+        max(0.0, barrier_deadline - started_at) / stable_cycles_required
+    )
     stable_cycles_observed = 0
     last_snapshot: Snapshot | None = None
     samples: list[dict[str, Any]] = []
 
     while time.monotonic() < barrier_deadline:
+        if barrier_deadline - time.monotonic() < sample_budget_seconds:
+            break
         cache_invalidation = (
             'build_snapshot_invalidate_reacquire'
             if element_key == navigation_contract['element_key']
