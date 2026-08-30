@@ -471,7 +471,7 @@ workflow:
         element_key_prefix: selected_post_editor_activity_
         name: Text editor for creating comment
         role: entry
-        relative_depth: 5
+        relative_depth: 6
         states_include:
           - editable
           - focusable

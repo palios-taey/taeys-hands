@@ -797,7 +797,8 @@ def with_empty_comment_editor(snapshot: Snapshot) -> Snapshot:
         text='\uFFFC',
         states=['editable', 'focusable', 'visible', 'sensitive', 'showing'],
     ).add(editor_text)
-    wrapper_3 = Node('generic').add(editor)
+    wrapper_4 = Node('generic').add(editor)
+    wrapper_3 = Node('generic').add(wrapper_4)
     wrapper_2 = Node('generic').add(wrapper_3)
     wrapper_1 = Node('generic').add(wrapper_2)
     post_card.add(wrapper_1)
@@ -805,6 +806,7 @@ def with_empty_comment_editor(snapshot: Snapshot) -> Snapshot:
         ref(wrapper_1),
         ref(wrapper_2),
         ref(wrapper_3),
+        ref(wrapper_4),
         ref(editor),
         ref(editor_text, text='Add a comment...'),
     ])
