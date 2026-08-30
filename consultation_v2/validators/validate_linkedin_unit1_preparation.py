@@ -8,6 +8,8 @@ import sys
 import types
 from urllib.parse import quote
 
+from jsonschema import Draft202012Validator
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -50,6 +52,7 @@ if 'gi' not in sys.modules:
     sys.modules['gi'] = fake_gi
     sys.modules['gi.repository'] = fake_repository
 
+from consultation_v2 import interact  # noqa: E402
 from consultation_v2.platforms.linkedin import manual  # noqa: E402
 from consultation_v2.platforms.linkedin.unit1_prepare import (  # noqa: E402
     LinkedInUnit1PreparationError,
@@ -129,6 +132,94 @@ def exclusion_decision(readiness: dict, transaction_sha256: str) -> dict:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def ready_opener_viewport(raw: dict) -> dict[str, object]:
+    if set(raw) == {'atspi_obj'}:
+        return {
+            'intersects_viewport': True,
+            'live_extent_in_viewport': False,
+            'available_below_px': 0,
+            'error': 'live_extent_outside_display',
+        }
+    return {
+        'intersects_viewport': True,
+        'live_extent_in_viewport': True,
+        'available_below_px': 500,
+        'error': None,
+    }
+
+
+def validate_generic_viewport_evidence() -> None:
+    class StateSet:
+        @staticmethod
+        def contains(_state) -> bool:
+            return False
+
+    class Component:
+        def __init__(self, rect) -> None:
+            self.rect = rect
+
+        def get_extents(self, _coordinates):
+            return self.rect
+
+    class ViewportObject:
+        def __init__(self, rect) -> None:
+            self.component = Component(rect)
+
+        def get_component_iface(self):
+            return self.component
+
+        @staticmethod
+        def get_state_set() -> StateSet:
+            return StateSet()
+
+    original_display_geometry = interact.inp.display_geometry
+    interact.inp.display_geometry = lambda: (1920, 1080)
+    try:
+        oversized = interact.atspi_element_viewport_state({
+            'atspi_obj': ViewportObject(types.SimpleNamespace(
+                x=50,
+                y=-100,
+                width=800,
+                height=1242,
+            )),
+        })
+        opener = interact.atspi_element_viewport_state({
+            'atspi_obj': ViewportObject(types.SimpleNamespace(
+                x=50,
+                y=50,
+                width=100,
+                height=30,
+            )),
+        })
+        interact.inp.display_geometry = lambda: (0, 1080)
+        invalid_display = interact.atspi_element_viewport_state({
+            'atspi_obj': ViewportObject(types.SimpleNamespace(
+                x=50,
+                y=50,
+                width=100,
+                height=30,
+            )),
+        })
+    finally:
+        interact.inp.display_geometry = original_display_geometry
+    require(
+        oversized['intersects_viewport'] is True
+        and oversized['live_extent_in_viewport'] is False
+        and oversized['width'] == 800
+        and oversized['height'] == 1242
+        and oversized['display_width'] == 1920
+        and oversized['display_height'] == 1080
+        and oversized['available_below_px'] == 0
+        and opener['intersects_viewport'] is True
+        and opener['live_extent_in_viewport'] is True
+        and opener['available_below_px'] == 1000
+        and invalid_display['display_geometry_resolved'] is False
+        and invalid_display['intersects_viewport'] is False
+        and invalid_display['error'] == 'invalid_display_geometry',
+        'generic viewport evidence lost positive-area or clearance semantics',
+    )
 
 
 def require_decision_input(readiness: dict) -> dict:
@@ -630,10 +721,20 @@ def with_thread_opener(snapshot: Snapshot, count: int = 2) -> Snapshot:
     key = (
         f'{manual.SELECTED_THREAD_OPEN_PREFIX}{ACTIVITY_A}_body_{BODY_SHA256}'
     )
+    root, body, _body_text = manual._selected_post_root_and_body(
+        snapshot,
+        manual._manual_notification_contract(),
+    )
+    require(root is not None and body is not None, 'thread fixture lost its post root')
     snapshot.mapped[key] = [ref(
         count_element.atspi_obj,
         key=key,
         raw={
+            'atspi_obj': count_element.atspi_obj,
+            'scroll_target_atspi_obj': count_element.atspi_obj,
+            'selected_post_root_atspi_obj': root.atspi_obj,
+            'selected_post_body_atspi_obj': body.atspi_obj,
+            'selected_post_body_showing': True,
             'selected_activity': ACTIVITY_A,
             'selected_post_body_sha256': BODY_SHA256,
         },
@@ -716,6 +817,33 @@ def barrier(card: dict) -> dict:
         postcondition.update({
             'route_exact': True,
             'category_exact': True,
+        })
+    if card['method'] == 'scroll_into_view':
+        postcondition.update({
+            'scroll_target': card['scroll_target'],
+            'scroll_target_source': card['scroll_target_source'],
+            'scroll_alignment': card['scroll_alignment'],
+            'phase': card['phase'],
+            'scroll_context_intersects_viewport': True,
+            'scroll_target_exact': True,
+            'live_extent_in_viewport': True,
+            'available_below_px': card.get(
+                'min_downward_clearance_px',
+                0,
+            ),
+        })
+    if card['phase'] == 'thread_scroll':
+        postcondition.update({
+            'min_downward_clearance_px': card[
+                'min_downward_clearance_px'
+            ],
+            'activity_exact': True,
+            'body_sha256_exact': True,
+            'selected_post_root_intersects_viewport': True,
+            'thread_opener_live_extent_in_viewport': True,
+            'thread_opener_available_below_px': card[
+                'min_downward_clearance_px'
+            ],
         })
     return {
         'result': 'PASS',
@@ -890,6 +1018,7 @@ def validate_initial_observation_barrier() -> None:
 
 
 def main() -> int:
+    validate_generic_viewport_evidence()
     validate_initial_observation_barrier()
     stream = inventory_snapshot(include_categories=True)
     inventory = project_notification_inventory(stream, REVISION)
@@ -1101,6 +1230,13 @@ def main() -> int:
         envelope,
         receipts,
     )
+    action_card_schema = json.loads((
+        REPO_ROOT
+        / 'consultation_v2/platforms/linkedin'
+        / 'unit1-preparation-action-card.schema.json'
+    ).read_text(encoding='utf-8'))
+    Draft202012Validator.check_schema(action_card_schema)
+    action_card_validator = Draft202012Validator(action_card_schema)
     require(
         navigation['phase'] == 'notifications_navigation',
         'preparation did not begin from Notifications',
@@ -1110,6 +1246,20 @@ def main() -> int:
         == set(navigation),
         'preparation action-card schema drifted',
     )
+    require(
+        not list(action_card_validator.iter_errors(navigation)),
+        'valid non-scroll preparation card failed its public schema',
+    )
+    for field, value in (
+        ('scroll_target', 'selected_thread_opener'),
+        ('scroll_target_source', 'self'),
+        ('scroll_alignment', 'top_edge'),
+        ('min_downward_clearance_px', 500),
+    ):
+        require(
+            list(action_card_validator.iter_errors({**navigation, field: value})),
+            f'non-scroll preparation card accepted forbidden {field}',
+        )
     missing_navigation_category = barrier(navigation)
     missing_navigation_category['postcondition_receipt'].pop('category_exact')
     expect_error(
@@ -1835,10 +1985,25 @@ def main() -> int:
     original_build_snapshot = manual.build_snapshot
     original_viewport = manual._selected_thread_viewport_state
     original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
-    manual.build_snapshot = lambda _platform: (None, None, virtualized)
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'live_extent_in_viewport': True,
-    }
+    settled_virtualized = virtualized_selected_snapshot()
+    _settled_root, settled_body, _settled_text = (
+        manual._selected_post_root_and_body(
+            settled_virtualized,
+            manual._manual_notification_contract(),
+        )
+    )
+    require(
+        settled_body is not None,
+        'settled selected body fixture did not resolve',
+    )
+    settled_body.states = ['enabled']
+    settled_body.atspi_obj.states = ['enabled']
+    manual.build_snapshot = lambda _platform: (
+        None,
+        None,
+        settled_virtualized,
+    )
+    manual._selected_thread_viewport_state = ready_opener_viewport
     manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
     try:
         _virtualized_snapshot, virtualized_barrier = (
@@ -1857,6 +2022,15 @@ def main() -> int:
         and all(
             sample['exact_element_key_count'] == 1
             and sample['firefox_cache_invalidation'] == 'recursive_success'
+            and sample['selected_post_identity_exact'] is True
+            and sample['scroll_context_intersects_viewport'] is True
+            and sample['scroll_target_exact'] is True
+            and sample['live_extent_in_viewport'] is True
+            and sample['available_below_px'] == 500
+            and sample['selected_post_root_intersects_viewport'] is True
+            and sample['thread_opener_live_extent_in_viewport'] is True
+            and sample['thread_opener_available_below_px'] == 500
+            and sample['min_downward_clearance_px'] == 500
             for sample in virtualized_barrier['samples']
         ),
         'virtualized selected root did not retain exact identity for two samples',
@@ -1874,9 +2048,7 @@ def main() -> int:
     )
     unopened_thread = with_thread_opener(selected_snapshot(visible=False))
     original_viewport = manual._selected_thread_viewport_state
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'live_extent_in_viewport': True,
-    }
+    manual._selected_thread_viewport_state = ready_opener_viewport
     try:
         thread_card = compile_preparation_step(
             unopened_thread,
@@ -1914,15 +2086,40 @@ def main() -> int:
     require(
         first_expand_scroll['phase'] == 'thread_expand_scroll'
         and first_expand_scroll['method'] == 'scroll_into_view'
+        and first_expand_scroll['scroll_target']
+        == 'selected_thread_expander'
+        and first_expand_scroll['scroll_target_source'] == 'self'
+        and first_expand_scroll['scroll_alignment'] == 'anywhere'
+        and 'min_downward_clearance_px' not in first_expand_scroll
         and '_total_9_visible_2_more_6' in first_expand_scroll['element'],
         'off-screen selected thread expansion did not compile one exact scroll',
     )
+    require(
+        not list(action_card_validator.iter_errors(first_expand_scroll)),
+        'valid self-targeted preparation scroll failed its public schema',
+    )
+    require(
+        list(action_card_validator.iter_errors({
+            **first_expand_scroll,
+            'min_downward_clearance_px': 500,
+        })),
+        'expander scroll accepted opener-only clearance authority',
+    )
+    for field in (
+        'scroll_target',
+        'scroll_target_source',
+        'scroll_alignment',
+    ):
+        missing_scroll_field = dict(first_expand_scroll)
+        missing_scroll_field.pop(field)
+        require(
+            list(action_card_validator.iter_errors(missing_scroll_field)),
+            f'preparation scroll card accepted missing {field}',
+        )
     original_build_snapshot = manual.build_snapshot
     original_cache_invalidator = manual._invalidate_linkedin_firefox_subtree
     manual.build_snapshot = lambda _platform: (None, None, partial_thread)
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'live_extent_in_viewport': True,
-    }
+    manual._selected_thread_viewport_state = ready_opener_viewport
     manual._invalidate_linkedin_firefox_subtree = lambda: 'recursive_success'
     try:
         _scroll_snapshot, expand_scroll_barrier = (
@@ -1950,6 +2147,32 @@ def main() -> int:
         and expand_scroll_barrier['postcondition_receipt']['more_count'] == 6,
         'selected thread expansion scroll barrier lost exact key identity',
     )
+    expander_with_threshold = json.loads(json.dumps(expand_scroll_barrier))
+    expander_with_threshold['postcondition_receipt'][
+        'min_downward_clearance_px'
+    ] = 0
+    expect_error(
+        lambda: accept_preparation_step(
+            first_expand_scroll,
+            expander_with_threshold,
+            receipts[-1]['receipt_sha256'],
+        ),
+        'expander receipt accepted opener-only clearance authority',
+    )
+    expander_with_negative_clearance = json.loads(
+        json.dumps(expand_scroll_barrier)
+    )
+    expander_with_negative_clearance['postcondition_receipt'][
+        'available_below_px'
+    ] = -1
+    expect_error(
+        lambda: accept_preparation_step(
+            first_expand_scroll,
+            expander_with_negative_clearance,
+            receipts[-1]['receipt_sha256'],
+        ),
+        'expander receipt accepted negative generic clearance',
+    )
     receipts.append(accept_preparation_step(
         first_expand_scroll,
         expand_scroll_barrier,
@@ -1974,9 +2197,7 @@ def main() -> int:
         selected_snapshot(count=9, visible_count=3),
         6,
     ))
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'live_extent_in_viewport': True,
-    }
+    manual._selected_thread_viewport_state = ready_opener_viewport
     try:
         expect_error(
             lambda: compile_preparation_step(
@@ -2090,9 +2311,7 @@ def main() -> int:
         first_expand_barrier,
         receipts[-1]['receipt_sha256'],
     ))
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'live_extent_in_viewport': True,
-    }
+    manual._selected_thread_viewport_state = ready_opener_viewport
     try:
         second_expand = compile_preparation_step(
             eight_visible,
@@ -2186,9 +2405,7 @@ def main() -> int:
         with_zero_thread_opener(selected_snapshot(count=0))
     )
     original_viewport = manual._selected_thread_viewport_state
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'live_extent_in_viewport': True,
-    }
+    manual._selected_thread_viewport_state = ready_opener_viewport
     try:
         zero_card = compile_preparation_step(
             zero_snapshot,
@@ -2230,9 +2447,7 @@ def main() -> int:
         compact_zero_source,
         compact_variant=True,
     ))
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'live_extent_in_viewport': True,
-    }
+    manual._selected_thread_viewport_state = ready_opener_viewport
     try:
         compact_zero_card = compile_preparation_step(
             compact_zero_snapshot,
@@ -2252,9 +2467,7 @@ def main() -> int:
     document_zero_snapshot = manual.augment_snapshot(with_zero_thread_opener(
         selected_snapshot(count=0, body_index=8),
     ))
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'live_extent_in_viewport': True,
-    }
+    manual._selected_thread_viewport_state = ready_opener_viewport
     try:
         document_zero_card = compile_preparation_step(
             document_zero_snapshot,
@@ -2289,10 +2502,42 @@ def main() -> int:
         manual._selected_thread_viewport_state = original_viewport
     require(
         media_zero_card['phase'] == 'thread_scroll'
+        and media_zero_card['scroll_target'] == 'selected_thread_opener'
+        and media_zero_card['scroll_target_source'] == 'self'
+        and media_zero_card['scroll_alignment'] == 'top_edge'
+        and media_zero_card['min_downward_clearance_px'] == 500
         and media_zero_card['element'].startswith(
             manual.SELECTED_THREAD_ZERO_OPEN_PREFIX
         ),
         'off-screen media zero thread did not compile one exact scroll',
+    )
+    require(
+        not list(action_card_validator.iter_errors(media_zero_card)),
+        'valid selected-root preparation scroll failed its public schema',
+    )
+    missing_clearance = dict(media_zero_card)
+    missing_clearance.pop('min_downward_clearance_px')
+    require(
+        list(action_card_validator.iter_errors(missing_clearance)),
+        'selected-root preparation scroll accepted missing clearance',
+    )
+    media_scroll_barrier = barrier(media_zero_card)
+    accept_preparation_step(
+        media_zero_card,
+        media_scroll_barrier,
+        candidate_receipts[-1]['receipt_sha256'],
+    )
+    divergent_media_scroll = json.loads(json.dumps(media_scroll_barrier))
+    divergent_media_scroll['postcondition_receipt'][
+        'available_below_px'
+    ] = 501
+    expect_error(
+        lambda: accept_preparation_step(
+            media_zero_card,
+            divergent_media_scroll,
+            candidate_receipts[-1]['receipt_sha256'],
+        ),
+        'preparation scroll accepted divergent clearance evidence',
     )
     disabled_expander = manual.augment_snapshot(with_thread_expander(
         with_zero_thread_opener(selected_snapshot(count=0)),

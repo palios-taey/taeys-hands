@@ -30,8 +30,44 @@
     "verification_operation": {"enum": ["activate", "scroll_into_view"]},
     "effect_class": {"type": "string", "minLength": 1},
     "postcondition_kind": {"type": "string", "minLength": 1},
+    "scroll_target": {"type": "string", "minLength": 1},
+    "scroll_target_source": {"enum": ["self", "mapped_context"]},
+    "scroll_alignment": {"enum": ["anywhere", "top_edge"]},
+    "min_downward_clearance_px": {"type": "integer", "minimum": 0},
     "card_sha256": {"$ref": "#/$defs/sha256"}
   },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"method": {"const": "scroll_into_view"}},
+        "required": ["method"]
+      },
+      "then": {
+        "required": [
+          "scroll_target",
+          "scroll_target_source",
+          "scroll_alignment"
+        ]
+      },
+      "else": {
+        "not": {
+          "anyOf": [
+            {"required": ["scroll_target"]},
+            {"required": ["scroll_target_source"]},
+            {"required": ["scroll_alignment"]}
+          ]
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"phase": {"const": "thread_scroll"}},
+        "required": ["phase"]
+      },
+      "then": {"required": ["min_downward_clearance_px"]},
+      "else": {"not": {"required": ["min_downward_clearance_px"]}}
+    }
+  ],
   "$defs": {
     "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
   }

@@ -11,6 +11,7 @@ sys.path.insert(0, str(REPO_ROOT))
 INTERACT_PATH = REPO_ROOT / 'consultation_v2/interact.py'
 INPUT_PATH = REPO_ROOT / 'consultation_v2/input.py'
 MANUAL_PATH = REPO_ROOT / 'consultation_v2/platforms/linkedin/manual.py'
+RUNTIME_PATH = REPO_ROOT / 'consultation_v2/runtime.py'
 
 from consultation_v2.yaml_contract import load_platform_yaml
 
@@ -105,9 +106,14 @@ def main() -> int:
     )
     _require(
         selected_thread.get('scroll_into_view') == {
+            'phase': 'thread_scroll',
             'effect_class': 'viewport',
             'primitives': ['scroll_into_view'],
             'allowed_now': ['scroll_into_view'],
+            'scroll_target': 'selected_thread_opener',
+            'scroll_target_source': 'self',
+            'scroll_alignment': 'top_edge',
+            'min_downward_clearance_px': 500,
             'postcondition': 'exact_selected_thread_opener_in_viewport',
             'observation_barrier': {
                 'refresh_policy': 'invalidate_reacquire',
@@ -132,9 +138,13 @@ def main() -> int:
             },
             'postcondition': 'exact_selected_thread_growth',
             'scroll_into_view': {
+                'phase': 'thread_expand_scroll',
                 'effect_class': 'viewport',
                 'primitives': ['scroll_into_view'],
                 'allowed_now': ['scroll_into_view'],
+                'scroll_target': 'selected_thread_expander',
+                'scroll_target_source': 'self',
+                'scroll_alignment': 'anywhere',
                 'postcondition': 'exact_selected_thread_expander_in_viewport',
                 'observation_barrier': {
                     'refresh_policy': 'invalidate_reacquire',
@@ -160,9 +170,17 @@ def main() -> int:
     for required in (
         '_SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)',
         '_SELECTED_THREAD_ZERO_OPEN_KEY.fullmatch(',
-        '_selected_thread_viewport_state(dict(context or {}))',
-        "viewport.get('live_extent_in_viewport') is True",
-        "viewport.get('error') == 'live_extent_outside_display'",
+        '_selected_thread_open_geometry(selected_context)',
+        "root_viewport.get('intersects_viewport') is True",
+        "opener_viewport.get('live_extent_in_viewport') is True",
+        "opener_viewport['available_below_px'] >= minimum_clearance",
+        "root_viewport.get('error') == 'live_extent_outside_display'",
+        "opener_viewport.get('error') == 'live_extent_outside_display'",
+        "'scroll_target'",
+        "'phase'",
+        "'scroll_target_source'",
+        "'scroll_alignment'",
+        "'min_downward_clearance_px'",
         "'selected_thread'",
         "]['action']",
         "]['scroll_into_view']",
@@ -208,6 +226,31 @@ def main() -> int:
         < pointer_source.index('inp.click_at('),
         'mapped pointer does not reject off-display extent before input',
     )
+    viewport_source = _function_source(
+        INTERACT_PATH,
+        'atspi_element_viewport_state',
+    )
+    for required in (
+        "'intersects_viewport': False",
+        "'x': 0",
+        "'y': 0",
+        "'width': 0",
+        "'height': 0",
+        "'display_width': 0",
+        "'display_height': 0",
+        "'available_below_px': 0",
+        "'error': None",
+        "'intersects_viewport': bool(",
+        "'available_below_px': max(",
+        'rect.width > 0',
+        'rect.height > 0',
+        'display_width > 0',
+        'display_height > 0',
+    ):
+        _require(
+            required in viewport_source,
+            f'generic viewport evidence missing {required!r}',
+        )
     click_source = _function_source(INPUT_PATH, 'click_at')
     _require(
         'display_geometry(timeout=timeout)' in click_source
@@ -225,11 +268,52 @@ def main() -> int:
         "len(matches) == 1",
         "declared.get('method') == 'mapped_pointer_activate'",
         "'live_extent_in_viewport': True",
+        "'scroll_context_intersects_viewport': True",
+        "'available_below_px': int(",
+        "root_viewport.get('intersects_viewport') is True",
+        'selected_post_identity_exact',
+        'and scroll_target_exact',
+        "opener_clearance >= declared_minimum_clearance",
+        "'selected_post_root_intersects_viewport': True",
+        "'scroll_target_exact': True",
+        "'thread_opener_live_extent_in_viewport': True",
+        "'thread_opener_available_below_px': int(",
+        "'min_downward_clearance_px': (",
+        "'selected_post_root_viewport': root_viewport",
+        "'thread_opener_viewport': opener_viewport",
+        "target_raw.get('scroll_target_atspi_obj')",
+        'is target.atspi_obj',
+        "'scroll_target': scroll_contract['scroll_target']",
+        "'scroll_alignment': scroll_contract['scroll_alignment']",
+        "'phase': scroll_contract['phase']",
         "'terminal_delivery_verified': False",
         "'observe_required_before_next_mutation': True",
         '_SELECTED_THREAD_EXPAND_KEY.fullmatch(',
     ):
         _require(required in barrier_source, f'scroll barrier missing {required!r}')
+
+    runtime_source = RUNTIME_PATH.read_text(encoding='utf-8')
+    runtime_tree = ast.parse(runtime_source)
+    runtime_class = next(
+        node
+        for node in runtime_tree.body
+        if isinstance(node, ast.ClassDef)
+        and node.name == 'ConsultationRuntime'
+    )
+    scroll_method = next(
+        node
+        for node in runtime_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == 'scroll_element_into_view'
+    )
+    scroll_source = ast.get_source_segment(runtime_source, scroll_method) or ''
+    _require(
+        "alignment: str = 'anywhere'" in scroll_source
+        and "'anywhere': _Atspi.ScrollType.ANYWHERE" in scroll_source
+        and "'top_edge': _Atspi.ScrollType.TOP_EDGE" in scroll_source
+        and 'comp.scroll_to(scroll_type)' in scroll_source,
+        'shared scroll runtime lost default-anywhere or explicit top-edge alignment',
+    )
 
     print('linkedin selected-thread viewport contract: PASS')
     return 0

@@ -76,6 +76,14 @@ _CARD_KEYS = frozenset({
     'transaction_sha256',
     'verification_operation',
 })
+_SCROLL_CARD_KEYS = _CARD_KEYS | frozenset({
+    'scroll_alignment',
+    'scroll_target',
+    'scroll_target_source',
+})
+_THREAD_SCROLL_CARD_KEYS = _SCROLL_CARD_KEYS | frozenset({
+    'min_downward_clearance_px',
+})
 _RECEIPT_KEYS = frozenset({
     'card_sha256',
     'effect_class',
@@ -344,6 +352,33 @@ def _declared_card(
             else postcondition['kind']
         ),
     }
+    if method == 'scroll_into_view':
+        if declared.get('phase') != phase:
+            raise LinkedInUnit1Error(
+                f'{element_key} scroll declaration phase is not exact'
+            )
+        for field in (
+            'scroll_target',
+            'scroll_target_source',
+            'scroll_alignment',
+        ):
+            value = declared.get(field)
+            if not isinstance(value, str) or not value:
+                raise LinkedInUnit1Error(
+                    f'{element_key} has no exact {field}'
+                )
+            card[field] = value
+        if phase == 'thread_scroll':
+            minimum_clearance = declared.get('min_downward_clearance_px')
+            if (
+                isinstance(minimum_clearance, bool)
+                or not isinstance(minimum_clearance, int)
+                or minimum_clearance < 0
+            ):
+                raise LinkedInUnit1Error(
+                    f'{element_key} has no exact minimum downward clearance'
+                )
+            card['min_downward_clearance_px'] = minimum_clearance
     card['card_sha256'] = _sha256(card)
     return card
 
@@ -560,7 +595,16 @@ def accept_unit1_step(
 ) -> dict[str, Any]:
     private = validate_private_input(private_input)
     transaction_sha256 = _sha256(private)
-    if not isinstance(card, Mapping) or frozenset(card) != _CARD_KEYS:
+    expected_card_keys = (
+        _THREAD_SCROLL_CARD_KEYS
+        if isinstance(card, Mapping)
+        and card.get('phase') == 'thread_scroll'
+        else _SCROLL_CARD_KEYS
+        if isinstance(card, Mapping)
+        and card.get('method') == 'scroll_into_view'
+        else _CARD_KEYS
+    )
+    if not isinstance(card, Mapping) or frozenset(card) != expected_card_keys:
         raise LinkedInUnit1Error('action card fields are incomplete or unknown')
     card_payload = dict(card)
     card_digest = card_payload.pop('card_sha256', None)
@@ -611,6 +655,53 @@ def accept_unit1_step(
         raise LinkedInUnit1Error('exact postcondition barrier did not authorize the step')
     if postcondition.get('effect_class') != card_payload.get('effect_class'):
         raise LinkedInUnit1Error('postcondition effect class does not match the action card')
+    if phase == 'thread_scroll' and (
+        card_payload.get('scroll_target') != 'selected_thread_opener'
+        or card_payload.get('scroll_target_source') != 'self'
+        or card_payload.get('scroll_alignment') != 'top_edge'
+        or postcondition.get('phase') != phase
+        or isinstance(card_payload.get('min_downward_clearance_px'), bool)
+        or not isinstance(card_payload.get('min_downward_clearance_px'), int)
+        or card_payload.get('min_downward_clearance_px', -1) < 0
+        or any(
+            postcondition.get(field) != card_payload.get(field)
+            for field in (
+                'scroll_alignment',
+                'scroll_target',
+                'scroll_target_source',
+            )
+        )
+        or postcondition.get('min_downward_clearance_px')
+        != card_payload.get('min_downward_clearance_px')
+        or postcondition.get('activity_exact') is not True
+        or postcondition.get('body_sha256_exact') is not True
+        or postcondition.get('scroll_context_intersects_viewport') is not True
+        or postcondition.get('scroll_target_exact') is not True
+        or postcondition.get('live_extent_in_viewport') is not True
+        or isinstance(postcondition.get('available_below_px'), bool)
+        or not isinstance(postcondition.get('available_below_px'), int)
+        or postcondition.get('available_below_px', -1)
+        < card_payload.get('min_downward_clearance_px', 0)
+        or postcondition.get(
+            'selected_post_root_intersects_viewport'
+        ) is not True
+        or postcondition.get(
+            'thread_opener_live_extent_in_viewport'
+        ) is not True
+        or isinstance(postcondition.get('thread_opener_available_below_px'), bool)
+        or not isinstance(
+            postcondition.get('thread_opener_available_below_px'),
+            int,
+        )
+        or postcondition.get('thread_opener_available_below_px', -1)
+        < card_payload.get('min_downward_clearance_px', 0)
+        or postcondition.get('available_below_px')
+        != postcondition.get('thread_opener_available_below_px')
+    ):
+        raise LinkedInUnit1Error(
+            'thread scroll did not prove selected identity, root intersection, '
+            'opener containment, and downward clearance'
+        )
     if terminal:
         submit_match = _SUBMIT.fullmatch(element)
         expected_postcondition_keys = {

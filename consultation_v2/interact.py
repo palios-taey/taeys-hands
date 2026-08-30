@@ -83,6 +83,15 @@ def atspi_element_viewport_state(element: Dict) -> Dict[str, object]:
         'live_extent_resolved': False,
         'display_geometry_resolved': False,
         'live_extent_in_viewport': False,
+        'intersects_viewport': False,
+        'x': 0,
+        'y': 0,
+        'width': 0,
+        'height': 0,
+        'display_width': 0,
+        'display_height': 0,
+        'available_below_px': 0,
+        'error': None,
     }
     obj = element.get('atspi_obj')
     if not obj or is_defunct(element):
@@ -104,16 +113,49 @@ def atspi_element_viewport_state(element: Dict) -> Dict[str, object]:
             return evidence
         evidence['live_extent_resolved'] = True
         display_width, display_height = inp.display_geometry()
+        display_width = int(display_width)
+        display_height = int(display_height)
+        evidence['display_width'] = display_width
+        evidence['display_height'] = display_height
+        if display_width <= 0 or display_height <= 0:
+            evidence['error'] = 'invalid_display_geometry'
+            return evidence
         evidence['display_geometry_resolved'] = True
-        if (
-            rect.x < 0
-            or rect.y < 0
-            or rect.x + rect.width > display_width
-            or rect.y + rect.height > display_height
-        ):
+        evidence.update({
+            'x': int(rect.x),
+            'y': int(rect.y),
+            'width': int(rect.width),
+            'height': int(rect.height),
+            'display_width': display_width,
+            'display_height': display_height,
+            'available_below_px': max(
+                0,
+                int(display_height - (rect.y + rect.height)),
+            ),
+            'intersects_viewport': bool(
+                rect.width > 0
+                and rect.height > 0
+                and display_width > 0
+                and display_height > 0
+                and rect.x < display_width
+                and rect.x + rect.width > 0
+                and rect.y < display_height
+                and rect.y + rect.height > 0
+            ),
+            'live_extent_in_viewport': bool(
+                rect.width > 0
+                and rect.height > 0
+                and display_width > 0
+                and display_height > 0
+                and rect.x >= 0
+                and rect.y >= 0
+                and rect.x + rect.width <= display_width
+                and rect.y + rect.height <= display_height
+            ),
+        })
+        if evidence['live_extent_in_viewport'] is not True:
             evidence['error'] = 'live_extent_outside_display'
             return evidence
-        evidence['live_extent_in_viewport'] = True
         return evidence
     except Exception as exc:
         evidence['error'] = f'viewport_state_failed:{type(exc).__name__}'

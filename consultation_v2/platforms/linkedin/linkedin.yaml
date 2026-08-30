@@ -405,11 +405,15 @@ workflow:
               - mapped_pointer_activate
           postcondition: exact_selected_thread_growth
           scroll_into_view:
+            phase: thread_expand_scroll
             effect_class: viewport
             primitives:
               - scroll_into_view
             allowed_now:
               - scroll_into_view
+            scroll_target: selected_thread_expander
+            scroll_target_source: self
+            scroll_alignment: anywhere
             postcondition: exact_selected_thread_expander_in_viewport
             observation_barrier:
               refresh_policy: invalidate_reacquire
@@ -423,11 +427,16 @@ workflow:
           allowed_now:
             - mapped_pointer_activate
         scroll_into_view:
+          phase: thread_scroll
           effect_class: viewport
           primitives:
             - scroll_into_view
           allowed_now:
             - scroll_into_view
+          scroll_target: selected_thread_opener
+          scroll_target_source: self
+          scroll_alignment: top_edge
+          min_downward_clearance_px: 500
           postcondition: exact_selected_thread_opener_in_viewport
           observation_barrier:
             refresh_policy: invalidate_reacquire

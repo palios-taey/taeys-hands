@@ -7,6 +7,8 @@ from pathlib import Path
 import sys
 import types
 
+from jsonschema import Draft202012Validator
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(REPO_ROOT))
@@ -111,6 +113,33 @@ def barrier(card: dict, private: dict) -> dict:
             'comment_text_chars': len(private['text']),
             'observed_url': 'https://www.linkedin.com/feed/update/example/',
         })
+    if card['method'] == 'scroll_into_view':
+        postcondition.update({
+            'scroll_target': card['scroll_target'],
+            'scroll_target_source': card['scroll_target_source'],
+            'scroll_alignment': card['scroll_alignment'],
+            'phase': card['phase'],
+            'scroll_context_intersects_viewport': True,
+            'scroll_target_exact': True,
+            'live_extent_in_viewport': True,
+            'available_below_px': card.get(
+                'min_downward_clearance_px',
+                0,
+            ),
+        })
+    if card['phase'] == 'thread_scroll':
+        postcondition.update({
+            'min_downward_clearance_px': card[
+                'min_downward_clearance_px'
+            ],
+            'activity_exact': True,
+            'body_sha256_exact': True,
+            'selected_post_root_intersects_viewport': True,
+            'thread_opener_live_extent_in_viewport': True,
+            'thread_opener_available_below_px': card[
+                'min_downward_clearance_px'
+            ],
+        })
     return {
         'result': 'PASS',
         'next_mutation_authorized': not terminal,
@@ -185,10 +214,26 @@ def main() -> int:
         (REPO_ROOT / 'consultation_v2/platforms/linkedin/unit1-action-card.schema.json')
         .read_text(encoding='utf-8')
     )
+    Draft202012Validator.check_schema(card_schema)
+    card_validator = Draft202012Validator(card_schema)
     require(
         set(card_schema['required']) == set(navigation),
         'action card schema drifted from the compiler output',
     )
+    require(
+        not list(card_validator.iter_errors(navigation)),
+        'valid non-scroll action card failed its public schema',
+    )
+    for field, value in (
+        ('scroll_target', 'selected_thread_opener'),
+        ('scroll_target_source', 'self'),
+        ('scroll_alignment', 'top_edge'),
+        ('min_downward_clearance_px', 500),
+    ):
+        require(
+            list(card_validator.iter_errors({**navigation, field: value})),
+            f'non-scroll action card accepted forbidden {field}',
+        )
     receipts.append(accept_unit1_step(navigation, barrier(navigation, private), None, private))
 
     candidate_card = compile_unit1_step(stream_snapshot, REVISION, private, receipts)
@@ -213,17 +258,77 @@ def main() -> int:
             'selected_post_body_sha256': BODY_SHA256,
         },
     )
+    thread_opener_object = object()
     thread = element(
         thread_key,
         states=['enabled', 'focusable'],
         raw={
+            'atspi_obj': thread_opener_object,
+            'scroll_target_atspi_obj': thread_opener_object,
+            'selected_post_root_atspi_obj': object(),
+            'selected_post_body_atspi_obj': object(),
+            'selected_post_body_showing': True,
             'selected_activity': ACTIVITY,
             'selected_post_body_sha256': BODY_SHA256,
         },
     )
     original_viewport = manual._selected_thread_viewport_state
     manual._selected_thread_viewport_state = lambda _raw: {
+        'error': 'live_extent_outside_display',
+    }
+    try:
+        thread_scroll_card = compile_unit1_step(
+            snapshot({selected_post_key: [selected], thread_key: [thread]}),
+            REVISION,
+            private,
+            receipts,
+        )
+    finally:
+        manual._selected_thread_viewport_state = original_viewport
+    require(
+        thread_scroll_card['phase'] == 'thread_scroll'
+        and thread_scroll_card['min_downward_clearance_px'] == 500
+        and not list(card_validator.iter_errors(thread_scroll_card)),
+        'valid selected-root scroll card failed its public schema',
+    )
+    for field in (
+        'scroll_target',
+        'scroll_target_source',
+        'scroll_alignment',
+        'min_downward_clearance_px',
+    ):
+        missing_scroll_field = dict(thread_scroll_card)
+        missing_scroll_field.pop(field)
+        require(
+            list(card_validator.iter_errors(missing_scroll_field)),
+            f'scroll action card accepted missing {field}',
+        )
+    thread_scroll_barrier = barrier(thread_scroll_card, private)
+    accept_unit1_step(
+        thread_scroll_card,
+        thread_scroll_barrier,
+        receipts[-1]['receipt_sha256'],
+        private,
+    )
+    divergent_scroll_barrier = json.loads(json.dumps(thread_scroll_barrier))
+    divergent_scroll_barrier['postcondition_receipt'][
+        'available_below_px'
+    ] = 501
+    try:
+        accept_unit1_step(
+            thread_scroll_card,
+            divergent_scroll_barrier,
+            receipts[-1]['receipt_sha256'],
+            private,
+        )
+    except LinkedInUnit1Error:
+        pass
+    else:
+        raise AssertionError('thread scroll accepted divergent clearance evidence')
+    manual._selected_thread_viewport_state = lambda _raw: {
+        'intersects_viewport': True,
         'live_extent_in_viewport': True,
+        'available_below_px': 500,
     }
     try:
         thread_card = compile_unit1_step(
@@ -238,10 +343,16 @@ def main() -> int:
     zero_thread_key = (
         f'{manual.SELECTED_THREAD_ZERO_OPEN_PREFIX}{ACTIVITY}_body_{BODY_SHA256}'
     )
+    zero_thread_opener_object = object()
     zero_thread = element(
         zero_thread_key,
         states=['showing', 'enabled', 'focusable'],
         raw={
+            'atspi_obj': zero_thread_opener_object,
+            'scroll_target_atspi_obj': zero_thread_opener_object,
+            'selected_post_root_atspi_obj': object(),
+            'selected_post_body_atspi_obj': object(),
+            'selected_post_body_showing': True,
             'selected_activity': ACTIVITY,
             'selected_post_body_sha256': BODY_SHA256,
             'selected_thread_expected_count': 0,
@@ -249,7 +360,9 @@ def main() -> int:
         },
     )
     manual._selected_thread_viewport_state = lambda _raw: {
+        'intersects_viewport': True,
         'live_extent_in_viewport': True,
+        'available_below_px': 500,
     }
     try:
         zero_thread_card = compile_unit1_step(
