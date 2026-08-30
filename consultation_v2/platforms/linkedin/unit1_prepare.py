@@ -1720,7 +1720,7 @@ def accept_preparation_step(
             'preparation expander scroll gained opener-only clearance authority'
         )
     if phase == 'thread_scroll' and (
-        card.get('scroll_target') != 'selected_post_root'
+        card.get('scroll_target') != 'selected_post_body'
         or card.get('scroll_target_source') != 'mapped_context'
         or card.get('scroll_alignment') != 'top_edge'
         or isinstance(card.get('min_downward_clearance_px'), bool)

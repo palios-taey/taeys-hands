@@ -656,7 +656,7 @@ def accept_unit1_step(
     if postcondition.get('effect_class') != card_payload.get('effect_class'):
         raise LinkedInUnit1Error('postcondition effect class does not match the action card')
     if phase == 'thread_scroll' and (
-        card_payload.get('scroll_target') != 'selected_post_root'
+        card_payload.get('scroll_target') != 'selected_post_body'
         or card_payload.get('scroll_target_source') != 'mapped_context'
         or card_payload.get('scroll_alignment') != 'top_edge'
         or postcondition.get('phase') != phase

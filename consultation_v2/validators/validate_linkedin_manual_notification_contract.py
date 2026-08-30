@@ -110,7 +110,7 @@ def main() -> int:
             'effect_class': 'viewport',
             'primitives': ['scroll_into_view'],
             'allowed_now': ['scroll_into_view'],
-            'scroll_target': 'selected_post_root',
+            'scroll_target': 'selected_post_body',
             'scroll_target_source': 'mapped_context',
             'scroll_alignment': 'top_edge',
             'min_downward_clearance_px': 0,
