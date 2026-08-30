@@ -1697,6 +1697,11 @@ def accept_preparation_step(
         )
     if phase in {'thread_scroll', 'thread_expand_scroll'} and (
         postcondition.get('scroll_context_intersects_viewport') is not True
+        or postcondition.get('viewport_source') != 'linkedin_document'
+        or postcondition.get('document_extent_resolved') is not True
+        or postcondition.get(
+            'selected_post_root_intersects_viewport'
+        ) is not True
         or postcondition.get('scroll_target_exact') is not True
         or postcondition.get('live_extent_in_viewport') is not True
         or isinstance(postcondition.get('available_below_px'), bool)

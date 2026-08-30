@@ -113,7 +113,7 @@ def main() -> int:
             'scroll_target': 'selected_post_root',
             'scroll_target_source': 'mapped_context',
             'scroll_alignment': 'top_edge',
-            'min_downward_clearance_px': 500,
+            'min_downward_clearance_px': 0,
             'postcondition': 'exact_selected_thread_opener_in_viewport',
             'observation_barrier': {
                 'refresh_policy': 'invalidate_reacquire',
@@ -171,10 +171,10 @@ def main() -> int:
         '_SELECTED_THREAD_OPEN_KEY.fullmatch(element_key)',
         '_SELECTED_THREAD_ZERO_OPEN_KEY.fullmatch(',
         '_selected_thread_open_geometry(selected_context)',
+        "'linkedin_document'",
+        "'live_extent_outside_document'",
         "root_viewport.get('intersects_viewport') is True",
         "opener_viewport.get('live_extent_in_viewport') is True",
-        "root_viewport.get('error') == 'live_extent_outside_display'",
-        "opener_viewport.get('error') == 'live_extent_outside_display'",
         "'scroll_target'",
         "'phase'",
         "'scroll_target_source'",
@@ -255,6 +255,24 @@ def main() -> int:
             required in viewport_source,
             f'generic viewport evidence missing {required!r}',
         )
+    linkedin_viewport_source = _function_source(
+        MANUAL_PATH,
+        '_selected_thread_viewport_state',
+    )
+    for required in (
+        "'viewport_source': 'linkedin_document'",
+        "'document_extent_resolved'",
+        "'display_available_below_px'",
+        "'live_extent_outside_document'",
+        'x >= document_x',
+        'y >= document_y',
+        'x + width <= document_right',
+        'y + height <= document_bottom',
+    ):
+        _require(
+            required in linkedin_viewport_source,
+            f'LinkedIn document viewport evidence missing {required!r}',
+        )
     click_source = _function_source(INPUT_PATH, 'click_at')
     _require(
         'display_geometry(timeout=timeout)' in click_source
@@ -273,6 +291,8 @@ def main() -> int:
         "declared.get('method') == 'mapped_pointer_activate'",
         "'live_extent_in_viewport': True",
         "'scroll_context_intersects_viewport': True",
+        "'viewport_source': 'linkedin_document'",
+        "'document_extent_resolved': True",
         "'available_below_px': int(",
         "root_viewport.get('intersects_viewport') is True",
         'selected_post_identity_exact',

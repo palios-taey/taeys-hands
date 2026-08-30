@@ -436,7 +436,7 @@ workflow:
           scroll_target: selected_post_root
           scroll_target_source: mapped_context
           scroll_alignment: top_edge
-          min_downward_clearance_px: 500
+          min_downward_clearance_px: 0
           postcondition: exact_selected_thread_opener_in_viewport
           observation_barrier:
             refresh_policy: invalidate_reacquire

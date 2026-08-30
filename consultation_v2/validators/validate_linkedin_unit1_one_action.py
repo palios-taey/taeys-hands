@@ -120,6 +120,9 @@ def barrier(card: dict, private: dict) -> dict:
             'scroll_alignment': card['scroll_alignment'],
             'phase': card['phase'],
             'scroll_context_intersects_viewport': True,
+            'viewport_source': 'linkedin_document',
+            'document_extent_resolved': True,
+            'selected_post_root_intersects_viewport': True,
             'scroll_target_exact': True,
             'live_extent_in_viewport': True,
             'available_below_px': card.get(
@@ -228,7 +231,7 @@ def main() -> int:
         ('scroll_target', 'selected_post_root'),
         ('scroll_target_source', 'mapped_context'),
         ('scroll_alignment', 'top_edge'),
-        ('min_downward_clearance_px', 500),
+        ('min_downward_clearance_px', 0),
     ):
         require(
             list(card_validator.iter_errors({**navigation, field: value})),
@@ -259,23 +262,53 @@ def main() -> int:
         },
     )
     thread_opener_object = object()
+    selected_post_root_object = object()
+    selected_post_body_object = object()
+    selected_post_document_object = object()
     thread = element(
         thread_key,
         states=['enabled', 'focusable'],
         raw={
             'atspi_obj': thread_opener_object,
-            'scroll_target_atspi_obj': thread_opener_object,
-            'selected_post_root_atspi_obj': object(),
-            'selected_post_body_atspi_obj': object(),
+            'scroll_target_atspi_obj': selected_post_root_object,
+            'selected_post_document_atspi_obj': selected_post_document_object,
+            'selected_post_root_atspi_obj': selected_post_root_object,
+            'selected_post_body_atspi_obj': selected_post_body_object,
             'selected_post_body_showing': True,
             'selected_activity': ACTIVITY,
             'selected_post_body_sha256': BODY_SHA256,
         },
     )
+    from consultation_v2 import interact
+
     original_viewport = manual._selected_thread_viewport_state
-    manual._selected_thread_viewport_state = lambda _raw: {
-        'error': 'live_extent_outside_display',
+    original_display_viewport = interact.atspi_element_viewport_state
+    rects = {
+        thread_opener_object: (1100, 1017, 75, 34),
+        selected_post_root_object: (636, 360, 552, 691),
+        selected_post_body_object: (668, 500, 500, 500),
+        selected_post_document_object: (320, 139, 1280, 887),
     }
+
+    def display_viewport(raw: dict) -> dict:
+        x, y, width, height = rects[raw['atspi_obj']]
+        return {
+            'atspi_object_bound': True,
+            'live_extent_resolved': True,
+            'display_geometry_resolved': True,
+            'live_extent_in_viewport': True,
+            'intersects_viewport': True,
+            'x': x,
+            'y': y,
+            'width': width,
+            'height': height,
+            'display_width': 1920,
+            'display_height': 1080,
+            'available_below_px': 1080 - (y + height),
+            'error': None,
+        }
+
+    interact.atspi_element_viewport_state = display_viewport
     try:
         thread_scroll_card = compile_unit1_step(
             snapshot({selected_post_key: [selected], thread_key: [thread]}),
@@ -284,12 +317,12 @@ def main() -> int:
             receipts,
         )
     finally:
-        manual._selected_thread_viewport_state = original_viewport
+        interact.atspi_element_viewport_state = original_display_viewport
     require(
         thread_scroll_card['phase'] == 'thread_scroll'
-        and thread_scroll_card['min_downward_clearance_px'] == 500
+        and thread_scroll_card['min_downward_clearance_px'] == 0
         and not list(card_validator.iter_errors(thread_scroll_card)),
-        'valid selected-root scroll card failed its public schema',
+        'document-clipped opener did not select the exact scroll fallback',
     )
     for field in (
         'scroll_target',
@@ -313,7 +346,7 @@ def main() -> int:
     divergent_scroll_barrier = json.loads(json.dumps(thread_scroll_barrier))
     divergent_scroll_barrier['postcondition_receipt'][
         'available_below_px'
-    ] = 501
+    ] = 1
     try:
         accept_unit1_step(
             thread_scroll_card,
@@ -326,6 +359,7 @@ def main() -> int:
     else:
         raise AssertionError('thread scroll accepted divergent clearance evidence')
     manual._selected_thread_viewport_state = lambda _raw: {
+        'viewport_source': 'linkedin_document',
         'intersects_viewport': True,
         'live_extent_in_viewport': True,
         'available_below_px': 199,
@@ -360,6 +394,7 @@ def main() -> int:
         },
     )
     manual._selected_thread_viewport_state = lambda _raw: {
+        'viewport_source': 'linkedin_document',
         'intersects_viewport': True,
         'live_extent_in_viewport': True,
         'available_below_px': 199,
