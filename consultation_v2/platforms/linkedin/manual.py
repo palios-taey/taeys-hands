@@ -366,7 +366,7 @@ def _manual_comment_contract() -> dict[str, Any]:
             'element_key_prefix': SELECTED_POST_EDITOR_PREFIX,
             'name': 'Text editor for creating comment',
             'role': 'entry',
-            'relative_depth': 5,
+            'relative_depth': 6,
             'states_include': ['editable', 'focusable', 'visible', 'sensitive'],
             'ready_states_include': ['showing'],
             'max_text_chars': 1800,

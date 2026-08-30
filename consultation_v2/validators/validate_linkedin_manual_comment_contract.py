@@ -28,6 +28,10 @@ def main() -> int:
          .get('manual_comment_composition') or {})
     )
     editor = contract.get('editor') or {}
+    _require(
+        editor.get('relative_depth') == 6,
+        'LinkedIn comment editor depth drifted from the observed selected post',
+    )
     activity = '1234567890'
     body_sha256 = hashlib.sha256(b'public post body').hexdigest()
     element_key = (
