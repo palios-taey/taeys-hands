@@ -24,7 +24,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install gate dependencies
-        run: pip install pyyaml
+        run: pip install pyyaml jsonschema
 
       - name: Run consultation_v2 integrity gate
         run: python3 consultation_v2/validators/lint_no_yaml_silent_fallbacks.py --all
