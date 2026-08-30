@@ -328,7 +328,7 @@ def main() -> int:
     manual._selected_thread_viewport_state = lambda _raw: {
         'intersects_viewport': True,
         'live_extent_in_viewport': True,
-        'available_below_px': 500,
+        'available_below_px': 199,
     }
     try:
         thread_card = compile_unit1_step(
@@ -362,7 +362,7 @@ def main() -> int:
     manual._selected_thread_viewport_state = lambda _raw: {
         'intersects_viewport': True,
         'live_extent_in_viewport': True,
-        'available_below_px': 500,
+        'available_below_px': 199,
     }
     try:
         zero_thread_card = compile_unit1_step(

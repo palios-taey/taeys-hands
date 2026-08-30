@@ -2399,13 +2399,9 @@ def element_operation(
         scroll_action = _manual_notification_contract()[
             'selected_thread'
         ]['scroll_into_view']
-        minimum_clearance = scroll_action['min_downward_clearance_px']
         if (
             root_viewport.get('intersects_viewport') is True
             and opener_viewport.get('live_extent_in_viewport') is True
-            and isinstance(opener_viewport.get('available_below_px'), int)
-            and not isinstance(opener_viewport.get('available_below_px'), bool)
-            and opener_viewport['available_below_px'] >= minimum_clearance
         ):
             declared_action = _manual_notification_contract()[
                 'selected_thread'
@@ -2415,18 +2411,13 @@ def element_operation(
             or opener_viewport.get('error') == 'live_extent_outside_display'
             or root_viewport.get('intersects_viewport') is not True
             or opener_viewport.get('live_extent_in_viewport') is not True
-            or not isinstance(opener_viewport.get('available_below_px'), int)
-            or isinstance(opener_viewport.get('available_below_px'), bool)
-            or opener_viewport.get('available_below_px', 0) < minimum_clearance
         ):
             declared_action = scroll_action
         else:
             raise ValueError(
                 'LinkedIn selected-thread root/opener viewport state is unavailable: '
                 f"root={root_viewport.get('error') or 'unknown'}; "
-                f"opener={opener_viewport.get('error') or 'unknown'}; "
-                'opener_available_below_px='
-                f"{opener_viewport.get('available_below_px')}"
+                f"opener={opener_viewport.get('error') or 'unknown'}"
             )
     elif selected_thread_expand_match is not None:
         viewport = _selected_thread_viewport_state(dict(context or {}))
