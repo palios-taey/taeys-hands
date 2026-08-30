@@ -62,6 +62,8 @@ from consultation_v2.platforms.linkedin.unit1_prepare import (  # noqa: E402
     accept_preparation_step,
     compile_preparation_step,
     extract_selected_source,
+    preparation_compile_observation_contract,
+    preparation_compiled_authority_sha256,
     preparation_transaction_sha256,
     project_notification_inventory as project_notification_inventory_with_authority,
 )
@@ -98,6 +100,14 @@ def canonical_sha256(value) -> str:
         sort_keys=True,
         separators=(',', ':'),
     ).encode('utf-8')).hexdigest()
+
+
+def resign_preparation_result(value: dict) -> dict:
+    result = json.loads(json.dumps(value))
+    result['input_sha256'] = canonical_sha256(result['input'])
+    result.pop('result_sha256', None)
+    result['result_sha256'] = canonical_sha256(result)
+    return result
 
 
 def exclusion_decision(readiness: dict, transaction_sha256: str) -> dict:
@@ -1242,6 +1252,37 @@ def main() -> int:
         'preparation did not begin from Notifications',
     )
     require(
+        preparation_compile_observation_contract() == {
+            'refresh_policy': 'invalidate_reacquire',
+            'stable_cycles': 2,
+            'interval_ms': 200,
+            'timeout_ms': 180000,
+        },
+        'preparation compile observation contract drifted',
+    )
+    navigation_authority = preparation_compiled_authority_sha256(navigation)
+    require(
+        preparation_compiled_authority_sha256({
+            **navigation,
+            'snapshot_revision': REVISION_B,
+        }) == navigation_authority,
+        'action-card semantic authority included observation revision',
+    )
+    changed_navigation = {
+        **navigation,
+        'element': 'linkedin_notifications_navigation_changed',
+    }
+    changed_navigation['card_sha256'] = canonical_sha256({
+        key: value
+        for key, value in changed_navigation.items()
+        if key not in {'card_sha256', 'snapshot_revision'}
+    })
+    require(
+        preparation_compiled_authority_sha256(changed_navigation)
+        != navigation_authority,
+        'action-card semantic authority omitted action identity',
+    )
+    require(
         schema_required('unit1-preparation-action-card.schema.json')
         == set(navigation),
         'preparation action-card schema drifted',
@@ -1743,6 +1784,36 @@ def main() -> int:
         'complete stream did not produce private selection input',
     )
     require_decision_input(ready_selection)
+    ready_selection_authority = preparation_compiled_authority_sha256(
+        ready_selection
+    )
+    next_selection_observation = json.loads(json.dumps(ready_selection))
+    next_selection_observation['snapshot_revision'] = REVISION_B
+    next_selection_observation['input']['notification_inventory'][
+        'snapshot_revision'
+    ] = REVISION_B
+    for row in next_selection_observation['input']['notification_inventory']['rows']:
+        row['snapshot_revision'] = REVISION_B
+    next_selection_observation = resign_preparation_result(
+        next_selection_observation
+    )
+    require(
+        preparation_compiled_authority_sha256(next_selection_observation)
+        == ready_selection_authority,
+        'private-selection semantic authority included observation revision',
+    )
+    changed_selection_observation = json.loads(json.dumps(ready_selection))
+    changed_selection_observation['input']['decision_input'][
+        'continuation_available'
+    ] = True
+    changed_selection_observation = resign_preparation_result(
+        changed_selection_observation
+    )
+    require(
+        preparation_compiled_authority_sha256(changed_selection_observation)
+        != ready_selection_authority,
+        'private-selection semantic authority omitted decision semantics',
+    )
     require(
         ready_selection['input']['continuation_available'] is False,
         'complete stream incorrectly exposed continuation authority',
@@ -2349,6 +2420,37 @@ def main() -> int:
     require(
         ready_draft['state'] == 'ready_for_private_draft',
         'exact selected source did not produce private draft input',
+    )
+    ready_draft_authority = preparation_compiled_authority_sha256(ready_draft)
+    next_draft_observation = json.loads(json.dumps(ready_draft))
+    next_draft_observation['snapshot_revision'] = REVISION_B
+    next_draft_source = next_draft_observation['input']['source']
+    next_draft_source['snapshot_revision'] = REVISION_B
+    next_draft_source.pop('source_sha256')
+    next_draft_source['source_sha256'] = canonical_sha256(next_draft_source)
+    next_draft_observation = resign_preparation_result(next_draft_observation)
+    require(
+        preparation_compiled_authority_sha256(next_draft_observation)
+        == ready_draft_authority,
+        'private-draft semantic authority included observation revision',
+    )
+    changed_draft_observation = json.loads(json.dumps(ready_draft))
+    changed_draft_source = changed_draft_observation['input']['source']
+    changed_draft_source['post']['body'] += ' Changed.'
+    changed_draft_source['post']['body_sha256'] = hashlib.sha256(
+        changed_draft_source['post']['body'].encode('utf-8')
+    ).hexdigest()
+    changed_draft_source.pop('source_sha256')
+    changed_draft_source['source_sha256'] = canonical_sha256(
+        changed_draft_source
+    )
+    changed_draft_observation = resign_preparation_result(
+        changed_draft_observation
+    )
+    require(
+        preparation_compiled_authority_sha256(changed_draft_observation)
+        != ready_draft_authority,
+        'private-draft semantic authority omitted selected source semantics',
     )
     source = ready_draft['input']['source']
     require(
