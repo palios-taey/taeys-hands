@@ -3463,6 +3463,29 @@ def _invalidate_linkedin_firefox_subtree() -> str:
     return 'recursive_success'
 
 
+def _candidate_postcondition_is_settling(
+    snapshot: Snapshot,
+    expected_activity: str,
+    verification_error: str | None,
+) -> bool:
+    if (
+        _notification_activity(
+            str(snapshot.url or ''),
+            _manual_notification_contract(),
+        )
+        != expected_activity
+    ):
+        return False
+    return verification_error in {
+        'LinkedIn notification lacks an exact structural tree path',
+        'LinkedIn notification structural tree path is empty',
+        (
+            'LinkedIn notification candidate postcondition failed: '
+            'fresh surface does not expose one exact selected activity/body'
+        ),
+    }
+
+
 def stable_post_action_observation(
     element_key: str,
     operation: str,
@@ -3639,7 +3662,19 @@ def stable_post_action_observation(
             exact_receipt = None
             verification_error = str(exc)
         exact = exact_receipt is not None
-        stable_cycles_observed = stable_cycles_observed + 1 if exact else 0
+        settling_transient = bool(
+            candidate_match is not None
+            and not exact
+            and _candidate_postcondition_is_settling(
+                snapshot,
+                candidate_match.group('activity'),
+                verification_error,
+            )
+        )
+        if exact:
+            stable_cycles_observed += 1
+        elif not settling_transient:
+            stable_cycles_observed = 0
         sample = {
             'sample': len(samples) + 1,
             'elapsed_ms': round((time.monotonic() - started_at) * 1000),
@@ -3655,6 +3690,9 @@ def stable_post_action_observation(
             ),
             'observed_url': snapshot.url,
             'firefox_cache_invalidation': cache_invalidation,
+            'settling_transient': settling_transient,
+            'counted_toward_stability': not settling_transient,
+            'stable_cycles_observed_after_sample': stable_cycles_observed,
         }
         if continuation_measurement is not None:
             sample.update(continuation_measurement)
