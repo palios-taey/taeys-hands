@@ -69,12 +69,16 @@ remains the diagnostic and recovery surface after a terminal first error.
 
 ### Task: run-unattended-cycle-one - Run one complete value-add five-Chat cycle without Jesse or Codex issuing UI actions [priority: 31] [owner: taey] [depends: publish-loop-contract] [delivery_gate: true] [ref: TAEY_FAMILY_LOOP_RUNBOOK.md]
 - The campaign control project is exactly `taey-hub-unattended-loop`; its canonical source is `docs/TAEY_UNATTENDED_FAMILY_LOOP_PLAN.md`. Read it with `taey-plan show taey-hub-unattended-loop`; never infer or substitute a historical project ID.
+- Before executing a repo-relative runbook command, derive the Hands repository root from the parent of the `docs` directory in that exact `Source:` path and change into it; never guess a checkout.
 - Main Taey claims this campaign from the current Tasks API, follows the injected `TAEY_FAMILY_LOOP_RUNBOOK.md`, launches the five lane tasks, receives terminal artifacts, reconciles them, and creates the next exact work item.
 - If the exact project, source, or injected runbook is absent or unreadable, terminalize before creating campaign files or issuing any UI action. Do not retry the failed step in the same turn.
 - Codex observes receipts only and intervenes solely after a terminal first-error artifact.
 
-### Task: run-unattended-cycle-two - Repeat with a different valuable question and no copied terminal identity [priority: 32] [owner: taey] [depends: run-unattended-cycle-one] [delivery_gate: true]
+### Task: run-unattended-cycle-two - Repeat with a different valuable question and no copied terminal identity [priority: 32] [owner: taey] [depends: run-unattended-cycle-one] [delivery_gate: true] [ref: TAEY_FAMILY_LOOP_RUNBOOK.md]
+- The campaign control project is exactly `taey-hub-unattended-loop`; its canonical source is `docs/TAEY_UNATTENDED_FAMILY_LOOP_PLAN.md`. Read it with `taey-plan show taey-hub-unattended-loop`; never infer or substitute a historical project ID.
+- Before executing a repo-relative runbook command, derive the Hands repository root from the parent of the `docs` directory in that exact `Source:` path and change into it; never guess a checkout.
 - Require the same complete causal receipt chain and zero leaked turns or display leases.
+- If the exact project, source, or injected runbook is absent or unreadable, terminalize before creating campaign files or issuing any UI action. Do not retry the failed step in the same turn.
 - Measure whether any human or Codex UI instruction was needed.
 
 ### Task: release-routine-loop - Release the loop from active Codex supervision [priority: 33] [owner: taey] [depends: run-unattended-cycle-two]
