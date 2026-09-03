@@ -4,6 +4,18 @@ Status: canonical pilot runbook. The deterministic five-lane transaction is prod
 Codex receipt supervision still requires the two unattended cycles in
 `docs/TAEY_UNATTENDED_FAMILY_LOOP_PLAN.md`.
 
+## Campaign entry contract
+
+- The control project is exactly `taey-hub-unattended-loop`. Resolve it with
+  `taey-plan show taey-hub-unattended-loop`; never infer or substitute a historical project ID.
+- Its canonical `Source:` is exactly `docs/TAEY_UNATTENDED_FAMILY_LOOP_PLAN.md`. Derive the Hands repository
+  root from the parent of the `docs` directory in that exact Source and change into it before any
+  repository-relative command; never guess a checkout.
+- Before creating campaign files or issuing any UI action, terminalize if the exact project, Source, or full
+  sibling `TAEY_FAMILY_LOOP_RUNBOOK.md` is absent or unreadable. Do not retry that failed step in the same turn.
+- Each cycle requires the complete causal receipt chain, zero leaked turns or display leases, and a record of
+  whether Jesse or Codex supplied any UI instruction.
+
 This runbook controls the campaign loop. It does not restate any platform's UI steps. Those remain owned by
 the selected platform YAML, driver, monitor, and extractor.
 
