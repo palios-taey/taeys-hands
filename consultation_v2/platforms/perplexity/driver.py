@@ -1152,7 +1152,16 @@ class _PerplexityInlineBase:
             return None
         open_method = str(operate.get('open_method') or '').strip().lower()
         open_key = str(operate.get('open_key') or '').strip()
-        if open_method != 'focus_and_key_open' or not open_key:
+        if open_method == 'mapped_pointer_activate' and not open_key:
+            open_evidence = self.runtime.mapped_pointer_activate(trigger)
+            time.sleep(self._selection_settle_seconds())
+        elif open_method == 'focus_and_key_open' and open_key:
+            open_evidence = self.runtime.focus_and_key_open(
+                trigger,
+                key=open_key,
+                settle=self._selection_settle_seconds(),
+            )
+        else:
             result.add_step(
                 'select',
                 False,
@@ -1163,11 +1172,6 @@ class _PerplexityInlineBase:
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        open_evidence = self.runtime.focus_and_key_open(
-            trigger,
-            key=open_key,
-            settle=self._selection_settle_seconds(),
-        )
         if not bool(open_evidence.get('ok')):
             result.add_step(
                 'select',
