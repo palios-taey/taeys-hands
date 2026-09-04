@@ -509,8 +509,7 @@ workflow:
         operate:
           trigger: model_selector
           scope: menu_snapshot
-          open_method: focus_and_key_open
-          open_key: space
+          open_method: mapped_pointer_activate
         options:
           best:
             element: model_best
@@ -525,8 +524,7 @@ workflow:
         operate:
           trigger: search_mode_trigger
           scope: menu_snapshot
-          open_method: focus_and_key_open
-          open_key: space
+          open_method: mapped_pointer_activate
         options:
           deep_research:
             element: deep_research

@@ -929,12 +929,12 @@ class _PerplexityInlineBase:
             and not active_trigger_names
             and self._selection_element_matches_active_recognition(target, active_state)
         ):
-            closed_snapshot, closed = self._selection_close_active_selection_menu()
+            closed_snapshot, closed = self._selection_close_active_selection_menu(target)
             if not closed:
                 result.add_step(
                     'select',
                     False,
-                    f'{self.platform} {menu}={option} active but menu did not close after Escape',
+                    f'{self.platform} {menu}={option} active but selected item did not close menu',
                     menu=menu,
                     option=option,
                     active_state=active_state,
@@ -976,12 +976,12 @@ class _PerplexityInlineBase:
             and not active_trigger_names
             and self._selection_element_matches_active_recognition(target, active_state)
         ):
-            closed_snapshot, closed = self._selection_close_active_selection_menu()
+            closed_snapshot, closed = self._selection_close_active_selection_menu(target)
             if not closed:
                 result.add_step(
                     'select',
                     False,
-                    f'{self.platform} {menu}={option} active after settle but menu did not close after Escape',
+                    f'{self.platform} {menu}={option} active after settle but selected item did not close menu',
                     menu=menu,
                     option=option,
                     active_state=active_state,
@@ -1152,7 +1152,15 @@ class _PerplexityInlineBase:
             return None
         open_method = str(operate.get('open_method') or '').strip().lower()
         open_key = str(operate.get('open_key') or '').strip()
-        if open_method != 'focus_and_key_open' or not open_key:
+        if open_method == 'mapped_pointer_activate' and not open_key:
+            open_evidence = self.runtime.mapped_pointer_activate(trigger)
+        elif open_method == 'focus_and_key_open' and open_key:
+            open_evidence = self.runtime.focus_and_key_open(
+                trigger,
+                key=open_key,
+                settle=self._selection_settle_seconds(),
+            )
+        else:
             result.add_step(
                 'select',
                 False,
@@ -1163,11 +1171,6 @@ class _PerplexityInlineBase:
                 snapshot=trigger_snapshot.serializable(),
             )
             return None
-        open_evidence = self.runtime.focus_and_key_open(
-            trigger,
-            key=open_key,
-            settle=self._selection_settle_seconds(),
-        )
         if not bool(open_evidence.get('ok')):
             result.add_step(
                 'select',
@@ -1386,16 +1389,17 @@ class _PerplexityInlineBase:
             )
         return current_snapshot, target
 
-    def _selection_close_active_selection_menu(self) -> tuple[Snapshot, bool]:
-        closed_snapshot: Snapshot | None = None
-        for _ in range(3):
-            self.runtime.press('Escape')
-            closed_snapshot = self._selection_wait_for_menu_closed()
-            if int(closed_snapshot.raw_count or 0) == 0:
-                self._selection_menu_transition_seen = False
-                return closed_snapshot, True
-            time.sleep(0.1)
-        return closed_snapshot or self.runtime.menu_snapshot(), False
+    def _selection_close_active_selection_menu(
+        self,
+        selected: ElementRef,
+    ) -> tuple[Snapshot, bool]:
+        if not self.runtime.click(selected, strategy='atspi_only'):
+            return self.runtime.menu_snapshot(), False
+        closed_snapshot = self._selection_wait_for_menu_closed()
+        closed = int(closed_snapshot.raw_count or 0) == 0
+        if closed:
+            self._selection_menu_transition_seen = False
+        return closed_snapshot, closed
 
     def _selection_wait_for_hover_revealed_anchor(self, key: str) -> tuple[Snapshot, ElementRef | None]:
         timeout = self._selection_render_wait_timeout_seconds()
@@ -2948,7 +2952,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         return [
             element
             for element in (snapshot.mapped.get('remove_attachment') or [])
-            if 'showing' in {str(state).lower() for state in (element.states or [])}
+            if (
+                str(element.name or '').strip().lower().startswith('remove ')
+                and 'showing' in {
+                    str(state).lower() for state in (element.states or [])
+                }
+            )
         ]
 
     def _read_clipboard_until_nonempty(
@@ -3789,7 +3798,18 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 continue
             if result.returncode == 0 and 'error' not in (result.stderr or '').lower():
                 time.sleep(0.3)
-                return True
+                try:
+                    focused = subprocess.run(
+                        ['xdotool', 'getwindowfocus'],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        env=env,
+                    )
+                except Exception:
+                    continue
+                if focused.returncode == 0 and focused.stdout.strip() == window_id:
+                    return True
         return False
 
     def _focus_platform_firefox_for_attach(self, env: dict[str, str]) -> bool:
@@ -3838,8 +3858,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         timeout: float = 12.0,
     ) -> tuple[bool, dict[str, object]]:
         env = self._dialog_env()
-        firefox_focused = self._focus_platform_firefox_for_attach(env)
-        found, waited = self._wait_for_perplexity_file_dialog_window(env, timeout)
+        found = self._find_perplexity_file_dialog_window(env)
+        firefox_focused = False
+        waited = 0.0
+        if found is None:
+            firefox_focused = self._focus_platform_firefox_for_attach(env)
+            found, waited = self._wait_for_perplexity_file_dialog_window(env, timeout)
         evidence: dict[str, object] = {
             'firefox_focused_before_dialog_wait': firefox_focused,
             'dialog_wait_seconds': waited,
