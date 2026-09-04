@@ -1154,7 +1154,6 @@ class _PerplexityInlineBase:
         open_key = str(operate.get('open_key') or '').strip()
         if open_method == 'mapped_pointer_activate' and not open_key:
             open_evidence = self.runtime.mapped_pointer_activate(trigger)
-            time.sleep(self._selection_settle_seconds())
         elif open_method == 'focus_and_key_open' and open_key:
             open_evidence = self.runtime.focus_and_key_open(
                 trigger,
