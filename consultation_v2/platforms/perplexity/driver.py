@@ -929,12 +929,12 @@ class _PerplexityInlineBase:
             and not active_trigger_names
             and self._selection_element_matches_active_recognition(target, active_state)
         ):
-            closed_snapshot, closed = self._selection_close_active_selection_menu()
+            closed_snapshot, closed = self._selection_close_active_selection_menu(target)
             if not closed:
                 result.add_step(
                     'select',
                     False,
-                    f'{self.platform} {menu}={option} active but menu did not close after Escape',
+                    f'{self.platform} {menu}={option} active but selected item did not close menu',
                     menu=menu,
                     option=option,
                     active_state=active_state,
@@ -976,12 +976,12 @@ class _PerplexityInlineBase:
             and not active_trigger_names
             and self._selection_element_matches_active_recognition(target, active_state)
         ):
-            closed_snapshot, closed = self._selection_close_active_selection_menu()
+            closed_snapshot, closed = self._selection_close_active_selection_menu(target)
             if not closed:
                 result.add_step(
                     'select',
                     False,
-                    f'{self.platform} {menu}={option} active after settle but menu did not close after Escape',
+                    f'{self.platform} {menu}={option} active after settle but selected item did not close menu',
                     menu=menu,
                     option=option,
                     active_state=active_state,
@@ -1389,16 +1389,17 @@ class _PerplexityInlineBase:
             )
         return current_snapshot, target
 
-    def _selection_close_active_selection_menu(self) -> tuple[Snapshot, bool]:
-        closed_snapshot: Snapshot | None = None
-        for _ in range(3):
-            self.runtime.press('Escape')
-            closed_snapshot = self._selection_wait_for_menu_closed()
-            if int(closed_snapshot.raw_count or 0) == 0:
-                self._selection_menu_transition_seen = False
-                return closed_snapshot, True
-            time.sleep(0.1)
-        return closed_snapshot or self.runtime.menu_snapshot(), False
+    def _selection_close_active_selection_menu(
+        self,
+        selected: ElementRef,
+    ) -> tuple[Snapshot, bool]:
+        if not self.runtime.click(selected, strategy='atspi_only'):
+            return self.runtime.menu_snapshot(), False
+        closed_snapshot = self._selection_wait_for_menu_closed()
+        closed = int(closed_snapshot.raw_count or 0) == 0
+        if closed:
+            self._selection_menu_transition_seen = False
+        return closed_snapshot, closed
 
     def _selection_wait_for_hover_revealed_anchor(self, key: str) -> tuple[Snapshot, ElementRef | None]:
         timeout = self._selection_render_wait_timeout_seconds()
