@@ -3798,7 +3798,18 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
                 continue
             if result.returncode == 0 and 'error' not in (result.stderr or '').lower():
                 time.sleep(0.3)
-                return True
+                try:
+                    focused = subprocess.run(
+                        ['xdotool', 'getwindowfocus'],
+                        capture_output=True,
+                        text=True,
+                        timeout=2,
+                        env=env,
+                    )
+                except Exception:
+                    continue
+                if focused.returncode == 0 and focused.stdout.strip() == window_id:
+                    return True
         return False
 
     def _focus_platform_firefox_for_attach(self, env: dict[str, str]) -> bool:
@@ -3847,8 +3858,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         timeout: float = 12.0,
     ) -> tuple[bool, dict[str, object]]:
         env = self._dialog_env()
-        firefox_focused = self._focus_platform_firefox_for_attach(env)
-        found, waited = self._wait_for_perplexity_file_dialog_window(env, timeout)
+        found = self._find_perplexity_file_dialog_window(env)
+        firefox_focused = False
+        waited = 0.0
+        if found is None:
+            firefox_focused = self._focus_platform_firefox_for_attach(env)
+            found, waited = self._wait_for_perplexity_file_dialog_window(env, timeout)
         evidence: dict[str, object] = {
             'firefox_focused_before_dialog_wait': firefox_focused,
             'dialog_wait_seconds': waited,
