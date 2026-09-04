@@ -2948,7 +2948,12 @@ class PerplexityConsultationDriver(_PerplexityInlineBase):
         return [
             element
             for element in (snapshot.mapped.get('remove_attachment') or [])
-            if 'showing' in {str(state).lower() for state in (element.states or [])}
+            if (
+                str(element.name or '').strip().lower().startswith('remove ')
+                and 'showing' in {
+                    str(state).lower() for state in (element.states or [])
+                }
+            )
         ]
 
     def _read_clipboard_until_nonempty(
