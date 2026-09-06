@@ -21,7 +21,6 @@ from consultation_v2 import storage_policy
 logger = logging.getLogger(__name__)
 
 _CORPUS_PATH = os.path.expanduser(os.environ.get('TAEY_CORPUS_PATH', '~/data/corpus'))
-_SECRETS_PATH = '/home/mira/palios-taey-secrets.json'
 _ALLOWED_ISMA_PLATFORMS = {
     'chatgpt',
     'claude',
@@ -91,21 +90,33 @@ def save_to_corpus(platform: str, content: str, url: str = None,
 
 def _read_isma_api_key() -> str:
     env_key = _env_or_machine('ISMA_API_KEY')
+    secrets_path = _env_or_machine('ISMA_SECRETS_PATH')
+
+    if not secrets_path:
+        if env_key:
+            return env_key
+        raise ISMAIngestError(
+            'ISMA_API_URL is configured but ISMA_API_KEY (and ISMA_SECRETS_PATH) is unset'
+        )
+
     try:
-        with open(_SECRETS_PATH, encoding='utf-8') as handle:
+        with open(secrets_path, encoding='utf-8') as handle:
             secrets = json.load(handle)
     except FileNotFoundError:
-        secrets = {}
+        if env_key:
+            logger.warning("ISMA secrets file %s not found; using ISMA_API_KEY env", secrets_path)
+            return env_key
+        raise ISMAIngestError(f"ISMA secrets file not found: {secrets_path}")
     except (OSError, json.JSONDecodeError) as exc:
         if env_key:
-            logger.warning("Cannot read ISMA API key secrets file %s; using ISMA_API_KEY env", _SECRETS_PATH)
+            logger.warning("Cannot read ISMA API key secrets file %s; using ISMA_API_KEY env", secrets_path)
             return env_key
-        raise ISMAIngestError(f"Cannot read ISMA API key secrets file {_SECRETS_PATH}: {exc}") from exc
+        raise ISMAIngestError(f"Cannot read ISMA API key secrets file {secrets_path}: {exc}") from exc
+
     key = str(secrets.get('isma_api_key') or env_key).strip()
     if not key:
         raise ISMAIngestError(
-            'ISMA_API_URL is configured but no isma_api_key is present in '
-            f'{_SECRETS_PATH} and ISMA_API_KEY is unset'
+            f'ISMA_API_URL is configured but no isma_api_key is present in {secrets_path} and ISMA_API_KEY is unset'
         )
     return key
 
