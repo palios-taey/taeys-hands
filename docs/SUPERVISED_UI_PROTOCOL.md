@@ -66,6 +66,25 @@ result. An action adds the action result and `needs_verify`; the mandatory next 
 observation and verification verdict causally bound to the action. A missing exact artifact, sequence gap, hash
 mismatch, replay, or noncanonical bytes makes the session inadmissible.
 
+## Explicit teardown and export lifecycle
+
+Session finalization and capture export are supervised by `scripts/run_supervised_ui_capture.py`:
+
+1. **Prelaunch Spent Claims**: Before any child worker is created, the supervisor creates and verifies two distinct
+   durable spent records (`.supervised-ui-capture-session-claims` under the receipt root and
+   `.supervised-ui-capture-export-claims` under the export root) using `O_CREAT | O_EXCL` and exact readback. Spent
+   records are permanent evidence of allocation and are never deleted, ensuring session and export identities are
+   strictly one-use across crashes and concurrency.
+2. **Explicit Close Command**: Action loops do not auto-close upon reaching `action_ready`. The caller explicitly sends
+   `{"command": "close", "request_id": "<uuid>"}`.
+3. **Child Close ACK**: The worker appends event `000020-worker_closed` and returns
+   `{"ok": true, "request_id": "<uuid>", "result": {"event_hash": "<event_20_hash>", "state": "action_ready"}}`.
+4. **Independent Rehash**: After the child process exits with code 0, the supervisor independently rehashes the receipt
+   directory, validating causal hash integrity from `worker_started` to `worker_closed` and matching the terminal event
+   hash and final state against the child ACK.
+5. **Create-Once Export Receipt**: Only after successful rehash does the supervisor write the contained
+   `supervised_ui_capture_export_v1` export receipt beneath the export root with atomic creation and fsync.
+
 ## Production gate
 
 Merged code is not production proof. Release requires an authorized harmless local-effect walk in which Taey chooses
