@@ -343,6 +343,16 @@ workflow:
           max_attempts: 1
           success_element: stop_button
           url_prefix: https://grok.com/c/
+  post_action_transitions:
+    usage_limit_retry:
+      source_exception: usage_limit_updated
+      observation:
+        surface: browser
+        scope: snapshot
+        refresh_policy: invalidate_reacquire
+        consecutive_matches: 2
+        timeout_ms: 2000
+        interval_ms: 200
   monitor:
     stop_key: stop_button
     generation_timeout: 3600
