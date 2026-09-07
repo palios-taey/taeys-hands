@@ -21,6 +21,12 @@ controls. The model-visible projection contains an opaque lease-bound ref, polic
 allowlisted role and non-value states, permitted operations, and effect class. Runtime names, coordinates, URLs,
 text values, raw dictionaries, AT-SPI objects, duplicate mappings, and unknown controls are not exposed.
 
+Each operation is guarded by a policy-authored before predicate over exact target presence and public states. An
+operation is present in the live schema only while its target matches that predicate, so an already-satisfied
+transition is not offered. `activate` requires distinct before and after predicates; an unchanged toggle or
+activation state cannot satisfy the contract. An absent after-target is valid only when the policy explicitly
+requires `present: false`; otherwise disappearance fails closed.
+
 A revision hashes the canonical projection inside the session lease domain. The state-specific `ui_action` schema
 allows only `observe` in `needs_observe`, only `verify` in `needs_verify`, or the exact current revision/ref/operation
 intersection in `action_ready`. Extra fields, parallel calls, stale refs, mismatched proposal bytes, and changed
@@ -39,6 +45,7 @@ effect classes fail closed.
 | `action_ready` | Taey may propose one currently permitted local-effect action. |
 | `action_succeeded` | A durably recorded primitive success requires a separate fresh verify turn. |
 | `needs_verify` | Only a new observe/verify proposal is allowed; its approved result replaces prior refs. |
+| `complete` | Verification passed and the fresh surface exposes no further permitted local action; terminal success. |
 | `rejected`, `failed`, `stale`, `replayed`, `cancelled`, `indeterminate` | Terminal; no retry, resume, or implicit next turn. |
 
 There is no backend model/action loop. A tool result never launches another model request. Restart changes the
@@ -53,12 +60,22 @@ projection, revalidates revision/ref/policy/incarnations, and refuses prior spen
 `atspi_activate`. A durable successful outcome moves to `needs_verify`; false, stale, missing, duplicate, expired,
 replayed, timeout, process loss, or persistence failure is terminal.
 
+Verification captures the surface again and requires all of the following: the original target matched the operation's
+before predicate, the target's new presence and states match its after predicate, the exact `(presence, states)` tuple
+changed, and the lease-bound projection revision changed. A missing target fails closed unless the operation-specific
+after predicate explicitly requires absence; unchanged state or revision always fails closed. A primitive returning
+success is therefore only an execution observation, never proof that the intended semantic transition occurred.
+
 ## Immutable receipt chain
 
 The external receipt root must be absolute, owned by the worker, mode `0700`, nonsymlinked, and outside every public
 repository. Event and exact-byte artifacts are create-once mode `0600`, no-follow, file-fsynced, directory-fsynced,
 sequence-addressed, and hash-chained. Every event carries stable session, process-incarnation, turn, observation,
 proposal, approval, and execution lineage as applicable.
+
+Every receipt event also carries a manifest of the exact policy, platform, and browser-config byte digests plus its
+aggregate digest. Opening an existing chain requires the same public Hands commit and the same manifest; changed code
+or configuration cannot resume an earlier chain.
 
 A successful read records the session/worker handshake, exact model settings and tool declaration, exact request and
 raw response bytes, pending proposal, approval, dispatch, spend, start, outcome, exact observation, and exact tool
@@ -68,7 +85,9 @@ mismatch, replay, or noncanonical bytes makes the session inadmissible.
 
 ## Production gate
 
-Merged code is not production proof. Release requires an authorized harmless local-effect walk in which Taey chooses
+Merged code is not production proof. The runner refuses a tracked-dirty checkout, a noncanonical origin, a commit that
+is absent from the public remote heads, or runtime config bytes that differ from that commit. Release requires an
+authorized harmless local-effect walk in which Taey chooses
 the read/action/verify proposals without a target hint; no accessibility read or action precedes approve plus execute;
 only one approved primitive runs; the post-action verify uses a fresh revision; restarts reject old approvals; and the
 complete out-of-repository receipt chain passes independent rehashing. Until that receipt exists, the seat is

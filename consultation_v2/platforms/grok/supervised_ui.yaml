@@ -12,3 +12,39 @@ controls:
         states_include:
           - focused
         states_exclude: []
+  history:
+    control_id: history
+    label: History
+    role: push button
+    operations:
+      - activate
+    effect_class: local
+    postconditions:
+      activate:
+        before:
+          present: true
+          states_include: []
+          states_exclude:
+            - expanded
+        after:
+          present: true
+          states_include:
+            - expanded
+          states_exclude: []
+  search:
+    control_id: search
+    label: Search
+    role: push button
+    operations:
+      - activate
+    effect_class: local
+    postconditions:
+      activate:
+        before:
+          present: true
+          states_include: []
+          states_exclude: []
+        after:
+          present: false
+          states_include: []
+          states_exclude: []

@@ -16,14 +16,18 @@ from .supervised_ui_contract import (
     canonical_json_bytes,
     load_supervised_policy,
     project_snapshot,
+    runtime_config_manifest,
     snapshot_revision,
+    state_predicate_matches,
     validate_approved_call,
+    validate_runtime_config_manifest,
 )
 from .supervised_ui_receipts import HandsReceiptStore, ReceiptStoreError
 
 
 _TERMINAL_STATES = frozenset({
     'cancelled',
+    'complete',
     'failed',
     'indeterminate',
     'rejected',
@@ -60,6 +64,7 @@ class SupervisedUiSeat:
         presence_incarnation_id: str,
         hands_incarnation_id: str,
         hands_commit: str,
+        runtime_config: Mapping[str, Any],
         receipt_store: HandsReceiptStore,
     ) -> None:
         if not isinstance(lease_secret, bytes) or len(lease_secret) < 32:
@@ -71,11 +76,19 @@ class SupervisedUiSeat:
         self.presence_incarnation_id = presence_incarnation_id
         self.hands_incarnation_id = hands_incarnation_id
         self.hands_commit = hands_commit
+        try:
+            self.runtime_config = validate_runtime_config_manifest(runtime_config, platform)
+        except SupervisedUiContractError as exc:
+            raise SupervisedUiSeatError('runtime_config_invalid') from exc
         self.receipts = receipt_store
         if self.receipts.hands_incarnation_id != hands_incarnation_id:
             raise SupervisedUiSeatError('receipt_incarnation_mismatch')
         if self.receipts.presence_incarnation_id != presence_incarnation_id:
             raise SupervisedUiSeatError('receipt_presence_incarnation_mismatch')
+        if self.receipts.hands_commit != hands_commit:
+            raise SupervisedUiSeatError('receipt_commit_mismatch')
+        if self.receipts.runtime_config != self.runtime_config:
+            raise SupervisedUiSeatError('receipt_runtime_config_mismatch')
         self.receipts.recover_incarnation()
         self.state = 'needs_observe'
         self._projection: ProjectedSnapshot | None = None
@@ -92,6 +105,8 @@ class SupervisedUiSeat:
                 'hands_commit': hands_commit,
                 'hands_incarnation_id': hands_incarnation_id,
                 'presence_incarnation_id': presence_incarnation_id,
+                'runtime_config': self.runtime_config,
+                'runtime_config_sha256': self.runtime_config['sha256'],
             },
         )
 
@@ -148,6 +163,8 @@ class SupervisedUiSeat:
             'contract_version': CONTRACT_VERSION,
             'hands_commit': self.hands_commit,
             'hands_incarnation_id': self.hands_incarnation_id,
+            'runtime_config': self.runtime_config,
+            'runtime_config_sha256': self.runtime_config['sha256'],
             'state': self.state,
             'tool': self._schema(),
         }
@@ -156,7 +173,11 @@ class SupervisedUiSeat:
         return result
 
     def _capture_projection(self) -> tuple[ProjectedSnapshot, str]:
+        if runtime_config_manifest(self.platform) != self.runtime_config:
+            raise SupervisedUiSeatError('runtime_config_changed')
         _firefox, _document, snapshot = build_snapshot(self.platform)
+        if runtime_config_manifest(self.platform) != self.runtime_config:
+            raise SupervisedUiSeatError('runtime_config_changed')
         projected = project_snapshot(snapshot, self._lease_secret)
         revision = snapshot_revision(projected, self._lease_secret)
         return projected, revision
@@ -314,9 +335,15 @@ class SupervisedUiSeat:
         self._projection = projected
         self._revision = revision
         self._observation_id = observation_id
-        if verification is not None and not verification['passed']:
-            self.state = 'failed'
-        elif projected.public['elements']:
+        has_action = any(item['operations'] for item in projected.public['elements'])
+        if verification is not None:
+            if not verification['passed']:
+                self.state = 'failed'
+            elif has_action:
+                self.state = 'action_ready'
+            else:
+                self.state = 'complete'
+        elif has_action:
             self.state = 'action_ready'
         else:
             self.state = 'failed'
@@ -363,24 +390,56 @@ class SupervisedUiSeat:
         if control is None:
             raise SupervisedUiSeatError('verification_policy_missing')
         postcondition = control.postconditions[pending['operation']]
-        observed_states = set(element['states']) if element is not None else set()
-        required_states = set(postcondition['states_include'])
-        forbidden_states = set(postcondition['states_exclude'])
+        observed_present = element is not None
+        observed_states = set(element['states']) if observed_present else set()
+        before_present = pending['before_present']
+        before_states = set(pending['before_states'])
+        before_predicate_passed = state_predicate_matches(
+            before_present,
+            before_states,
+            postcondition.before,
+        )
+        after_predicate_passed = state_predicate_matches(
+            observed_present,
+            observed_states,
+            postcondition.after,
+        )
+        revision_changed = after_revision != pending['before_revision']
+        state_changed = (
+            observed_present != before_present
+            or observed_states != before_states
+        )
         passed = (
-            element is not None
-            and required_states.issubset(observed_states)
-            and forbidden_states.isdisjoint(observed_states)
+            before_predicate_passed
+            and after_predicate_passed
+            and revision_changed
+            and state_changed
         )
         result = {
             'action_execution_event_hash': pending['execution_event_hash'],
             'after_revision': after_revision,
+            'after_predicate': {
+                'present': postcondition.after.present,
+                'states_exclude': list(postcondition.after.states_exclude),
+                'states_include': list(postcondition.after.states_include),
+            },
+            'after_predicate_passed': after_predicate_passed,
+            'after_present': observed_present,
             'before_revision': pending['before_revision'],
-            'forbidden_states': sorted(forbidden_states),
+            'before_predicate': {
+                'present': postcondition.before.present,
+                'states_exclude': list(postcondition.before.states_exclude),
+                'states_include': list(postcondition.before.states_include),
+            },
+            'before_predicate_passed': before_predicate_passed,
+            'before_present': before_present,
+            'before_states': sorted(before_states),
             'observed_states': sorted(observed_states),
             'operation': pending['operation'],
             'passed': passed,
             'ref': ref,
-            'required_states': sorted(required_states),
+            'revision_changed': revision_changed,
+            'state_changed': state_changed,
             'verification_execution_id': approval['execution_id'],
         }
         self._pending_verification = None
@@ -423,7 +482,9 @@ class SupervisedUiSeat:
             return result
         public_element = next(item for item in projected.public['elements'] if item['ref'] == ref)
         self._pending_verification = {
+            'before_present': True,
             'before_revision': proposal['revision'],
+            'before_states': list(public_element['states']),
             'control_id': public_element['control_id'],
             'execution_event_hash': outcome['event_hash'],
             'operation': proposal['op'],
