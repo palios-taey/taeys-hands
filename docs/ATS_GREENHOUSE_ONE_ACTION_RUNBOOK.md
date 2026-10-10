@@ -27,6 +27,16 @@ A terminal result never authorizes another mutation. An incomplete prior
 `execution_started` receipt is also terminal because its side effect is
 uncertain.
 
+When a Greenhouse postcondition barrier times out, its terminal receipt retains
+every sample number, elapsed time, revision, match verdict, and refresh policy.
+It also retains the last surface identity, the last canonical `Country`
+control projection when the surface is a form, and a bounded raw subtree from
+that exact bound control through the existing `tree.find_elements` walker.
+This evidence diagnoses whether a primitive failed to land or the canonical
+projection lacks an exact semantic producer; it never changes the predicate,
+authorizes a retry, or permits another mutation. Screenshots remain optional
+post-terminal diagnostics and are explicitly not barrier-time authority.
+
 ## Public authorities
 
 The mutable public authorities are:

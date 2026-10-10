@@ -53,6 +53,9 @@ _SHA256 = frozenset('0123456789abcdef')
 _UUID_FIELDS = ('transaction_id', 'action_id')
 _MAX_FROZEN_ACTION_BYTES = 4 * 1024 * 1024
 _INTERACTIVE_STATES = frozenset({'showing', 'visible', 'enabled'})
+_TIMEOUT_COUNTRY_RAW_MAX_DEPTH = 8
+_TIMEOUT_COUNTRY_RAW_MAX_ELEMENTS = 128
+_TIMEOUT_COUNTRY_TEXT_MAX_CHARS = 512
 _COUNTRY_CALLING_CODE_SUFFIX = re.compile(
     r'(?P<semantic_token>\S(?:.*\S)?) \+[0-9]{1,3}',
     flags=re.ASCII,
@@ -120,6 +123,7 @@ class GreenhouseOneActionError(RuntimeError):
         *,
         code: str = 'exact_postcondition_failure',
         mutation_started: bool = False,
+        barrier_evidence: Mapping[str, Any] | None = None,
     ) -> None:
         super().__init__(reason)
         if code not in _STOP_CODES:
@@ -127,6 +131,9 @@ class GreenhouseOneActionError(RuntimeError):
         self.reason = reason
         self.code = code
         self.mutation_started = mutation_started
+        self.barrier_evidence = (
+            None if barrier_evidence is None else dict(barrier_evidence)
+        )
 
 
 class _UniqueKeyLoader(yaml.SafeLoader):
@@ -1353,6 +1360,103 @@ def _surface_public(surface: Any) -> Mapping[str, Any]:
     raise GreenhouseOneActionError('unsupported barrier surface')
 
 
+def _timeout_raw_element(element: Mapping[str, Any]) -> dict[str, Any]:
+    item = {
+        'name': str(element.get('name') or ''),
+        'role': str(element.get('role') or ''),
+        'states': sorted(_live_states(element)),
+    }
+    for key in ('description', 'text'):
+        value = element.get(key)
+        if isinstance(value, str) and value:
+            item[key] = value
+    obj = element.get('atspi_obj')
+    if obj is not None:
+        try:
+            text = _control_text(element)
+        except GreenhouseOneActionError as exc:
+            item['control_text'] = {
+                'status': 'unreadable',
+                'error': exc.reason,
+            }
+        else:
+            if text:
+                item['control_text'] = {
+                    'status': 'read',
+                    'length': len(text),
+                    'sha256': hashlib.sha256(text.encode('utf-8')).hexdigest(),
+                    'value': text[:_TIMEOUT_COUNTRY_TEXT_MAX_CHARS],
+                    'truncated': len(text) > _TIMEOUT_COUNTRY_TEXT_MAX_CHARS,
+                }
+    return item
+
+
+def _timeout_country_evidence(surface: Any) -> dict[str, Any] | None:
+    if not isinstance(surface, BoundSurface) or surface.public.get('surface') != 'form':
+        return None
+    matches = [
+        control
+        for control in surface.public.get('controls') or ()
+        if control.get('name') == 'Country'
+        and control.get('role') == 'combo box'
+    ]
+    evidence: dict[str, Any] = {
+        'canonical_match_count': len(matches),
+        'canonical_control': dict(matches[0]) if len(matches) == 1 else None,
+        'raw_subtree': None,
+    }
+    if len(matches) != 1:
+        return evidence
+    binding = surface.bindings.get(str(matches[0].get('ref') or ''))
+    obj = binding.get('atspi_obj') if isinstance(binding, Mapping) else None
+    if obj is None:
+        evidence['raw_subtree'] = {
+            'capture_status': 'unavailable',
+            'reason': 'canonical Country binding has no AT-SPI object',
+        }
+        return evidence
+    try:
+        raw = find_elements(obj, max_depth=_TIMEOUT_COUNTRY_RAW_MAX_DEPTH)
+        captured = raw[:_TIMEOUT_COUNTRY_RAW_MAX_ELEMENTS]
+        evidence['raw_subtree'] = {
+            'capture_status': 'captured',
+            'walker': 'consultation_v2.tree.find_elements',
+            'max_depth': _TIMEOUT_COUNTRY_RAW_MAX_DEPTH,
+            'observed_count': len(raw),
+            'retained_count': len(captured),
+            'truncated': len(raw) > len(captured),
+            'elements': [_timeout_raw_element(element) for element in captured],
+        }
+    except Exception as exc:
+        evidence['raw_subtree'] = {
+            'capture_status': 'failed',
+            'error': type(exc).__name__,
+        }
+    return evidence
+
+
+def _timeout_barrier_evidence(
+    barrier: Mapping[str, Any],
+    samples: Iterable[Mapping[str, Any]],
+    last_surface: Any,
+) -> dict[str, Any]:
+    public = _surface_public(last_surface) if last_surface is not None else None
+    return {
+        'schema': 'ats_greenhouse_postcondition_timeout_evidence_v1',
+        'refresh_policy': barrier['refresh_policy'],
+        'timeout_ms': barrier['timeout_ms'],
+        'interval_ms': barrier['interval_ms'],
+        'required_stable_cycles': barrier['stable_cycles'],
+        'samples': [dict(sample) for sample in samples],
+        'last_surface': None if public is None else {
+            'surface': public.get('surface'),
+            'revision': public.get('revision'),
+        },
+        'last_country_projection': _timeout_country_evidence(last_surface),
+        'screenshot_authority': 'diagnostic_only_not_captured_by_runner',
+    }
+
+
 def _wait_barrier(
     capture: Callable[[], Any],
     barrier: Mapping[str, Any],
@@ -1360,11 +1464,13 @@ def _wait_barrier(
 ) -> BarrierResult:
     started = time.monotonic()
     samples: list[dict[str, Any]] = []
+    last_surface: Any = None
     last_digest: str | None = None
     stable = 0
     while (time.monotonic() - started) * 1000 <= barrier['timeout_ms']:
         try:
             surface = capture()
+            last_surface = surface
             digest = _surface_digest(surface)
             matched = bool(predicate(surface))
         except GreenhouseOneActionError:
@@ -1385,7 +1491,14 @@ def _wait_barrier(
         if stable >= barrier['stable_cycles']:
             return BarrierResult(surface=surface, samples=tuple(samples))
         time.sleep(barrier['interval_ms'] / 1000)
-    raise GreenhouseOneActionError('exact postcondition barrier timed out')
+    raise GreenhouseOneActionError(
+        'exact postcondition barrier timed out',
+        barrier_evidence=_timeout_barrier_evidence(
+            barrier,
+            samples,
+            last_surface,
+        ),
+    )
 
 
 def _post_action_barrier(
@@ -1400,6 +1513,7 @@ def _post_action_barrier(
             exc.reason,
             code=exc.code,
             mutation_started=True,
+            barrier_evidence=exc.barrier_evidence,
         ) from exc
     except Exception as exc:
         raise GreenhouseOneActionError(
@@ -2238,6 +2352,11 @@ def execute_frozen_action_fd(fd_value: int, expected_sha256: str) -> dict[str, A
                 'mutation_started': mutation_started,
                 'next_mutation_authorized': False,
             }
+            if (
+                isinstance(exc, GreenhouseOneActionError)
+                and exc.barrier_evidence is not None
+            ):
+                payload['postcondition_evidence'] = exc.barrier_evidence
             receipt = _write_event(
                 store,
                 request,
