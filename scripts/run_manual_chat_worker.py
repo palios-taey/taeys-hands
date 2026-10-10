@@ -59,6 +59,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(recover)
     recover.add_argument("--exception-key", required=True)
     recover.add_argument("--source-response-json", required=True)
+    recover.add_argument("--source-consultation-receipt")
 
     recover_claude_pre_send = phases.add_parser(
         "recover-claude-pre-send",
@@ -1093,6 +1094,7 @@ def _recovery_content(
     display: str,
     exception_key: str,
     source_response_sha256: str,
+    source_consultation_receipt_sha256: str | None = None,
 ) -> str:
     exceptions = _post_send_exceptions(platform)
     spec = exceptions.get(exception_key)
@@ -1118,9 +1120,19 @@ def _recovery_content(
         raise RuntimeError(f"{platform} exception {exception_key} has invalid URL prefix")
     detect = ", ".join(str(value) for value in spec["detect"])
     stop_keys = ", ".join(_monitor_stop_keys(platform))
+    source_evidence = f"Source evidence SHA-256 is {source_response_sha256}."
+    recovery_receipt_source_fields = "evidence SHA-256"
+    if source_consultation_receipt_sha256 is not None:
+        source_evidence += (
+            " Source consultation receipt SHA-256 is "
+            f"{source_consultation_receipt_sha256}."
+        )
+        recovery_receipt_source_fields = (
+            "response evidence SHA-256 and source consultation receipt SHA-256"
+        )
     return (
         f"Execute one frozen {PLATFORM_LABELS[platform]} post-send recovery transaction on "
-        f"{display}. Source evidence SHA-256 is {source_response_sha256}. Use drive_chat only. "
+        f"{display}. {source_evidence} Use drive_chat only. "
         "Do not read any file, runbook, or YAML. Do not navigate, attach, paste, send, extract, "
         "or operate any control except the one exact recovery control below.\n"
         f"1. observe scope=base; require current_url to begin exactly {url_prefix}. If any mapped "
@@ -1133,7 +1145,7 @@ def _recovery_content(
         f"3. click element={element} exactly once. This is the only recovery mutation authorized. "
         "Observe scope=base exactly once. If Stop is present exactly once, require monitor "
         "registration and return a receipt containing platform/display, URL, exception key, source "
-        "evidence SHA-256, clicked element, mapped Stop key, and monitor_id.\n"
+        f"{recovery_receipt_source_fields}, clicked element, mapped Stop key, and monitor_id.\n"
         "4. If Stop is absent after the click, do not mutate: observe scope=base exactly once more. "
         "If Stop is now present exactly once, require monitor registration and return the same "
         "receipt. If the mapped exception persists, return a POST-SEND EXCEPTION REPORT. Otherwise "
@@ -2186,6 +2198,203 @@ def _receipt_field_matches(receipt: str, field: str, expected: str) -> bool:
     ) is not None
 
 
+def _validate_consultation_recovery_source(
+    *,
+    source_response: Path,
+    source_receipt: str,
+    consultation_receipt: Path,
+    platform: str,
+    display: str,
+    exception_key: str,
+) -> str:
+    if source_response.name != "worker_response.json":
+        raise RuntimeError(
+            "one-call recovery source response must be named worker_response.json"
+        )
+    if (
+        consultation_receipt.name != "consultation_receipt.json"
+        or consultation_receipt.parent != source_response.parent
+    ):
+        raise RuntimeError(
+            "one-call recovery consultation receipt must be the exact sibling "
+            "consultation_receipt.json"
+        )
+    consultation_receipt_sha256 = _sha256(consultation_receipt)
+    required_source_fields = {
+        "Result": "Failed",
+        "Display": display,
+        "Receipt path": str(consultation_receipt),
+        "Receipt SHA256": consultation_receipt_sha256,
+    }
+    if not all(
+        _receipt_field_matches(source_receipt, field, expected)
+        for field, expected in required_source_fields.items()
+    ):
+        raise RuntimeError(
+            "one-call recovery source response does not bind the exact failed result, "
+            "display, sibling receipt path, and sibling receipt SHA-256"
+        )
+    try:
+        payload = json.loads(consultation_receipt.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError("consultation recovery receipt is not valid JSON") from exc
+    if not isinstance(payload, dict):
+        raise RuntimeError("consultation recovery receipt must be a JSON object")
+    request = payload.get("request")
+    if (
+        payload.get("ok") is not False
+        or payload.get("platform") != platform
+        or not isinstance(request, dict)
+        or request.get("platform") != platform
+    ):
+        raise RuntimeError(
+            "consultation recovery receipt does not prove the exact failed platform"
+        )
+    if payload.get("response_text") != "":
+        raise RuntimeError("consultation recovery receipt response_text must be empty")
+
+    exceptions = _post_send_exceptions(platform)
+    spec = exceptions.get(exception_key)
+    if spec is None:
+        raise RuntimeError(f"{platform} has no mapped post-send exception {exception_key}")
+    recovery = spec.get("recovery")
+    if not isinstance(recovery, dict):
+        raise RuntimeError(f"{platform} exception {exception_key} has no recovery mapping")
+    url_prefix = recovery.get("url_prefix")
+    session_url = payload.get("session_url_after")
+    if (
+        not isinstance(url_prefix, str)
+        or not isinstance(session_url, str)
+        or not session_url.startswith(url_prefix)
+    ):
+        raise RuntimeError(
+            "consultation recovery receipt does not prove the exact recovery URL prefix"
+        )
+
+    steps = payload.get("steps")
+    if not isinstance(steps, list) or not all(isinstance(step, dict) for step in steps):
+        raise RuntimeError("consultation recovery receipt steps must be mappings")
+    if any(
+        "retry" in str(step.get("step", "")).lower()
+        or "recover" in str(step.get("step", "")).lower()
+        for step in steps
+    ):
+        raise RuntimeError(
+            "consultation recovery receipt contains a prior retry or recovery step"
+        )
+
+    def exact_step(name: str) -> tuple[int, dict[str, object]]:
+        matches = [
+            (index, step)
+            for index, step in enumerate(steps)
+            if step.get("step") == name
+        ]
+        if len(matches) != 1:
+            raise RuntimeError(
+                f"consultation recovery receipt has {len(matches)} exact {name} steps"
+            )
+        return matches[0]
+
+    send_action_index, send_action = exact_step("send_action")
+    send_index, send = exact_step("send")
+    monitor_register_index, monitor_register = exact_step("monitor_register")
+    monitor_index, monitor = exact_step("monitor")
+    if not (
+        send_action_index < send_index < monitor_register_index < monitor_index
+        and send_action.get("success") is True
+        and send.get("success") is True
+        and monitor_register.get("success") is True
+        and monitor.get("success") is True
+    ):
+        raise RuntimeError(
+            "consultation recovery receipt lacks one ordered successful send and monitor chain"
+        )
+    send_action_evidence = send_action.get("evidence")
+    send_evidence = send.get("evidence")
+    monitor_register_evidence = monitor_register.get("evidence")
+    monitor_evidence = monitor.get("evidence")
+    if (
+        not isinstance(send_action_evidence, dict)
+        or send_action_evidence.get("click_returned") is not True
+        or not isinstance(send_evidence, dict)
+        or send_evidence.get("stop_seen") is not True
+        or send_evidence.get("answer_thread") is not True
+        or send_evidence.get("url_after") != session_url
+        or not isinstance(monitor_register_evidence, dict)
+        or not isinstance(monitor_register_evidence.get("monitor_id"), str)
+        or not monitor_register_evidence["monitor_id"]
+        or monitor_register_evidence.get("url") != session_url
+        or not isinstance(monitor_evidence, dict)
+        or monitor_evidence.get("seed_stop_seen") is not True
+        or monitor_evidence.get("stop_seen") is not True
+    ):
+        raise RuntimeError(
+            "consultation recovery receipt lacks exact send or monitor evidence"
+        )
+
+    failed_steps = [
+        (index, step)
+        for index, step in enumerate(steps)
+        if step.get("success") is False
+    ]
+    if len(failed_steps) != 1:
+        raise RuntimeError(
+            "consultation recovery receipt must have exactly one failed terminal step"
+        )
+    failed_index, failed_step = failed_steps[0]
+    if failed_step.get("step") != "extract" or failed_index <= monitor_index:
+        raise RuntimeError(
+            "consultation recovery receipt failure must be extraction after the monitor"
+        )
+    if any(
+        step.get("success") is not True
+        or not str(step.get("step", "")).startswith("notify_")
+        for step in steps[failed_index + 1 :]
+    ):
+        raise RuntimeError(
+            "consultation recovery receipt contains work after the terminal extraction failure"
+        )
+    failed_evidence = failed_step.get("evidence")
+    snapshot = failed_evidence.get("snapshot") if isinstance(failed_evidence, dict) else None
+    mapped = snapshot.get("mapped") if isinstance(snapshot, dict) else None
+    if (
+        not isinstance(snapshot, dict)
+        or snapshot.get("platform") != platform
+        or snapshot.get("url") != session_url
+        or not isinstance(mapped, dict)
+    ):
+        raise RuntimeError(
+            "consultation recovery receipt lacks the exact terminal platform snapshot"
+        )
+
+    def mapped_count(key: str) -> int:
+        values = mapped.get(key, [])
+        if not isinstance(values, list):
+            raise RuntimeError(
+                f"consultation recovery receipt has a non-list mapped value for {key}"
+            )
+        return len(values)
+
+    selected_detect = tuple(str(value) for value in spec["detect"])
+    if any(mapped_count(key) != 1 for key in selected_detect):
+        raise RuntimeError(
+            "consultation recovery receipt lacks singleton counts for the complete exception set"
+        )
+    other_detect = {
+        str(value)
+        for other_key, other_spec in exceptions.items()
+        if other_key != exception_key
+        for value in other_spec["detect"]
+    } - set(selected_detect)
+    if any(mapped_count(key) != 0 for key in other_detect):
+        raise RuntimeError(
+            "consultation recovery receipt maps a different declared exception set"
+        )
+    if any(mapped_count(key) != 0 for key in _monitor_stop_keys(platform)):
+        raise RuntimeError("consultation recovery receipt terminal snapshot still maps Stop")
+    return consultation_receipt_sha256
+
+
 def _gemini_terminal_receipt_field(receipt: str, field: str) -> str:
     matches = re.findall(
         rf"(?m)^- {re.escape(field)}: `([^`]+)`$",
@@ -3190,6 +3399,8 @@ def main() -> int:
 
     source_response = None
     source_response_sha256 = None
+    source_consultation_receipt = None
+    source_consultation_receipt_sha256 = None
     source_terminal_identity = None
     source_diagnostic_identity = None
     exception_key = None
@@ -3588,19 +3799,47 @@ def main() -> int:
         exception_key = _identity(args.exception_key, "exception key")
         source_response = _absolute_input(args.source_response_json, "source response JSON")
         _source_payload, source_receipt = _worker_receipt(source_response)
-        if not _is_worker_stop_report(source_receipt):
-            raise RuntimeError("source response is not a terminal worker report")
         source_response_sha256 = _sha256(source_response)
+        if _is_worker_stop_report(source_receipt):
+            if args.source_consultation_receipt is not None:
+                raise RuntimeError(
+                    "source consultation receipt is only valid for a one-call failure report"
+                )
+        else:
+            if args.source_consultation_receipt is None:
+                raise RuntimeError("source response is not a terminal worker report")
+            source_consultation_receipt = _absolute_input(
+                args.source_consultation_receipt,
+                "source consultation receipt",
+            )
+            source_consultation_receipt_sha256 = (
+                _validate_consultation_recovery_source(
+                    source_response=source_response,
+                    source_receipt=source_receipt,
+                    consultation_receipt=source_consultation_receipt,
+                    platform=args.platform,
+                    display=args.display,
+                    exception_key=exception_key,
+                )
+            )
         content = _recovery_content(
             args.platform,
             args.display,
             exception_key,
             source_response_sha256,
+            source_consultation_receipt_sha256,
         )
-        digest = hashlib.sha256(
-            f"{seat_id}\0{args.platform}\0{args.display}\0{exception_key}\0"
-            f"{source_response_sha256}\0{content}".encode("utf-8")
-        ).hexdigest()
+        if source_consultation_receipt_sha256 is None:
+            digest = hashlib.sha256(
+                f"{seat_id}\0{args.platform}\0{args.display}\0{exception_key}\0"
+                f"{source_response_sha256}\0{content}".encode("utf-8")
+            ).hexdigest()
+        else:
+            digest = hashlib.sha256(
+                f"{seat_id}\0{args.platform}\0{args.display}\0{exception_key}\0"
+                f"{source_response_sha256}\0{source_consultation_receipt_sha256}\0"
+                f"{content}".encode("utf-8")
+            ).hexdigest()
         event_id = f"recover-{digest[:24]}"
         response_file = None
         request_text = _request_text(content, 4096)
@@ -3816,6 +4055,12 @@ def main() -> int:
             if args.phase == "recover":
                 raise RuntimeError("source response changed during recovery")
             raise RuntimeError("source response changed during the extraction turn")
+        if (
+            source_consultation_receipt is not None
+            and _sha256(source_consultation_receipt)
+            != source_consultation_receipt_sha256
+        ):
+            raise RuntimeError("source consultation receipt changed during recovery")
         if (
             preview_source_response is not None
             and _sha256(preview_source_response) != preview_source_sha256
@@ -4401,6 +4646,11 @@ def main() -> int:
         else:
             source_result["exception_key"] = exception_key
         result.update(source_result)
+    if source_consultation_receipt is not None:
+        result.update({
+            "source_consultation_receipt": str(source_consultation_receipt),
+            "source_consultation_receipt_sha256": source_consultation_receipt_sha256,
+        })
     if source_terminal_identity is not None:
         result.update({
             "source_terminal_identity": source_terminal_identity,
