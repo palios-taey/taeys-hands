@@ -3,6 +3,9 @@ click_strategy: atspi_only
 urls:
   fresh: https://grok.com/
   verify_navigation: true
+  address_bar_exact_paste_values:
+    - https://grok.com/
+    - grok.com
 native_dialog:
   schema: native_dialog_v1
   root: dialog_root

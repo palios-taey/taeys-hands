@@ -138,6 +138,11 @@ requires a fresh base observation. After any failed, refused, absent, duplicate,
 the leg immediately and report the first mismatch. Do not press Escape, close a menu, retry, recover, switch
 displays, or invent a fallback in that turn.
 
+Firefox may render the focused address bar differently from the absolute URL it receives. A platform may
+declare only its observed exact renderings in `urls.address_bar_exact_paste_values`; when absent, the proof
+remains literal `urls.fresh`. The navigation receipt records the observed and matched exact values. This
+pre-Return rendering proof never replaces the post-Return absolute document-URL and populated-tree gates.
+
 ## Claude memory-review pre-send recovery
 
 Claude can replace the fresh composer with the exact dialog `Review updates to Claude’s memory`. That state
