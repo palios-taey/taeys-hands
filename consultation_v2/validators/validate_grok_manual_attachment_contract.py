@@ -66,7 +66,24 @@ def main() -> int:
         'open_key' not in attachment,
         'Grok mapped-pointer attachment unexpectedly declares open_key',
     )
-
+    post_submit = attachment.get('post_submit') or {}
+    _require(
+        post_submit == {
+            'scope': 'document',
+            'elements': ['uploaded_file_chip', 'remove_attachment'],
+            'observation': {
+                'refresh_policy': 'invalidate_reacquire',
+                'stable_cycles': 2,
+                'interval_ms': 250,
+                'timeout_ms': 15000,
+            },
+        },
+        'Grok attachment exact-count post-submit contract drifted',
+    )
+    _require(
+        'attach_present' not in (cfg.get('validation') or {}),
+        'Grok retained the superseded generic attachment-presence validation',
+    )
     ready = element_operation(trigger_key, ['showing', 'enabled'])
     _require(
         ready == {
@@ -102,6 +119,24 @@ def main() -> int:
         'Grok retained driver does not invoke the exact pointer operation once',
     )
     _require(
+        driver_source.count('_wait_for_grok_native_dialog_postcondition(') == 3
+        and driver_source.count("self.runtime.press('ctrl+l')") == 1
+        and driver_source.count('self.runtime.paste(abs_path)') == 1
+        and driver_source.count("self.runtime.press('Return')") == 1,
+        'Grok retained driver changed the proven native chooser proof path',
+    )
+    _require(
+        'for attachment_index, file_path in enumerate(request.attachments, start=1)'
+        in driver_source
+        and 'expected_count=0' in driver_source
+        and 'expected_count=attachment_index' in driver_source,
+        'Grok retained driver does not prove the zero-then-requested attachment count',
+    )
+    _require(
+        "wait_for_validation(\n                'attach_present'" not in driver_source,
+        'Grok retained driver still accepts generic attachment presence',
+    )
+    _require(
         "open_method != 'mapped_pointer_activate'" in driver_source,
         'Grok retained driver does not enforce the YAML pointer method',
     )
@@ -110,6 +145,32 @@ def main() -> int:
             forbidden not in driver_source,
             f'Grok retained driver still exposes forbidden attachment path: {forbidden}',
         )
+    count_source = _function_source(
+        DRIVER_PATH,
+        '_wait_for_exact_attachment_count',
+        owner='GrokConsultationDriver',
+    )
+    for required in (
+        "last_snapshot = self.runtime.snapshot()",
+        "last_snapshot.mapped.get('uploaded_file_chip')",
+        "last_snapshot.mapped.get('remove_attachment')",
+        "'revision': last_snapshot.revision",
+        "'elapsed_ms':",
+        "'stable_cycles_required': stable_cycles",
+        "'classification': classification",
+        "'absent_count'",
+        "'stale_count'",
+        'return False, last_snapshot, samples',
+    ):
+        _require(
+            required in count_source,
+            f'Grok exact attachment-count receipt is missing {required}',
+        )
+    _require(
+        "classification in {'inconsistent_mapped_counts', 'excess_count'}"
+        in count_source,
+        'Grok exact attachment-count proof does not fail loud on ambiguous excess',
+    )
     selection_source = _function_source(
         DRIVER_PATH,
         '_open_selection_menu',

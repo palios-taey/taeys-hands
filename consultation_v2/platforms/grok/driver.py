@@ -3354,7 +3354,21 @@ class GrokConsultationDriver(_GrokInlineBase):
         trigger_key = attachment['trigger']
         upload_key = attachment['menu_target']
 
-        for file_path in request.attachments:
+        baseline_verified, baseline_snapshot, baseline_samples = (
+            self._wait_for_exact_attachment_count(expected_count=0)
+        )
+        result.add_step(
+            'attach_baseline',
+            baseline_verified,
+            'Grok attachment baseline count is exactly zero',
+            expected_count=0,
+            attachment_observation_samples=baseline_samples,
+            snapshot=(baseline_snapshot.serializable() if baseline_snapshot else None),
+        )
+        if not baseline_verified:
+            return False
+
+        for attachment_index, file_path in enumerate(request.attachments, start=1):
             abs_path = os.path.abspath(file_path)
             self.runtime.close_stale_dialogs()
 
@@ -3472,31 +3486,115 @@ class GrokConsultationDriver(_GrokInlineBase):
                 )
                 return False
 
-            # ONE bounded readiness wait (DRIVER_CONTRACT Section E - a single readiness
-            # wait before a SINGLE action/check; NOT a retry of the upload). Grok
-            # renders the chip + its "Remove this attachment" button slightly after
-            # the file dialog closes, same render-race as mode-select; re-SNAPSHOT
-            # here is observation while the chip renders. The upload is NOT
-            # re-performed - we only wait for the indicator, then validate ONCE.
-            # Validate the chip rendered via the exact attach-present indicator
-            # (the static "Remove this attachment" button) in the DOCUMENT scope.
-            verify_snap = self.wait_for_validation(
-                'attach_present',
-                timeout=15.0,
-                interval=0.5,
+            verified, verify_snap, attachment_samples = (
+                self._wait_for_exact_attachment_count(
+                    expected_count=attachment_index,
+                )
             )
-            verified = self.validation_passes(verify_snap, 'attach_present')
-            result.add_step('attach', verified,
-                            f'Grok attached {os.path.basename(abs_path)}',
-                            file=abs_path,
-                            native_dialog=dialog_snapshot.serializable(),
-                            dialog_observation_samples=dialog_samples,
-                            location_observation_samples=location_samples,
-                            path_observation_samples=path_samples,
-                            snapshot=verify_snap.serializable())
+            result.add_step(
+                'attach',
+                verified,
+                f'Grok attachment count is exactly {attachment_index} after chooser submit',
+                file=abs_path,
+                expected_count=attachment_index,
+                native_dialog=dialog_snapshot.serializable(),
+                dialog_observation_samples=dialog_samples,
+                location_observation_samples=location_samples,
+                path_observation_samples=path_samples,
+                attachment_observation_samples=attachment_samples,
+                snapshot=(verify_snap.serializable() if verify_snap else None),
+            )
             if not verified:
                 return False
         return True
+
+    def _wait_for_exact_attachment_count(
+        self,
+        *,
+        expected_count: int,
+    ) -> tuple[bool, Snapshot | None, list[dict[str, Any]]]:
+        attachment = self.cfg.get('workflow', {}).get('attachment', {}) or {}
+        post_submit = attachment.get('post_submit') or {}
+        observation = post_submit.get('observation') or {}
+        scope = str(post_submit.get('scope') or '')
+        elements = post_submit.get('elements') or []
+        refresh_policy = str(observation.get('refresh_policy') or '')
+        stable_cycles_value = observation.get('stable_cycles')
+        interval_ms_value = observation.get('interval_ms')
+        timeout_ms_value = observation.get('timeout_ms')
+        contract_valid = (
+            isinstance(expected_count, int)
+            and not isinstance(expected_count, bool)
+            and expected_count >= 0
+            and scope == 'document'
+            and elements == ['uploaded_file_chip', 'remove_attachment']
+            and refresh_policy == 'invalidate_reacquire'
+            and isinstance(stable_cycles_value, int)
+            and not isinstance(stable_cycles_value, bool)
+            and stable_cycles_value > 0
+            and isinstance(interval_ms_value, int)
+            and not isinstance(interval_ms_value, bool)
+            and interval_ms_value > 0
+            and isinstance(timeout_ms_value, int)
+            and not isinstance(timeout_ms_value, bool)
+            and timeout_ms_value >= interval_ms_value
+        )
+        if not contract_valid:
+            return False, None, [{
+                'sample': 0,
+                'elapsed_ms': 0,
+                'expected_count': expected_count,
+                'matched': False,
+                'classification': 'invalid_yaml_postcondition',
+                'scope': scope,
+                'elements': elements,
+                'refresh_policy': refresh_policy,
+            }]
+
+        stable_cycles = stable_cycles_value
+        interval = interval_ms_value / 1000.0
+        timeout = timeout_ms_value / 1000.0
+        started = time.monotonic()
+        deadline = started + timeout
+        matched_cycles = 0
+        samples: list[dict[str, Any]] = []
+        last_snapshot: Snapshot | None = None
+
+        while time.monotonic() < deadline:
+            last_snapshot = self.runtime.snapshot()
+            uploaded_count = len(last_snapshot.mapped.get('uploaded_file_chip') or ())
+            remove_count = len(last_snapshot.mapped.get('remove_attachment') or ())
+            matched = uploaded_count == expected_count and remove_count == expected_count
+            matched_cycles = matched_cycles + 1 if matched else 0
+            if uploaded_count != remove_count:
+                classification = 'inconsistent_mapped_counts'
+            elif uploaded_count > expected_count:
+                classification = 'excess_count'
+            elif uploaded_count < expected_count:
+                classification = 'absent_count' if uploaded_count == 0 else 'stale_count'
+            else:
+                classification = 'exact_count'
+            samples.append({
+                'sample': len(samples) + 1,
+                'elapsed_ms': round((time.monotonic() - started) * 1000),
+                'revision': last_snapshot.revision,
+                'scope': scope,
+                'refresh_policy': refresh_policy,
+                'expected_count': expected_count,
+                'uploaded_file_chip_count': uploaded_count,
+                'remove_attachment_count': remove_count,
+                'matched': matched,
+                'classification': classification,
+                'stable_cycles': matched_cycles,
+                'stable_cycles_required': stable_cycles,
+            })
+            if matched_cycles >= stable_cycles:
+                return True, last_snapshot, samples
+            if classification in {'inconsistent_mapped_counts', 'excess_count'}:
+                return False, last_snapshot, samples
+            time.sleep(interval)
+
+        return False, last_snapshot, samples
 
     def _wait_for_grok_native_dialog_postcondition(
         self,

@@ -319,6 +319,16 @@ workflow:
       stable_cycles: 2
       interval_ms: 250
       dialog_timeout_ms: 12000
+    post_submit:
+      scope: document
+      elements:
+        - uploaded_file_chip
+        - remove_attachment
+      observation:
+        refresh_policy: invalidate_reacquire
+        stable_cycles: 2
+        interval_ms: 250
+        timeout_ms: 15000
   prompt:
     input: input
     observation:
@@ -376,13 +386,6 @@ validation:
       role: radio menu item
       states_include:
       - checked
-  # attach_present: presence of the static remove button (doc scope). Its name
-  # is static (the filename is dynamic, the button name is not), so it is an
-  # EXACT indicator — no structural locator. LIVE-CONFIRMED on :5 2026-06-03.
-  attach_present:
-    indicators:
-    - name: "Remove this attachment"
-      role: push button
   # send_fired: the stop button is present (generating).
   send_fired:
     stop_present: stop_button
